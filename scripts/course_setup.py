@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Shared course selector and resumable private workbench setup. Standard library only."""
+from __future__ import annotations
+import argparse,datetime,json,os,platform,re,shutil,subprocess,sys,tempfile,time
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+class SetupError(ValueError):pass
+
+def write(path,value):
+    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True);fd,tmp=tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd,'w',encoding='utf-8') as f:json.dump(value,f,indent=2);f.write('\n');f.flush();os.fsync(f.fileno())
+        os.replace(tmp,path)
+    finally:
+        if os.path.exists(tmp):os.unlink(tmp)
+
+def command(args,cwd=None,interactive=False):
+    result=subprocess.run(args,cwd=cwd,text=True,capture_output=not interactive)
+    if result.returncode:raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. Complete the visible action and rerun the same launcher. No work was removed.')
+    return '' if interactive else result.stdout.strip()
+
+def options():return json.loads((ROOT/'course-options.json').read_text())['courses']
+def choose(course):
+    courses=options()
+    if course:
+        for c in courses:
+            if c['id']==course:return c
+        raise SetupError('Unknown course. Use a listed course option.')
+    print('Which class are you joining?')
+    for i,c in enumerate(courses,1):print(f'{i}. {c["label"]}')
+    answer=input('Choose 1, 2 or 3: ').strip()
+    if answer not in [str(x) for x in range(1,len(courses)+1)]:raise SetupError('Choose one listed course; rerun to select again.')
+    return courses[int(answer)-1]
+
+def safe_workspace(path):
+    path=Path(path).expanduser().absolute()
+    if any(x.lower() in {'desktop','documents'} or any(label in x.lower() for label in ['dropbox','onedrive','icloud','google drive','cloudstorage']) for x in path.parts):raise SetupError('Choose a local folder such as ~/GitHub, outside synced Desktop/Documents or cloud storage.')
+    if path.is_symlink():raise SetupError('Choose a local folder rather than a symlink.')
+    return path
+
+def version_tuple(text):
+    m=re.search(r'(\d+)\.(\d+)(?:\.(\d+))?',text)
+    return tuple(int(x or 0) for x in m.groups()) if m else (0,0,0)
+
+def check_tools(runner=command):
+    versions={};minimum={'git':(2,28,0),'gh':(2,0,0),'python':(3,11,0),'claude':(2,1,0)}
+    for name,exe in [('git','git'),('gh','gh'),('python',sys.executable),('claude','claude')]:
+        try:text=runner([exe,'--version']).splitlines()[0]
+        except (OSError,SetupError):raise SetupError(f'{name} is missing. Rerun the platform launcher to install only missing requirements.')
+        if version_tuple(text)<minimum[name]:raise SetupError(f'{name} is older than the course compatibility floor. Update this tool through its installer, then rerun.')
+        versions[name]=text
+    return versions
+
+def repo_name(value):
+    if not re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}',value) or value.endswith('.git'):raise SetupError('Choose a simple repository name without slashes or a .git suffix.')
+    return value
+
+def remote_matches(url,full):return url in {f'https://github.com/{full}',f'https://github.com/{full}.git',f'git@github.com:{full}.git'}
+
+def verify_existing(folder,full,runner=command):
+    folder=Path(folder)
+    if folder.is_symlink() or not (folder/'.git').exists():raise SetupError('The chosen folder already exists and is not this Git project. Choose a different name; it will not be overwritten.')
+    remote=runner(['git','remote','get-url','origin'],cwd=folder)
+    if not remote_matches(remote,full):raise SetupError('Existing folder has a different origin. Keep it and choose another name, or ask Claude to review adoption.')
+    return True
+
+def setup(course,workspace,name,state_root=None,runner=command,no_launch=False):
+    started=time.monotonic();workspace=safe_workspace(workspace);name=repo_name(name)
+    state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
+    statefile=state_root/(name+'.json');state=json.loads(statefile.read_text()) if statefile.exists() else {'schema_version':'aibl.setup-progress/v1','repository_name':name,'attempts':[]}
+    attempt={'course':course['id'],'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'manual_interventions':0,'manual_interventions_scope':'observed browser logins only; course/name/OS consent measured separately','os_prompts':'unmeasured','steps':[],'result':'in_progress'};state['attempts'].append(attempt);write(statefile,state)
+    def step(label):attempt['steps'].append(label);write(statefile,state)
+    try:
+        versions=check_tools(runner);attempt['versions']=versions;step('tools_verified')
+        try:runner(['gh','auth','status'])
+        except SetupError:
+            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True);runner(['gh','auth','status'])
+        user=json.loads(runner(['gh','api','user']));full=user['login']+'/'+name
+        if state.get('repository') and state['repository']!=full:raise SetupError('This saved setup belongs to another GitHub account. Sign into that account or choose a new repository name.')
+        if state.get('workspace') and state['workspace']!=str(workspace):raise SetupError('This setup already has a local folder. Resume there or choose a new name; duplicate clones are not created.')
+        state['repository']=full;state['workspace']=str(workspace);step('github_verified')
+        for upstream in course['access']:
+            try:meta=json.loads(runner(['gh','api','repos/'+upstream]))
+            except SetupError:raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.')
+            if not meta.get('private'):raise SetupError('Course destination privacy changed. Ask the course team to review before continuing.')
+        step('course_access_verified')
+        folder=workspace/name
+        if folder.exists():verify_existing(folder,full,runner)
+        # Listing the authenticated owner's repositories distinguishes absence from network/auth errors.
+        owned=json.loads(runner(['gh','repo','list',user['login'],'--limit','1000','--json','nameWithOwner,isPrivate']))
+        existing=next((x for x in owned if x['nameWithOwner'].lower()==full.lower()),None)
+        if existing:
+            if not existing['isPrivate']:raise SetupError('That name belongs to a public repository. Choose a new private workbench name; privacy is not changed automatically.')
+            meta=json.loads(runner(['gh','api','repos/'+full]));template=(meta.get('template_repository') or {}).get('full_name')
+            if template!=course['template'] and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
+        else:
+            state['creation_intent']={'repository':full,'template':course['template']};step('repository_creation_planned')
+            runner(['gh','repo','create',full,'--private','--template',course['template']])
+        meta=json.loads(runner(['gh','api','repos/'+full]))
+        if not meta.get('private') or meta.get('full_name','').lower()!=full.lower():raise SetupError('Private repository verification failed.')
+        state['created_repository_id']=meta.get('id');step('private_repository_verified')
+        if not folder.exists():
+            workspace.mkdir(parents=True,exist_ok=True)
+            temp=workspace/('.'+name+'-clone-in-progress')
+            if temp.exists():
+                # A successful clone interrupted before rename can resume; partial clones remain untouched.
+                verify_existing(temp,full,runner);runner(['git','rev-parse','--verify','HEAD'],cwd=temp)
+            else:runner(['gh','repo','clone',full,str(temp)])
+            temp.rename(folder)
+        verify_existing(folder,full,runner);step('clone_verified')
+        for key,value in [('user.name',user.get('name') or user['login']),('user.email',str(user['id'])+'+'+user['login']+'@users.noreply.github.com')]:
+            try:current=runner(['git','config','--local','--get',key],cwd=folder)
+            except SetupError:current=''
+            if not current:runner(['git','config','--local',key,value],cwd=folder)
+        step('local_git_identity_verified')
+        runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder);step('student_context_ready')
+        onboarding=folder/'.aibl-local/onboarding.json'
+        if not onboarding.exists():write(onboarding,{'started_at':attempt['started_at'],'course':course['id'],'first_artifact':None,'measurement_scope':'Python setup and Claude exercise; OS bootstrap prompts and duration not captured'})
+        # Do not persist auth payloads. Browser consent stays visible and is rechecked each run.
+        try:
+            auth=json.loads(runner(['claude','auth','status','--json']))
+            if not auth.get('loggedIn'):raise SetupError('Claude login required')
+        except (SetupError,json.JSONDecodeError):
+            print('Sign into your supported Claude Code account in the browser.');attempt['manual_interventions']+=1;runner(['claude','auth','login'],interactive=True)
+            auth=json.loads(runner(['claude','auth','status','--json']))
+            if not auth.get('loggedIn'):raise SetupError('Claude sign-in is not complete. Finish browser consent and rerun.')
+        step('claude_authenticated');attempt['result']='ready';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
+        result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':'/aibl-setup'}
+        print(json.dumps(result,indent=2))
+        if not no_launch:runner(['claude','Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.'],cwd=folder,interactive=True)
+        return result
+    except (OSError,ValueError) as e:
+        attempt['result']='blocked';attempt['recovery']=str(e);attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state);raise
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');a=p.parse_args()
+    try:
+        course=choose(a.course)
+        if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
+        if course['id']=='legacy-workshop':command(['node',str(ROOT/'install.mjs'),'--workspace',a.workspace],interactive=True);return 0
+        name=a.repo_name or input('Private project name [my-workbench]: ').strip() or 'my-workbench'
+        setup(course,a.workspace,name,no_launch=a.no_launch);return 0
+    except (OSError,ValueError) as e:print('Setup paused: '+str(e));return 1
+if __name__=='__main__':sys.exit(main())

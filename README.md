@@ -1,5 +1,10 @@
 # AI Build Lab Installer
 
+**New course entry:** [Choose your class in the shared installer](START-HERE.md).
+Essentials and Workforce use the minimal native Python path. The existing
+workshop instructions below retain their own requirements.
+
+
 A guided setup for the workshop's required tools and first safe repo:
 
 - Git
