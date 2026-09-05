@@ -19,7 +19,7 @@ class Fake:
    p=Path(args[-1]);p.mkdir();(p/'.git').mkdir();return ''
   if args[:2]==['gh','api']:
    if args[2].startswith('repos/aibuild-lab/'):
-    if not self.access:raise setup.SetupError('No access')
+    if not self.access:raise setup.SetupError('No access','not_found')
     return json.dumps({'private':True})
    if not self.exists:raise setup.SetupError('HTTP 404','not_found')
    return json.dumps({'private':self.private,'full_name':'synthetic-student/my-workbench','id':100,'template_repository':{'full_name':self.template}})

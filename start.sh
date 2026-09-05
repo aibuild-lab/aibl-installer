@@ -1,6 +1,7 @@
 #!/bin/bash
 # Shared macOS course entry. Existing workshop implementation remains separate.
 set -euo pipefail
+export AIBL_BOOTSTRAP_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 COURSE="${1:-}"
 if [[ -z "$COURSE" ]]; then
   echo 'Which class are you joining?'

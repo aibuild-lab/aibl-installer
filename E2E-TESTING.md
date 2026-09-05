@@ -63,3 +63,16 @@ rather than assuming that the first `python` alias is the new installation.
 Primary references:
 - [Claude setup and supported platforms](https://code.claude.com/docs/en/setup)
 - [Microsoft execution-policy behavior](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
+
+## Failure and version receipts
+
+Each Python attempt records PASS, FAIL, IN_PROGRESS or NOT_RUN for nine stages,
+the last proven stage, failed stage, bounded failure domain and safe recovery.
+An interrupted process can leave IN_PROGRESS; that is not a passing stage.
+The receipt records executed setup/catalog hashes, observed installer revision
+and dirty state, the platform launcher hash when supplied, and the observed
+workbench commit/tree. These identify observations, not a pinned distribution.
+The browser bootstrap, installer clone and template creation still follow their
+current default branches. Record that entire resolved tuple during qualification;
+course release pins alone do not qualify the full installation chain. Pre-Python
+failures still need the facilitator's walkthrough record.

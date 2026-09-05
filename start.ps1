@@ -1,5 +1,6 @@
 param([string]$Course = "")
 $ErrorActionPreference = 'Stop'
+$env:AIBL_BOOTSTRAP_PATH = $PSCommandPath
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
 if (-not $Course) {
   Write-Host 'Which class are you joining?'

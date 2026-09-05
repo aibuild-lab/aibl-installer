@@ -129,3 +129,29 @@ class GitSetupIntegrationTests(unittest.TestCase):
             finally:
                 if child.poll() is None:child.terminate()
                 child.communicate(timeout=5)
+
+class SetupEvidenceTests(unittest.TestCase):
+    def test_failed_clone_records_boundary_and_not_run_stages(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td).resolve();services=LocalServices(root);services.interrupt_clone=True
+            with contextlib.redirect_stdout(io.StringIO()),self.assertRaises(setup.SetupError):
+                setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',root/'state',services,True)
+            attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]
+            self.assertEqual(attempt['failed_stage'],'clone')
+            self.assertEqual(attempt['last_proven_stage'],'private_repository')
+            self.assertEqual(attempt['failure_domain'],'network')
+            self.assertEqual(attempt['stages']['claude_auth'],'NOT_RUN')
+            self.assertEqual(attempt['stages']['clone'],'FAIL')
+            self.assertEqual(attempt['provenance']['bootstrap'],'unmeasured')
+            self.assertEqual(len(attempt['provenance']['setup_sha256']),64)
+
+    def test_success_records_actual_clone_identity_and_explicit_launch_skip(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td).resolve();services=LocalServices(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                result=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',root/'state',services,True)
+            attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]
+            self.assertEqual(attempt['provenance']['student_observed_tree'],services.git('rev-parse','HEAD^{tree}',cwd=result['workspace']))
+            self.assertEqual(attempt['failed_stage'],None)
+            self.assertEqual(attempt['stages']['claude_launch'],'NOT_RUN')
+            self.assertEqual(attempt['last_proven_stage'],'claude_auth')

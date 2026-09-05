@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared course selector and resumable private workbench setup. Standard library only."""
 from __future__ import annotations
-import argparse,contextlib,datetime,json,os,platform,re,shutil,subprocess,sys,tempfile,time
+import argparse,contextlib,datetime,hashlib,json,os,platform,re,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 class SetupError(ValueError):
@@ -21,7 +21,7 @@ def command(args,cwd=None,interactive=False):
     result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
     if result.returncode:
         detail=(result.stderr or '').lower()
-        reason='not_found' if 'http 404' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
+        reason='not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
         recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
         raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
     return '' if interactive else result.stdout.strip()
@@ -67,6 +67,23 @@ def repo_name(value):
     return value
 
 def remote_matches(url,full):return url in {f'https://github.com/{full}',f'https://github.com/{full}.git',f'git@github.com:{full}.git'}
+
+STAGES=('tools','github_auth','course_access','private_repository','clone','git_identity','student_context','claude_auth','claude_launch')
+STEP_STAGE={'tools_verified':'tools','github_verified':'github_auth','course_access_verified':'course_access','private_repository_verified':'private_repository','clone_verified':'clone','local_git_identity_verified':'git_identity','student_context_ready':'student_context','claude_authenticated':'claude_auth','claude_session_returned':'claude_launch'}
+
+def source_provenance():
+    value={'setup_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'course_options_sha256':hashlib.sha256((ROOT/'course-options.json').read_bytes()).hexdigest(),'bootstrap':'unmeasured','installer_revision':'unavailable'}
+    try:
+        p=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,text=True,capture_output=True)
+        if p.returncode==0 and re.fullmatch('[0-9a-f]{40,64}',p.stdout.strip()):
+            value['installer_revision']=p.stdout.strip()
+            status=subprocess.run(['git','status','--porcelain'],cwd=ROOT,text=True,capture_output=True)
+            value['installer_dirty']=bool(status.stdout.strip()) if status.returncode==0 else 'unavailable'
+    except OSError:pass
+    # The platform entry supplies its own file for a hash, never its contents.
+    bootstrap=os.environ.get('AIBL_BOOTSTRAP_PATH')
+    if bootstrap and Path(bootstrap).is_file():value['bootstrap']={'sha256':hashlib.sha256(Path(bootstrap).read_bytes()).hexdigest()}
+    return value
 
 def verify_existing(folder,full,runner=command,require_head=True):
     folder=Path(folder)
@@ -136,10 +153,20 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
     try:state=json.loads(statefile.read_text(encoding='utf-8')) if statefile.exists() else {'schema_version':'aibl.setup-progress/v1','repository_name':name,'attempts':[]}
     except json.JSONDecodeError:raise SetupError('Setup progress is damaged. Preserve it and ask for recovery; existing repositories have not been changed.')
     if not isinstance(state,dict) or state.get('schema_version')!='aibl.setup-progress/v1' or state.get('repository_name')!=name or not isinstance(state.get('attempts'),list):raise SetupError('Setup progress has an unexpected identity or format. Preserve it for diagnosis.')
-    attempt={'course':course['id'],'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'manual_interventions':0,'manual_interventions_scope':'observed browser logins only; course/name/OS consent measured separately','os_prompts':'unmeasured','steps':[],'result':'in_progress'};state['attempts'].append(attempt);write(statefile,state)
-    def step(label):attempt['steps'].append(label);write(statefile,state)
+    attempt={'course':course['id'],'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'manual_interventions':0,'manual_interventions_scope':'observed browser logins only; course/name/OS consent measured separately','os_prompts':'unmeasured','steps':[],'result':'in_progress','stages':dict.fromkeys(STAGES,'NOT_RUN'),'last_proven_stage':None,'failed_stage':None,'failure_domain':None,'provenance':source_provenance()};state['attempts'].append(attempt);write(statefile,state)
+    active_stage=None
+    def enter(label):
+        nonlocal active_stage
+        active_stage=label;attempt['stages'][label]='IN_PROGRESS';write(statefile,state)
+    def step(label):
+        attempt['steps'].append(label)
+        if label in STEP_STAGE:
+            proven=STEP_STAGE[label];attempt['stages'][proven]='PASS';attempt['last_proven_stage']=proven
+        write(statefile,state)
     try:
+        enter('tools')
         versions=check_tools(runner);attempt['versions']=versions;step('tools_verified')
+        enter('github_auth')
         try:runner(['gh','auth','status','--hostname','github.com'])
         except SetupError:
             print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True);runner(['gh','auth','status','--hostname','github.com'])
@@ -147,13 +174,15 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
         if state.get('repository') and state['repository']!=full:raise SetupError('This saved setup belongs to another GitHub account. Sign into that account or choose a new repository name.')
         if state.get('workspace') and state['workspace']!=str(workspace):raise SetupError('This setup already has a local folder. Resume there or choose a new name; duplicate clones are not created.')
         state['repository']=full;state['workspace']=str(workspace);step('github_verified')
+        enter('course_access')
         for upstream in course['access']:
             try:meta=json.loads(runner(['gh','api','repos/'+upstream]))
             except SetupError as exc:
-                if exc.reason=='network':raise
-                raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.')
+                if exc.reason!='not_found':raise
+                raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.','missing_access')
             if not meta.get('private'):raise SetupError('Course destination privacy changed. Ask the course team to review before continuing.')
         step('course_access_verified')
+        enter('private_repository')
         folder=workspace/name
         if folder.exists():verify_existing(folder,full,runner)
         # A specific 404 is absence; network/auth failures never trigger creation.
@@ -171,20 +200,27 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
         meta=json.loads(runner(['gh','api','repos/'+full]))
         if not meta.get('private') or meta.get('full_name','').lower()!=full.lower():raise SetupError('Private repository verification failed.')
         state['created_repository_id']=meta.get('id');step('private_repository_verified')
+        enter('clone')
         if not folder.exists():
             workspace.mkdir(parents=True,exist_ok=True)
             temp=workspace/('.'+name+'-clone-in-progress')
             resume_clone(folder,temp,full,meta.get('default_branch'),runner)
-        verify_existing(folder,full,runner);step('clone_verified')
+        verify_existing(folder,full,runner)
+        attempt['provenance']['student_observed_commit']=runner(['git','rev-parse','HEAD'],cwd=folder)
+        attempt['provenance']['student_observed_tree']=runner(['git','rev-parse','HEAD^{tree}'],cwd=folder)
+        step('clone_verified')
+        enter('git_identity')
         for key,value in [('user.name',user.get('name') or user['login']),('user.email',str(user['id'])+'+'+user['login']+'@users.noreply.github.com')]:
             try:current=runner(['git','config','--local','--get',key],cwd=folder)
             except SetupError:current=''
             if not current:runner(['git','config','--local',key,value],cwd=folder)
         step('local_git_identity_verified')
+        enter('student_context')
         runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder);step('student_context_ready')
         onboarding=folder/'.aibl-local/onboarding.json'
         if onboarding.parent.is_symlink() or onboarding.is_symlink():raise SetupError('Private onboarding state must not be a symlink.')
         if not onboarding.exists():write(onboarding,{'started_at':state['attempts'][0]['started_at'],'course':course['id'],'first_artifact':None,'measurement_scope':'Python setup and Claude exercise; OS bootstrap prompts and duration not captured'})
+        enter('claude_auth')
         # Do not persist auth payloads. Browser consent stays visible and is rechecked each run.
         try:
             auth=json.loads(runner(['claude','auth','status','--json']))
@@ -196,10 +232,13 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
         step('claude_authenticated');attempt['result']='ready';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
         result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':'/aibl-setup'}
         print(json.dumps(result,indent=2))
-        if not no_launch:runner(['claude','Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.'],cwd=folder,interactive=True)
+        if not no_launch:
+            enter('claude_launch');runner(['claude','Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.'],cwd=folder,interactive=True);step('claude_session_returned')
         return result
     except (OSError,ValueError) as e:
-        attempt['result']='blocked';attempt['recovery']=str(e);attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state);raise
+        attempt['result']='blocked';attempt['failed_stage']=active_stage;attempt['failure_domain']=getattr(e,'reason','local_state');attempt['recovery']=str(e);attempt['elapsed_seconds']=round(time.monotonic()-started,2)
+        if active_stage:attempt['stages'][active_stage]='FAIL'
+        write(statefile,state);raise
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');a=p.parse_args()
