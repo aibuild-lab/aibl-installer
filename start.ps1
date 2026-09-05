@@ -1,5 +1,6 @@
 param([string]$Course = "")
 $ErrorActionPreference = 'Stop'
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
 if (-not $Course) {
   Write-Host 'Which class are you joining?'
   Write-Host '1. Agent Essentials'
@@ -14,7 +15,20 @@ if (-not $Course) {
 }
 if ($Course -notin @('agent-essentials','agent-native-workforce','legacy-workshop')) { throw 'Unknown course.' }
 function Refresh-ProcessPath {
-  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
+  $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
+}
+function Find-CompatiblePython {
+  foreach ($Probe in @(@('py','-3'),@('python'),@('python3'))) {
+    $Executable = $Probe[0]
+    if (Get-Command $Executable -ErrorAction SilentlyContinue) {
+      $PrefixArguments = @($Probe | Select-Object -Skip 1)
+      $PythonLocation = & $Executable @PrefixArguments -c 'import sys; assert sys.version_info >= (3,11); print(sys.executable)' 2>$null
+      if ($LASTEXITCODE -eq 0 -and $PythonLocation) {
+        return [string]($PythonLocation | Select-Object -Last 1)
+      }
+    }
+  }
+  return $null
 }
 function Install-Missing([string]$Command, [string]$Package) {
   if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
@@ -27,21 +41,14 @@ function Install-Missing([string]$Command, [string]$Package) {
 Refresh-ProcessPath
 Install-Missing 'git' 'Git.Git'
 Install-Missing 'gh' 'GitHub.cli'
-$Python = $null
-foreach ($Candidate in @('python','python3')) {
-  if (Get-Command $Candidate -ErrorAction SilentlyContinue) {
-    & $Candidate -c 'import sys; sys.exit(sys.version_info < (3,11))' 2>$null
-    if ($LASTEXITCODE -eq 0) { $Python = $Candidate; break }
-  }
-}
+$Python = Find-CompatiblePython
 if (-not $Python) {
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Install Microsoft App Installer, then rerun.' }
   winget install --id Python.Python.3.13 --exact --source winget
   if ($LASTEXITCODE -ne 0) { throw 'Python installation paused. Complete consent and rerun.' }
   Refresh-ProcessPath
-  $Python = 'python'
-  & $Python -c 'import sys; sys.exit(sys.version_info < (3,11))'
-  if ($LASTEXITCODE -ne 0) { throw 'Open a fresh PowerShell window and rerun so the installed Python is visible.' }
+  $Python = Find-CompatiblePython
+  if (-not $Python) { throw 'Open a fresh PowerShell window and rerun so the installed Python is visible.' }
 }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
   $ClaudeInstaller = Join-Path ([IO.Path]::GetTempPath()) 'aibl-claude-install.ps1'

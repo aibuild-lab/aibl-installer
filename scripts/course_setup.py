@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Shared course selector and resumable private workbench setup. Standard library only."""
 from __future__ import annotations
-import argparse,datetime,json,os,platform,re,shutil,subprocess,sys,tempfile,time
+import argparse,contextlib,datetime,json,os,platform,re,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-class SetupError(ValueError):pass
+class SetupError(ValueError):
+    def __init__(self,message,reason='operation'):
+        super().__init__(message);self.reason=reason
 
 def write(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True);fd,tmp=tempfile.mkstemp(dir=path.parent)
@@ -15,8 +17,13 @@ def write(path,value):
         if os.path.exists(tmp):os.unlink(tmp)
 
 def command(args,cwd=None,interactive=False):
-    result=subprocess.run(args,cwd=cwd,text=True,capture_output=not interactive)
-    if result.returncode:raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. Complete the visible action and rerun the same launcher. No work was removed.')
+    child_env={**os.environ,'GH_HOST':'github.com'} if args[0]=='gh' else None
+    result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
+    if result.returncode:
+        detail=(result.stderr or '').lower()
+        reason='not_found' if 'http 404' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
+        recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
+        raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
     return '' if interactive else result.stdout.strip()
 
 def options():return json.loads((ROOT/'course-options.json').read_text())['courses']
@@ -34,9 +41,10 @@ def choose(course):
 
 def safe_workspace(path):
     path=Path(path).expanduser().absolute()
-    if any(x.lower() in {'desktop','documents'} or any(label in x.lower() for label in ['dropbox','onedrive','icloud','google drive','cloudstorage']) for x in path.parts):raise SetupError('Choose a local folder such as ~/GitHub, outside synced Desktop/Documents or cloud storage.')
+    resolved=path.resolve()
+    if any(x.lower() in {'desktop','documents'} or any(label in x.lower() for label in ['dropbox','onedrive','icloud','google drive','cloudstorage']) for x in (*path.parts,*resolved.parts)):raise SetupError('Choose a local folder such as ~/GitHub, outside synced Desktop/Documents or cloud storage.')
     if path.is_symlink():raise SetupError('Choose a local folder rather than a symlink.')
-    return path
+    return resolved
 
 def version_tuple(text):
     m=re.search(r'(\d+)\.(\d+)(?:\.(\d+))?',text)
@@ -45,53 +53,117 @@ def version_tuple(text):
 def check_tools(runner=command):
     versions={};minimum={'git':(2,28,0),'gh':(2,0,0),'python':(3,11,0),'claude':(2,1,0)}
     for name,exe in [('git','git'),('gh','gh'),('python',sys.executable),('claude','claude')]:
-        try:text=runner([exe,'--version']).splitlines()[0]
+        try:
+            lines=runner([exe,'--version']).splitlines()
+            if not lines:raise SetupError('Version output is empty')
+            text=lines[0]
         except (OSError,SetupError):raise SetupError(f'{name} is missing. Rerun the platform launcher to install only missing requirements.')
         if version_tuple(text)<minimum[name]:raise SetupError(f'{name} is older than the course compatibility floor. Update this tool through its installer, then rerun.')
         versions[name]=text
     return versions
 
 def repo_name(value):
-    if not re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}',value) or value.endswith('.git'):raise SetupError('Choose a simple repository name without slashes or a .git suffix.')
+    if not re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}',value) or value.lower().endswith(('.git','.')) or re.match(r'(?i)^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)',value):raise SetupError('Choose a portable repository name without slashes, trailing dots, a .git suffix or a Windows reserved device name.')
     return value
 
 def remote_matches(url,full):return url in {f'https://github.com/{full}',f'https://github.com/{full}.git',f'git@github.com:{full}.git'}
 
-def verify_existing(folder,full,runner=command):
+def verify_existing(folder,full,runner=command,require_head=True):
     folder=Path(folder)
     if folder.is_symlink() or not (folder/'.git').exists():raise SetupError('The chosen folder already exists and is not this Git project. Choose a different name; it will not be overwritten.')
     remote=runner(['git','remote','get-url','origin'],cwd=folder)
     if not remote_matches(remote,full):raise SetupError('Existing folder has a different origin. Keep it and choose another name, or ask Claude to review adoption.')
+    top=runner(['git','rev-parse','--show-toplevel'],cwd=folder)
+    if Path(top).resolve()!=folder.resolve():raise SetupError('Existing Git folder is not the project root. Choose its actual root or another name.')
+    if require_head:runner(['git','rev-parse','--verify','HEAD'],cwd=folder)
     return True
 
+@contextlib.contextmanager
+def setup_lock(state_root,name):
+    if state_root.is_symlink():raise SetupError('Setup state must be a local directory, not a symlink.')
+    state_root.mkdir(parents=True,exist_ok=True);legacy=state_root/(name+'.lock')
+    if legacy.exists() or legacy.is_symlink():raise SetupError('A historical setup lock exists. Ask for diagnosis before retrying; do not create a duplicate repository.')
+    guard=state_root/(name+'.guard')
+    if guard.is_symlink():raise SetupError('Setup operation guard must not be a symlink.')
+    fd=os.open(guard,os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+    with os.fdopen(fd,'r+b',buffering=0) as stream:
+        try:
+            if os.fstat(stream.fileno()).st_size==0:stream.write(b'0')
+            stream.seek(0)
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except OSError as exc:raise SetupError('Another setup process holds this project lock. Close the duplicate launcher and retry.') from exc
+        try:yield
+        finally:
+            stream.seek(0)
+            if os.name=='nt':msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
+            else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
+
 def setup(course,workspace,name,state_root=None,runner=command,no_launch=False):
+    name=repo_name(name);workspace=safe_workspace(workspace)
+    state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
+    with setup_lock(state_root,name):
+        return _setup(course,workspace,name,state_root,runner,no_launch)
+
+def resume_clone(folder,temporary,full,default_branch,runner):
+    if temporary.is_symlink():raise SetupError('Interrupted clone path is a symlink. Preserve it and choose a local folder.')
+    if temporary.exists() and not any(temporary.iterdir()):
+        runner(['gh','repo','clone',full,str(temporary)])
+    elif temporary.exists():
+        verify_existing(temporary,full,runner,require_head=False)
+        try:runner(['git','rev-parse','--verify','HEAD'],cwd=temporary)
+        except SetupError:
+            if any(p.name!='.git' for p in temporary.iterdir()):raise SetupError('Incomplete clone contains files. They are preserved; ask Claude or the facilitator to review this folder before resuming.')
+            if not isinstance(default_branch,str) or not default_branch or default_branch.startswith('-'):raise SetupError('GitHub default branch is unavailable. Retry when the repository finishes initializing.')
+            runner(['git','check-ref-format','refs/heads/'+default_branch],cwd=temporary)
+            runner(['git','fetch','origin'],cwd=temporary)
+            runner(['git','checkout','--detach','refs/remotes/origin/'+default_branch],cwd=temporary)
+            runner(['git','switch','-c',default_branch],cwd=temporary)
+    else:runner(['gh','repo','clone',full,str(temporary)])
+    verify_existing(temporary,full,runner)
+    if folder.exists():raise SetupError('Destination appeared during cloning. Both folders are preserved; review before continuing.')
+    temporary.rename(folder)
+
+def _setup(course,workspace,name,state_root,runner,no_launch):
     started=time.monotonic();workspace=safe_workspace(workspace);name=repo_name(name)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
-    statefile=state_root/(name+'.json');state=json.loads(statefile.read_text()) if statefile.exists() else {'schema_version':'aibl.setup-progress/v1','repository_name':name,'attempts':[]}
+    statefile=state_root/(name+'.json')
+    if statefile.is_symlink():raise SetupError('Setup progress must not be a symlink.')
+    try:state=json.loads(statefile.read_text(encoding='utf-8')) if statefile.exists() else {'schema_version':'aibl.setup-progress/v1','repository_name':name,'attempts':[]}
+    except json.JSONDecodeError:raise SetupError('Setup progress is damaged. Preserve it and ask for recovery; existing repositories have not been changed.')
+    if not isinstance(state,dict) or state.get('schema_version')!='aibl.setup-progress/v1' or state.get('repository_name')!=name or not isinstance(state.get('attempts'),list):raise SetupError('Setup progress has an unexpected identity or format. Preserve it for diagnosis.')
     attempt={'course':course['id'],'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'manual_interventions':0,'manual_interventions_scope':'observed browser logins only; course/name/OS consent measured separately','os_prompts':'unmeasured','steps':[],'result':'in_progress'};state['attempts'].append(attempt);write(statefile,state)
     def step(label):attempt['steps'].append(label);write(statefile,state)
     try:
         versions=check_tools(runner);attempt['versions']=versions;step('tools_verified')
-        try:runner(['gh','auth','status'])
+        try:runner(['gh','auth','status','--hostname','github.com'])
         except SetupError:
-            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True);runner(['gh','auth','status'])
+            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True);runner(['gh','auth','status','--hostname','github.com'])
         user=json.loads(runner(['gh','api','user']));full=user['login']+'/'+name
         if state.get('repository') and state['repository']!=full:raise SetupError('This saved setup belongs to another GitHub account. Sign into that account or choose a new repository name.')
         if state.get('workspace') and state['workspace']!=str(workspace):raise SetupError('This setup already has a local folder. Resume there or choose a new name; duplicate clones are not created.')
         state['repository']=full;state['workspace']=str(workspace);step('github_verified')
         for upstream in course['access']:
             try:meta=json.loads(runner(['gh','api','repos/'+upstream]))
-            except SetupError:raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.')
+            except SetupError as exc:
+                if exc.reason=='network':raise
+                raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.')
             if not meta.get('private'):raise SetupError('Course destination privacy changed. Ask the course team to review before continuing.')
         step('course_access_verified')
         folder=workspace/name
         if folder.exists():verify_existing(folder,full,runner)
-        # Listing the authenticated owner's repositories distinguishes absence from network/auth errors.
-        owned=json.loads(runner(['gh','repo','list',user['login'],'--limit','1000','--json','nameWithOwner,isPrivate']))
-        existing=next((x for x in owned if x['nameWithOwner'].lower()==full.lower()),None)
+        # A specific 404 is absence; network/auth failures never trigger creation.
+        try:existing=json.loads(runner(['gh','api','repos/'+full]))
+        except SetupError as exc:
+            if exc.reason!='not_found':raise
+            existing=None
         if existing:
-            if not existing['isPrivate']:raise SetupError('That name belongs to a public repository. Choose a new private workbench name; privacy is not changed automatically.')
-            meta=json.loads(runner(['gh','api','repos/'+full]));template=(meta.get('template_repository') or {}).get('full_name')
+            if not existing['private']:raise SetupError('That name belongs to a public repository. Choose a new private workbench name; privacy is not changed automatically.')
+            meta=existing;template=(meta.get('template_repository') or {}).get('full_name')
             if template!=course['template'] and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
         else:
             state['creation_intent']={'repository':full,'template':course['template']};step('repository_creation_planned')
@@ -102,11 +174,7 @@ def setup(course,workspace,name,state_root=None,runner=command,no_launch=False):
         if not folder.exists():
             workspace.mkdir(parents=True,exist_ok=True)
             temp=workspace/('.'+name+'-clone-in-progress')
-            if temp.exists():
-                # A successful clone interrupted before rename can resume; partial clones remain untouched.
-                verify_existing(temp,full,runner);runner(['git','rev-parse','--verify','HEAD'],cwd=temp)
-            else:runner(['gh','repo','clone',full,str(temp)])
-            temp.rename(folder)
+            resume_clone(folder,temp,full,meta.get('default_branch'),runner)
         verify_existing(folder,full,runner);step('clone_verified')
         for key,value in [('user.name',user.get('name') or user['login']),('user.email',str(user['id'])+'+'+user['login']+'@users.noreply.github.com')]:
             try:current=runner(['git','config','--local','--get',key],cwd=folder)
@@ -115,7 +183,8 @@ def setup(course,workspace,name,state_root=None,runner=command,no_launch=False):
         step('local_git_identity_verified')
         runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder);step('student_context_ready')
         onboarding=folder/'.aibl-local/onboarding.json'
-        if not onboarding.exists():write(onboarding,{'started_at':attempt['started_at'],'course':course['id'],'first_artifact':None,'measurement_scope':'Python setup and Claude exercise; OS bootstrap prompts and duration not captured'})
+        if onboarding.parent.is_symlink() or onboarding.is_symlink():raise SetupError('Private onboarding state must not be a symlink.')
+        if not onboarding.exists():write(onboarding,{'started_at':state['attempts'][0]['started_at'],'course':course['id'],'first_artifact':None,'measurement_scope':'Python setup and Claude exercise; OS bootstrap prompts and duration not captured'})
         # Do not persist auth payloads. Browser consent stays visible and is rechecked each run.
         try:
             auth=json.loads(runner(['claude','auth','status','--json']))
