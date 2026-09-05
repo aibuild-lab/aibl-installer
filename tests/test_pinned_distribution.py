@@ -53,6 +53,7 @@ class PinnedSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve(); services = PinnedServices(root)
             result = self.run_setup(services, root); project = Path(result['workspace'])
+            self.assertEqual(result['next'], '/aibl-teach')
             self.assertEqual((project / 'context/project.md').read_text(), 'Synthetic pinned starter')
             self.assertEqual(services.git('rev-list', '--count', 'HEAD', cwd=project), '1')
             self.assertFalse(any('--template' in call for call in services.calls))

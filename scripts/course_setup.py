@@ -252,10 +252,12 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             auth=json.loads(runner(['claude','auth','status','--json']))
             if not auth.get('loggedIn'):raise SetupError('Claude sign-in is not complete. Finish browser consent and rerun.')
         step('claude_authenticated');attempt['result']='ready';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
-        result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':'/aibl-setup'}
+        start_request='/aibl-teach' if distribution else '/aibl-setup'
+        result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':start_request}
         print(json.dumps(result,indent=2))
         if not no_launch:
-            enter('claude_launch');runner(['claude','Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.'],cwd=folder,interactive=True);step('claude_session_returned')
+            prompt=('Use /aibl-teach in this workbench. Read the installed mission map and saved learning state; resume the pending checkpoint, or begin ANW-M0-01 if no learning record exists. Preserve prior attempts and ask for my actual choices and explanations.' if distribution else 'Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.')
+            enter('claude_launch');runner(['claude',prompt],cwd=folder,interactive=True);step('claude_session_returned')
         return result
     except (OSError,ValueError) as e:
         attempt['result']='blocked';attempt['failed_stage']=active_stage;attempt['failure_domain']=getattr(e,'reason','local_state');attempt['recovery']=str(e);attempt['elapsed_seconds']=round(time.monotonic()-started,2)
