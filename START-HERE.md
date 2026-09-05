@@ -48,7 +48,8 @@ is not visible, then rerun this same entry point.
 - Existing folder or repository name: use another name or ask Claude to review
   the existing project. Setup does not delete or replace it.
 - Interrupted setup: rerun the same course, folder and repository name. Verified
-  work resumes; compatible tools and completed repositories are reused.
+  work resumes; compatible tools and completed repositories are reused. An empty
+  interrupted clone is resumed; a partial folder containing work pauses for review.
 - Restricted device: bring the exact nonsecret error to the course team. Do not
   disable safeguards or install an unrelated runtime to get around the policy.
 
@@ -73,3 +74,5 @@ or timing promise is included.
 
 [Legacy workshop instructions](README.md) remain available.
 [Claude supported installation and access](https://code.claude.com/docs/en/setup).
+
+Facilitators: [end-to-end testing and real-device walkthrough](E2E-TESTING.md).

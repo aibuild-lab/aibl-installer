@@ -1,9 +1,20 @@
 # AI Build Lab Installer
 
-**New course entry:** [Choose your class in the shared installer](START-HERE.md).
-Essentials and Workforce use the minimal native Python path. The existing
-workshop instructions below retain their own requirements.
+[Start here: choose your course](START-HERE.md)
 
+Choose **Essentials**, **Agent Native Workforce** (includes Essentials), or the
+existing Agent Native OS workshop. The shared launcher checks the tools for
+that choice and guides you into the right private project.
+
+For Essentials and Workforce, Claude takes over after tool setup and browser
+sign-in. Git, GitHub CLI, Python and native Claude Code are the required tools.
+Your sign-ins, visible device permissions, project choices and judgment remain yours.
+
+Setup recovery and verification limits are on the [start page](START-HERE.md).
+Facilitators can use the [end-to-end test and walkthrough guide](E2E-TESTING.md).
+
+<details>
+<summary>Existing Agent Native OS workshop instructions</summary>
 
 A guided setup for the workshop's required tools and first safe repo:
 
@@ -344,3 +355,5 @@ For Infisical specifically:
 ## Need help?
 
 Ask in the workshop Slack channel.
+
+</details>

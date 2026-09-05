@@ -19,10 +19,12 @@ class Fake:
    p=Path(args[-1]);p.mkdir();(p/'.git').mkdir();return ''
   if args[:2]==['gh','api']:
    if args[2].startswith('repos/aibuild-lab/'):
-    if not self.access:raise setup.SetupError('No access')
+    if not self.access:raise setup.SetupError('No access','not_found')
     return json.dumps({'private':True})
+   if not self.exists:raise setup.SetupError('HTTP 404','not_found')
    return json.dumps({'private':self.private,'full_name':'synthetic-student/my-workbench','id':100,'template_repository':{'full_name':self.template}})
   if args[:3]==['git','remote','get-url']:return 'https://github.com/synthetic-student/my-workbench.git'
+  if args==['git','rev-parse','--show-toplevel']:return str(Path(cwd).resolve())
   if args[:3]==['git','config','--local']:
    if '--get' in args:raise setup.SetupError('not set')
    return ''
@@ -67,7 +69,7 @@ class SetupTests(unittest.TestCase):
   def fail(args,**kw):raise FileNotFoundError()
   with self.assertRaisesRegex(setup.SetupError,'launcher'):setup.check_tools(fail)
  def test_invalid_names_and_synced_paths(self):
-  for name in ['../oops','one/two','x.git']:
+  for name in ['../oops','one/two','x.git','x.GIT','CON','nul.txt','COM1','workbench.']:
    with self.assertRaises(setup.SetupError):setup.repo_name(name)
   for path in ['/tmp/Dropbox/project','/tmp/OneDrive/project','/tmp/Documents/project']:
    with self.assertRaises(setup.SetupError):setup.safe_workspace(path)
@@ -75,4 +77,21 @@ class SetupTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    (Path(d)/'.git').mkdir()
    with self.assertRaisesRegex(setup.SetupError,'different origin'):setup.verify_existing(d,'student/my-workbench',lambda *a,**k:'https://github.com/other/repo.git')
+ def test_empty_version_is_actionable(self):
+  with self.assertRaisesRegex(setup.SetupError,'launcher'):setup.check_tools(lambda *a,**k:'')
+ def test_setup_lock_blocks_duplicate_attempt(self):
+  with tempfile.TemporaryDirectory() as d:
+   state=Path(d)/'state';state.mkdir();(state/'my-workbench.lock').write_text('existing writer')
+   f=Fake()
+   with self.assertRaisesRegex(setup.SetupError,'lock'):self.run_setup(f,d)
+   self.assertFalse(f.calls)
+ def test_network_failure_is_not_reported_as_missing_invitation(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake()
+   def fail(args,**kwargs):
+    if args[:2]==['gh','api'] and args[2].startswith('repos/aibuild-lab/'):
+     raise setup.SetupError('Network unavailable','network')
+    return f(args,**kwargs)
+   with self.assertRaisesRegex(setup.SetupError,'Network unavailable'):self.run_setup(fail,d)
+   self.assertFalse(f.exists)
 if __name__=='__main__':unittest.main()
