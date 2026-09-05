@@ -43,6 +43,14 @@ sign-ins; it does not automate account consent. Each test round uses a fresh
 private practice repository. Omit `--rehearsal-id` only for an actual student
 candidate session whose answers remain the student's own.
 
+GitHub qualification uses `gh api user` for the selected account. An invalid
+inactive saved account does not block a working selected account. Network,
+permission and rejected-credential failures remain unresolved and do not
+trigger account changes or repository creation. Only an ordinary student
+setup with GitHub CLI's explicit authentication-required result enters the
+visible login flow; an automated rehearsal always requires existing access.
+The selected account must still match any saved repository binding.
+
 The seed flow initializes an independent local history, pushes it to the new
 private repository and verifies the remote HEAD. Setup retains the actual
 `student_observed_commit` in its attempt provenance. To qualify a real clone,

@@ -1,18 +1,21 @@
-import contextlib,io,json,sys,tempfile,unittest
+import contextlib,io,json,subprocess,sys,tempfile,unittest
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import course_setup as setup
 
 class Fake:
- def __init__(self):self.calls=[];self.exists=False;self.github=True;self.claude=True;self.access=True;self.private=True;self.template='aibuild-lab/agent-essentials'
+ def __init__(self):self.calls=[];self.exists=False;self.github=True;self.inactive_status_invalid=False;self.claude=True;self.access=True;self.private=True;self.template='aibuild-lab/agent-essentials'
  def __call__(self,args,cwd=None,interactive=False):
   self.calls.append(args)
   if args[-1]=='--version':return {'git':'git version 2.49.0','gh':'gh version 2.70.0','claude':'2.1.228'}.get(args[0],'Python 3.13.0')
   if args[:3]==['gh','auth','status']:
-   if not self.github:raise setup.SetupError('Expired')
+   if not self.github or self.inactive_status_invalid:raise setup.SetupError('Saved account status failed','authentication')
    return ''
   if args[:3]==['gh','auth','login']:self.github=True;return ''
-  if args==['gh','api','user']:return json.dumps({'login':'synthetic-student','name':'Student','id':123})
+  if args==['gh','api','user']:
+   if not self.github:raise setup.SetupError('No selected GitHub sign-in','authentication_missing')
+   return json.dumps({'login':'synthetic-student','name':'Student','id':123})
   if args[:3]==['gh','repo','list']:return json.dumps([{'nameWithOwner':'synthetic-student/my-workbench','isPrivate':self.private}] if self.exists else [])
   if args[:3]==['gh','repo','create']:self.exists=True;return ''
   if args[:3]==['gh','repo','clone']:
@@ -43,9 +46,51 @@ class SetupTests(unittest.TestCase):
    f=Fake();self.assertEqual(self.run_setup(f,d)['status'],'ready');self.run_setup(f,d)
    self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in f.calls),1);self.assertEqual(sum(c[:3]==['gh','repo','clone'] for c in f.calls),1)
    self.assertTrue(all('--global' not in c for c in f.calls))
- def test_expired_logins_recover_and_recheck(self):
+ def test_missing_logins_recover_visibly_and_recheck_selected_api(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();f.github=False;f.claude=False;result=self.run_setup(f,d);self.assertEqual(result['manual_interventions'],2)
+   self.assertEqual(sum(c[:3]==['gh','auth','login'] for c in f.calls),1)
+   self.assertEqual(sum(c==['gh','api','user'] for c in f.calls),2)
+   self.assertFalse(any(c[:3]==['gh','auth','status'] for c in f.calls))
+ def test_anw_demo_011_selected_api_works_despite_invalid_inactive_account(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();f.inactive_status_invalid=True
+   result=self.run_setup(f,d)
+   self.assertEqual(result['status'],'ready');self.assertEqual(result['repository'],'synthetic-student/my-workbench')
+   self.assertEqual(result['manual_interventions'],0)
+   self.assertFalse(any(c[:2]==['gh','auth'] for c in f.calls))
+   self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in f.calls),1)
+ def test_selected_api_failures_preserve_domain_and_never_login_or_create(self):
+  for reason in ('authentication','network','permission','operation'):
+   with self.subTest(reason=reason),tempfile.TemporaryDirectory() as d:
+    f=Fake()
+    def fail(args,**kwargs):
+     if args==['gh','api','user']:
+      f.calls.append(args);raise setup.SetupError('Selected API unavailable',reason)
+     return f(args,**kwargs)
+    with self.assertRaises(setup.SetupError) as error:self.run_setup(fail,d)
+    self.assertEqual(error.exception.reason,reason)
+    self.assertFalse(f.exists);self.assertFalse(any(c[:2]==['gh','auth'] or c[:3]==['gh','repo','create'] for c in f.calls))
+    state=json.loads((Path(d)/'state/my-workbench.json').read_text());attempt=state['attempts'][-1]
+    self.assertNotIn('repository',state)
+    self.assertEqual(attempt['failed_stage'],'github_auth');self.assertEqual(attempt['failure_domain'],reason)
+    self.assertEqual(attempt['last_proven_stage'],'tools');self.assertEqual(attempt['stages']['private_repository'],'NOT_RUN')
+ def test_selected_api_error_classification_distinguishes_missing_auth_from_network(self):
+  for code,detail,reason in [(4,'To get started with GitHub CLI, please run: gh auth login','authentication_missing'),(1,'Bad credentials (HTTP 401)','authentication'),(1,'error connecting to api.github.com','network'),(1,'Forbidden (HTTP 403)','permission')]:
+   with self.subTest(reason=reason),patch.object(setup.subprocess,'run',return_value=subprocess.CompletedProcess(['gh','api','user'],code,'',detail)):
+    with self.assertRaises(setup.SetupError) as error:setup.command(['gh','api','user'])
+    self.assertEqual(error.exception.reason,reason)
+ def test_selected_api_account_change_preserves_saved_repository_binding(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();self.run_setup(f,d);before=len(f.calls)
+   def changed(args,**kwargs):
+    if args==['gh','api','user']:
+     f.calls.append(args);return json.dumps({'login':'different-student','name':'Different Student','id':124})
+    return f(args,**kwargs)
+   with self.assertRaisesRegex(setup.SetupError,'another GitHub account'):self.run_setup(changed,d)
+   state=json.loads((Path(d)/'state/my-workbench.json').read_text())
+   self.assertEqual(state['repository'],'synthetic-student/my-workbench')
+   self.assertFalse(any(c[:2]==['gh','auth'] or c[:3]==['gh','repo','create'] for c in f.calls[before:]))
  def test_missing_invitation_blocks_before_repo_creation(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();f.access=False

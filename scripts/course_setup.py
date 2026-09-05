@@ -21,7 +21,7 @@ def command(args,cwd=None,interactive=False):
     result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
     if result.returncode:
         detail=(result.stderr or '').lower()
-        reason='not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
+        reason='authentication_missing' if args[0]=='gh' and result.returncode==4 else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
         recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
         raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
     return '' if interactive else result.stdout.strip()
@@ -197,11 +197,15 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
         enter('tools')
         versions=check_tools(runner);attempt['versions']=versions;step('tools_verified')
         enter('github_auth')
-        try:runner(['gh','auth','status','--hostname','github.com'])
-        except SetupError:
-            if rehearsal_id:raise SetupError('Automated rehearsal requires the existing GitHub sign-in; no account enrollment or login is automated.')
-            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True);runner(['gh','auth','status','--hostname','github.com'])
-        user=json.loads(runner(['gh','api','user']));full=user['login']+'/'+name
+        # Qualify the selected account, not every saved account. An inactive
+        # account can make `gh auth status` fail while the selected API works.
+        try:user=json.loads(runner(['gh','api','user']))
+        except SetupError as exc:
+            if exc.reason!='authentication_missing':raise
+            if rehearsal_id:raise SetupError('Automated rehearsal requires the existing GitHub sign-in; no account enrollment or login is automated.','authentication_missing')
+            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True)
+            user=json.loads(runner(['gh','api','user']))
+        full=user['login']+'/'+name
         if state.get('repository') and state['repository']!=full:raise SetupError('This saved setup belongs to another GitHub account. Sign into that account or choose a new repository name.')
         if state.get('workspace') and state['workspace']!=str(workspace):raise SetupError('This setup already has a local folder. Resume there or choose a new name; duplicate clones are not created.')
         state['repository']=full;state['workspace']=str(workspace);step('github_verified')

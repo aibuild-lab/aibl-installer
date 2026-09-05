@@ -48,6 +48,35 @@ class PreviewTests(unittest.TestCase):
             self.run_setup(services,root,bundle,lock,sha)
             self.assertEqual(sum(call[:3]==['gh','repo','create'] for call in services.calls),1)
 
+    def test_anw_demo_011_rehearsal_uses_selected_account_despite_inactive_status_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();services,bundle,lock,sha=self.prepare(root)
+            def selected(args,**kwargs):
+                if args[:3]==['gh','auth','status']:
+                    services.calls.append(args);raise setup.SetupError('Inactive saved account is invalid','authentication')
+                return services(args,**kwargs)
+            with contextlib.redirect_stdout(io.StringIO()):
+                result=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                    root/'state',selected,True,services.distribution,sha,str(bundle),str(lock),'ui-first')
+            self.assertEqual(result['status'],'ready');self.assertEqual(result['actor'],'automated_test')
+            self.assertFalse(any(call[:2]==['gh','auth'] for call in services.calls))
+            self.assertEqual(sum(call[:3]==['gh','repo','create'] for call in services.calls),1)
+
+    def test_rehearsal_missing_selected_auth_never_automates_login(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();services,bundle,lock,sha=self.prepare(root)
+            def missing(args,**kwargs):
+                if args==['gh','api','user']:
+                    services.calls.append(args);raise setup.SetupError('Authentication required','authentication_missing')
+                return services(args,**kwargs)
+            with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(setup.SetupError,'no account enrollment or login'):
+                setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                    root/'state',missing,True,services.distribution,sha,str(bundle),str(lock),'ui-first')
+            self.assertFalse(any(call[:2]==['gh','auth'] or call[:3]==['gh','repo','create'] for call in services.calls))
+            attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]
+            self.assertEqual(attempt['failure_domain'],'authentication_missing')
+            self.assertEqual(attempt['stages']['private_repository'],'NOT_RUN')
+
     def test_missing_changed_or_wrong_digest_preview_stops_before_account_calls(self):
         for kind in ('missing','changed','wrong-digest'):
             with self.subTest(kind=kind),tempfile.TemporaryDirectory() as directory:
