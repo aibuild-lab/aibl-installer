@@ -123,7 +123,7 @@ def setup_lock(state_root,name):
             else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
 def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False):
-    if desktop and (not preview_bundle or course['id']=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for an Essentials or Workforce course.')
+    if desktop and (not preview_bundle or course['id']=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
     name=repo_name(name);workspace=safe_workspace(workspace)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     with setup_lock(state_root,name):
@@ -317,7 +317,7 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');p.add_argument('--preview-bundle');p.add_argument('--rehearsal-id');p.add_argument('--desktop',action='store_true',help='Prepare a local preview for a separate Claude Desktop session; authentication and runtime remain unobserved.');a=p.parse_args()
     try:
-        if a.desktop and (not a.preview_bundle or a.course=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for an Essentials or Workforce course.')
+        if a.desktop and (not a.preview_bundle or a.course=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
         distribution=None;distribution_sha256=None
         if a.distribution_lock or a.distribution_sha256:
             if not a.distribution_lock or not a.distribution_sha256:raise SetupError('Pinned setup needs both the reviewed lock and its separate digest.')

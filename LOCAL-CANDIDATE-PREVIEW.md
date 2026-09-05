@@ -55,8 +55,9 @@ The selected account must still match any saved repository binding.
 
 For a separate native Claude Desktop preview, add `--desktop` to the explicit
 Python command above. This option is supported only with `--preview-bundle`
-for Essentials or Workforce. It verifies the frozen local inputs, Git, GitHub
-CLI and Python, then uses the same selected GitHub account, private repository,
+for the Workforce local candidate, which starts with Essentials. It verifies
+the frozen local inputs, Git, GitHub CLI and Python, then uses the same selected
+GitHub account, private repository,
 seed push/readback, local Git identity and installed student-context gates.
 It never calls Claude CLI for a version, authentication or session, and does
 not open an application, enroll a working directory or change credential routes.
