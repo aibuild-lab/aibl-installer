@@ -168,6 +168,8 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             raise SetupError('Automated rehearsal needs a local candidate bundle and a portable rehearsal ID.')
         if preview_bundle and (not distribution or not distribution_lock):raise SetupError('Local candidate setup requires the independent frozen distribution lock and digest.')
         if state.get('local_candidate') and not preview_bundle:raise SetupError('This project uses a local candidate. Resume with its explicit bundle; no release download fallback is allowed.')
+        if preview_bundle and not state.get('local_candidate') and (state.get('repository') or state.get('distribution_sha256')):
+            raise SetupError('This saved setup uses the published course route. Use a fresh project name for a local candidate; its original setup and resume route are preserved.')
         if state.get('rehearsal_id')!=rehearsal_id and (state.get('rehearsal_id') or (rehearsal_id and state.get('repository'))):raise SetupError('Saved project rehearsal identity differs; preserve this project and choose the matching rehearsal.')
         if preview_bundle:
             enter('candidate_inputs')

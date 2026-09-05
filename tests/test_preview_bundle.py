@@ -76,5 +76,35 @@ class PreviewTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'linked'):self.run_setup(services,root,alias,lock,sha)
             self.assertFalse(any(call[0]=='gh' for call in services.calls))
 
+    def test_anw_demo_008_published_setup_rejects_preview_and_keeps_its_resume_route(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();services,bundle,lock,sha=self.prepare(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                result=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                    root/'state',services,True,services.distribution,sha)
+            project=Path(result['workspace']);record=project/'.aibl/distribution.json'
+            original=record.read_bytes();statefile=root/'state/my-workbench.json'
+            before=json.loads(statefile.read_bytes());calls=len(services.calls)
+            work=project/'student-note.txt';work.write_text('Preserve this existing student work.')
+            with self.assertRaisesRegex(ValueError,'fresh project name'):
+                self.run_setup(services,root,bundle,lock,sha,rehearsal=None)
+            after=json.loads(statefile.read_bytes())
+            self.assertEqual({k:v for k,v in before.items() if k!='attempts'},
+                             {k:v for k,v in after.items() if k!='attempts'})
+            self.assertEqual(after['attempts'][-1]['result'],'blocked')
+            self.assertEqual(record.read_bytes(),original)
+            self.assertEqual(len(services.calls),calls)
+            self.assertFalse((project/'.aibl-local/candidate-distribution.json').exists())
+            with self.assertRaisesRegex(ValueError,'not the matching local candidate'):
+                pinned.record_candidate_transport(project,bundle,lock,services.distribution,sha)
+            self.assertFalse((project/'.aibl-local/candidate-distribution.json').exists())
+            with contextlib.redirect_stdout(io.StringIO()):
+                resumed=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                    root/'state',services,True,services.distribution,sha)
+            self.assertEqual(resumed['status'],'ready');self.assertNotIn('delivery_mode',resumed)
+            self.assertEqual(record.read_bytes(),original)
+            self.assertEqual(work.read_text(),'Preserve this existing student work.')
+            self.assertEqual(sum(call[:3]==['gh','repo','create'] for call in services.calls),1)
+
 
 if __name__=='__main__':unittest.main()

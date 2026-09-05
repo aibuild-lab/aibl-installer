@@ -17,6 +17,12 @@ candidate/
   agent-native-workforce/payload.zip
 ```
 
+A saved published setup and a saved local candidate keep their original
+delivery modes. Changing mode requires a fresh project name; a preview attempt
+against an existing published setup fails before account calls or project
+changes, and its original published setup can still resume. Candidate transport
+also requires matching installed candidate provenance before writing a locator.
+
 Use an actual supported Python 3.11+ executable. From the pinned clean installer:
 
 ```sh

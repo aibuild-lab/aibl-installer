@@ -110,6 +110,14 @@ def preview_bundle(directory, distribution):
 
 def record_candidate_transport(folder, directory, lock_path, distribution, distribution_sha256, rehearsal_id=None):
     folder=Path(folder).resolve();directory=local_input(directory,True);lock_path=local_input(lock_path)
+    provenance=folder/'.aibl/distribution.json'
+    require(not provenance.parent.is_symlink() and not provenance.is_symlink() and provenance.is_file(), 'Installed candidate provenance is missing or linked; preserve the project.')
+    installed=json.loads(provenance.read_bytes())
+    require(isinstance(installed,dict) and installed.get('delivery_mode')=='local_candidate'
+            and installed.get('distribution_sha256')==distribution_sha256
+            and installed.get('source_release_pins')==distribution['source_release_pins']
+            and installed.get('installer_commit')==distribution['installer']['commit'],
+            'This installed project is not the matching local candidate. Use a fresh project; published provenance is never converted.')
     lock_bytes=lock_path.read_bytes()
     require(digest(lock_bytes)==distribution_sha256, 'Candidate lock changed before transport was recorded.')
     require(json.loads(lock_bytes)==distribution, 'Candidate distribution changed before transport was recorded.')
