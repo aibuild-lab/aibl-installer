@@ -38,10 +38,10 @@ python3 scripts/course_setup.py --course agent-native-workforce \
 The capitalized values are placeholders the operator resolves from reviewed
 inputs. The preview verifies both local product payloads before account or
 repository actions. It never downloads a candidate tag or consults a current
-channel. An automated rehearsal requires existing GitHub and Claude Code
-sign-ins; it does not automate account consent. Each test round uses a fresh
-private practice repository. Omit `--rehearsal-id` only for an actual student
-candidate session whose answers remain the student's own.
+channel. The default CLI route requires existing GitHub and Claude Code sign-ins
+for an automated rehearsal; it does not automate account consent. Each test
+round uses a fresh private practice repository. Omit `--rehearsal-id` only for
+an actual student candidate session whose answers remain the student's own.
 
 GitHub qualification uses `gh api user` for the selected account. An invalid
 inactive saved account does not block a working selected account. Network,
@@ -50,6 +50,40 @@ trigger account changes or repository creation. Only an ordinary student
 setup with GitHub CLI's explicit authentication-required result enters the
 visible login flow; an automated rehearsal always requires existing access.
 The selected account must still match any saved repository binding.
+
+## Claude Desktop files handoff
+
+For a separate native Claude Desktop preview, add `--desktop` to the explicit
+Python command above. This option is supported only with `--preview-bundle`
+for Essentials or Workforce. It verifies the frozen local inputs, Git, GitHub
+CLI and Python, then uses the same selected GitHub account, private repository,
+seed push/readback, local Git identity and installed student-context gates.
+It never calls Claude CLI for a version, authentication or session, and does
+not open an application, enroll a working directory or change credential routes.
+
+The returned result and saved attempt stop at `files_ready_for_desktop`, with
+`last_proven_stage=student_context`. Both CLI stages remain `NOT_RUN`.
+`desktop_authentication`, `desktop_session` and `native_runtime` are all
+`NOT_OBSERVED` in both records. The result includes the exact project path,
+observed commit and tree, `/aibl-teach` and the handoff prompt. An automated
+rehearsal keeps its explicit rehearsal ID, actor and `course_credit=false`.
+GitHub, source, seed or student-context failures still stop setup as `blocked`.
+
+Open that project in the existing native Desktop session and use the returned
+handoff prompt. The end-to-end operator records actual Desktop version,
+permissions, authentication, session and teaching observations separately.
+A files handoff does not establish any of those observations or completion of
+the learning exercises. If Desktop is unavailable, the files remain prepared
+while its native session remains unobserved.
+
+Setup freezes `client=claude_desktop` before its tool and account calls.
+Retries preserve the selected client and existing work. A saved state without
+a client field keeps the legacy CLI meaning. A different frozen client, or a
+different client for an existing repository/distribution, requires a fresh
+project name. Prior CLI attempts and their exact distribution stay intact.
+The default CLI route remains unchanged: `--no-launch` still verifies Claude
+CLI authentication. With `--desktop`, `--no-launch` is redundant because this
+route always ends with the files handoff.
 
 The seed flow initializes an independent local history, pushes it to the new
 private repository and verifies the remote HEAD. Setup retains the actual
