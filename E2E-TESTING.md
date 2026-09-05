@@ -76,3 +76,12 @@ The browser bootstrap, installer clone and template creation still follow their
 current default branches. Record that entire resolved tuple during qualification;
 course release pins alone do not qualify the full installation chain. Pre-Python
 failures still need the facilitator's walkthrough record.
+
+That limitation applies to the original unpinned entry. The new
+[frozen route](PINNED-COURSE-DELIVERY.md) verifies the launcher/lock before
+prerequisite installation, fetches an exact installer commit and seeds from
+the hash-verified immutable Essentials archive. `test_pinned_distribution.py`
+covers this route with real local Git and simulated private account/release
+boundaries. Qualification must use its exact reviewed lock, retain observed
+vendor-tool versions and exercise native Mac/Windows consent and recovery.
+Those device/account outcomes remain unobserved here.

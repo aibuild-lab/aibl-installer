@@ -32,3 +32,9 @@ The Python integration suite runs real Git repositories and the actual Python
 handoff. Only GitHub, local test transport and account boundaries are simulated.
 `tests/test_windows_launcher.ps1` checks PowerShell syntax and interpreter
 resolution; running it on macOS does not establish native Windows behavior.
+
+The optional [frozen Workforce route](PINNED-COURSE-DELIVERY.md) binds the exact
+AIBL bootstrap and installer files to both accepted product pins. It seeds a
+private independent repository from the verified Essentials release archive,
+preserving the legacy selector and default-template route for existing callers.
+The frozen route must be used when qualifying a named immutable distribution.

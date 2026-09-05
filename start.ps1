@@ -1,6 +1,11 @@
-param([string]$Course = "")
+param([string]$Course = "", [string]$DistributionLock = "", [string]$DistributionSHA256 = "", [string]$InstallerCommit = "", [string]$LauncherSHA256 = "")
 $ErrorActionPreference = 'Stop'
 $env:AIBL_BOOTSTRAP_PATH = $PSCommandPath
+if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $LauncherSHA256) {
+  if ($Course -ne 'agent-native-workforce' -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
+  if ((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $LauncherSHA256 -or (Get-FileHash -LiteralPath $DistributionLock -Algorithm SHA256).Hash.ToLowerInvariant() -ne $DistributionSHA256) { throw 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.' }
+  $DistributionLock = (Resolve-Path -LiteralPath $DistributionLock).Path
+}
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
 if (-not $Course) {
   Write-Host 'Which class are you joining?'
@@ -58,11 +63,28 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
   Refresh-ProcessPath
 }
 $InstallerDir = $PSScriptRoot
-if (-not (Test-Path (Join-Path $InstallerDir 'course-options.json'))) {
+if ($InstallerCommit) {
+  $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-pinned-installer-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $InstallerDir | Out-Null
+  git -C $InstallerDir init --quiet
+  if ($LASTEXITCODE -ne 0) { throw 'Pinned installer directory could not be initialized.' }
+  git -C $InstallerDir remote add origin https://github.com/aibuild-lab/workshop-installer.git
+  if ($LASTEXITCODE -ne 0) { throw 'Pinned installer origin could not be set.' }
+  git -C $InstallerDir fetch --depth 1 origin $InstallerCommit
+  if ($LASTEXITCODE -ne 0) { throw 'Frozen installer download failed. Rerun when GitHub is reachable.' }
+  git -C $InstallerDir checkout --detach --quiet FETCH_HEAD
+  if ($LASTEXITCODE -ne 0) { throw 'Frozen installer checkout failed.' }
+  $ObservedInstallerCommit = git -C $InstallerDir rev-parse HEAD
+  if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision was not fetched.' }
+} elseif (-not (Test-Path (Join-Path $InstallerDir 'course-options.json'))) {
   $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-course-installer-' + [guid]::NewGuid().ToString('N'))
   git clone --depth 1 https://github.com/aibuild-lab/workshop-installer.git $InstallerDir
   if ($LASTEXITCODE -ne 0) { throw 'Download failed. Rerun when GitHub is reachable.' }
 }
 if ($Course -eq 'legacy-workshop') { & (Join-Path $InstallerDir 'install.ps1'); exit $LASTEXITCODE }
+if ($InstallerCommit) {
+  & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
+  exit $LASTEXITCODE
+}
 & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course
 exit $LASTEXITCODE
