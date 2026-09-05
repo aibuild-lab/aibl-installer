@@ -504,6 +504,17 @@ function denyIfSecretPath(text) {
 // wire, places only placeholders in the child, and is safe only while the sandbox remains on.
 // Its child command was added to the inspection set above and therefore faces every normal
 // print/read rule below.
+const INFISICAL_SECRETS_HELP_PATHS = new Set([
+  'secrets', 'secrets get', 'secrets set', 'secrets delete',
+  'secrets folders', 'secrets folders get', 'secrets folders create', 'secrets folders delete',
+  'secrets agent-proxy', 'secrets agent-proxy run',
+]);
+function isInfisicalSecretsHelpOnly(args) {
+  if (!['-h', '--help'].includes(args[args.length - 1])) return false;
+  // Exact paths exclude option values, positional secret names, delimiters,
+  // --help=false, and arguments after help. Other shell segments are still vetted.
+  return INFISICAL_SECRETS_HELP_PATHS.has(args.slice(0, -1).join(' '));
+}
 for (const seg of segments) {
   const tokens = words(seg);
   let i = 0;
@@ -526,6 +537,7 @@ for (const seg of segments) {
   if (infisicalCommand === 'pam')
     deny('Direct Infisical PAM access can return or expose credentials. Use a separately reviewed sandboxed launcher.');
   if (infisicalCommand !== 'secrets') continue;
+  if (isInfisicalSecretsHelpOnly(infisicalArgs)) continue;
   const localAgentProxy = String(tokens[i + 2] || '').toLowerCase() === 'agent-proxy' &&
     String(tokens[i + 3] || '').toLowerCase() === 'run';
   if (!localAgentProxy)
