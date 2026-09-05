@@ -120,11 +120,11 @@ def setup_lock(state_root,name):
             if os.name=='nt':msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
             else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
-def setup(course,workspace,name,state_root=None,runner=command,no_launch=False):
+def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None):
     name=repo_name(name);workspace=safe_workspace(workspace)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     with setup_lock(state_root,name):
-        return _setup(course,workspace,name,state_root,runner,no_launch)
+        return _setup(course,workspace,name,state_root,runner,no_launch,distribution,distribution_sha256)
 
 def resume_clone(folder,temporary,full,default_branch,runner):
     if temporary.is_symlink():raise SetupError('Interrupted clone path is a symlink. Preserve it and choose a local folder.')
@@ -145,7 +145,7 @@ def resume_clone(folder,temporary,full,default_branch,runner):
     if folder.exists():raise SetupError('Destination appeared during cloning. Both folders are preserved; review before continuing.')
     temporary.rename(folder)
 
-def _setup(course,workspace,name,state_root,runner,no_launch):
+def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,distribution_sha256=None):
     started=time.monotonic();workspace=safe_workspace(workspace);name=repo_name(name)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     statefile=state_root/(name+'.json')
@@ -164,6 +164,17 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
             proven=STEP_STAGE[label];attempt['stages'][proven]='PASS';attempt['last_proven_stage']=proven
         write(statefile,state)
     try:
+        if state.get('distribution_sha256') and not distribution:raise SetupError('This project uses a frozen distribution. Resume with its reviewed pinned launcher; earlier work is preserved.')
+        if distribution:
+            from pinned_distribution import validate_lock
+            validate_lock(distribution)
+            if course['id']!=distribution['course_id'] or not re.fullmatch('[a-f0-9]{64}',distribution_sha256 or ''):raise SetupError('Pinned distribution does not match this course.')
+            if state.get('distribution_sha256') and state['distribution_sha256']!=distribution_sha256:raise SetupError('This project began with a different frozen distribution. Use its supported update path; earlier work is preserved.')
+            if not state.get('distribution_sha256') and state.get('repository'):raise SetupError('This saved setup began without a frozen distribution. Choose a new project name; earlier work is preserved.')
+            state['distribution_sha256']=distribution_sha256
+            attempt['provenance']['distribution_sha256']=distribution_sha256
+            attempt['provenance']['source_release_pins']=distribution['source_release_pins']
+            write(statefile,state)
         enter('tools')
         versions=check_tools(runner);attempt['versions']=versions;step('tools_verified')
         enter('github_auth')
@@ -190,7 +201,10 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
         except SetupError as exc:
             if exc.reason!='not_found':raise
             existing=None
-        if existing:
+        if distribution:
+            from pinned_distribution import ensure_private_repository
+            ensure_private_repository(full,existing,state,distribution_sha256,runner,lambda:write(statefile,state))
+        elif existing:
             if not existing['private']:raise SetupError('That name belongs to a public repository. Choose a new private workbench name; privacy is not changed automatically.')
             meta=existing;template=(meta.get('template_repository') or {}).get('full_name')
             if template!=course['template'] and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
@@ -204,8 +218,16 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
         if not folder.exists():
             workspace.mkdir(parents=True,exist_ok=True)
             temp=workspace/('.'+name+'-clone-in-progress')
-            resume_clone(folder,temp,full,meta.get('default_branch'),runner)
+            if distribution:
+                from pinned_distribution import download_bundle,seed_project
+                with tempfile.TemporaryDirectory(prefix='aibl-pinned-release-') as bundle:
+                    manifest,payload=download_bundle(distribution,bundle,runner)
+                    seed_project(folder,temp,full,manifest,payload,distribution,distribution_sha256,user,runner)
+            else:resume_clone(folder,temp,full,meta.get('default_branch'),runner)
         verify_existing(folder,full,runner)
+        if distribution:
+            from pinned_distribution import verify_installed_helper
+            verify_installed_helper(folder,distribution,distribution_sha256)
         attempt['provenance']['student_observed_commit']=runner(['git','rev-parse','HEAD'],cwd=folder)
         attempt['provenance']['student_observed_tree']=runner(['git','rev-parse','HEAD^{tree}'],cwd=folder)
         step('clone_verified')
@@ -241,12 +263,17 @@ def _setup(course,workspace,name,state_root,runner,no_launch):
         write(statefile,state);raise
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');a=p.parse_args()
     try:
-        course=choose(a.course)
+        distribution=None;distribution_sha256=None
+        if a.distribution_lock or a.distribution_sha256:
+            if not a.distribution_lock or not a.distribution_sha256:raise SetupError('Pinned setup needs both the reviewed lock and its separate digest.')
+            from pinned_distribution import load_lock
+            distribution,distribution_sha256=load_lock(a.distribution_lock,a.distribution_sha256,ROOT,command,os.environ.get('AIBL_BOOTSTRAP_PATH'))
+        course=choose(a.course or (distribution['course_id'] if distribution else None))
         if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
         if course['id']=='legacy-workshop':command(['node',str(ROOT/'install.mjs'),'--workspace',a.workspace],interactive=True);return 0
         name=a.repo_name or input('Private project name [my-workbench]: ').strip() or 'my-workbench'
-        setup(course,a.workspace,name,no_launch=a.no_launch);return 0
+        setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256);return 0
     except (OSError,ValueError) as e:print('Setup paused: '+str(e));return 1
 if __name__=='__main__':sys.exit(main())

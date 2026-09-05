@@ -3,6 +3,15 @@
 set -euo pipefail
 export AIBL_BOOTSTRAP_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 COURSE="${1:-}"
+DISTRIBUTION_LOCK="${2:-}"
+DISTRIBUTION_SHA256="${3:-}"
+INSTALLER_COMMIT="${4:-}"
+LAUNCHER_SHA256="${5:-}"
+if [[ -n "$DISTRIBUTION_LOCK$DISTRIBUTION_SHA256$INSTALLER_COMMIT$LAUNCHER_SHA256" ]]; then
+  if [[ "$COURSE" != agent-native-workforce || ! -f "$DISTRIBUTION_LOCK" || ! "$DISTRIBUTION_SHA256" =~ ^[a-f0-9]{64}$ || ! "$INSTALLER_COMMIT" =~ ^[a-f0-9]{40}$ || ! "$LAUNCHER_SHA256" =~ ^[a-f0-9]{64}$ ]]; then echo 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.'; exit 1; fi
+  if [[ "$(shasum -a 256 "$AIBL_BOOTSTRAP_PATH" | cut -d' ' -f1)" != "$LAUNCHER_SHA256" || "$(shasum -a 256 "$DISTRIBUTION_LOCK" | cut -d' ' -f1)" != "$DISTRIBUTION_SHA256" ]]; then echo 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.'; exit 1; fi
+  DISTRIBUTION_LOCK="$(cd "$(dirname "$DISTRIBUTION_LOCK")" && pwd)/$(basename "$DISTRIBUTION_LOCK")"
+fi
 if [[ -z "$COURSE" ]]; then
   echo 'Which class are you joining?'
   echo '1. Agent Essentials'
@@ -33,9 +42,17 @@ if ! command -v claude >/dev/null 2>&1; then
   bash "${TMPDIR:-/tmp}/aibl-claude-install.sh"
 fi
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ ! -f "$INSTALLER_DIR/course-options.json" ]]; then
+if [[ -n "$INSTALLER_COMMIT" ]]; then
+  INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aibl-pinned-installer.XXXXXX")"
+  git -C "$INSTALLER_DIR" init --quiet
+  git -C "$INSTALLER_DIR" remote add origin https://github.com/aibuild-lab/workshop-installer.git
+  git -C "$INSTALLER_DIR" fetch --depth 1 origin "$INSTALLER_COMMIT"
+  git -C "$INSTALLER_DIR" checkout --detach --quiet FETCH_HEAD
+  if [[ "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision was not fetched.'; exit 1; fi
+elif [[ ! -f "$INSTALLER_DIR/course-options.json" ]]; then
   INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aibl-course-installer.XXXXXX")"
   git clone --depth 1 https://github.com/aibuild-lab/workshop-installer.git "$INSTALLER_DIR"
 fi
 if [[ "$COURSE" == legacy-workshop ]]; then exec bash "$INSTALLER_DIR/install.sh"; fi
+if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
 exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE"
