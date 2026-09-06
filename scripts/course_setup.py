@@ -21,7 +21,7 @@ def command(args,cwd=None,interactive=False):
     result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
     if result.returncode:
         detail=(result.stderr or '').lower()
-        reason='not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
+        reason='authentication_missing' if args[0]=='gh' and result.returncode==4 else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
         recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
         raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
     return '' if interactive else result.stdout.strip()
@@ -50,9 +50,11 @@ def version_tuple(text):
     m=re.search(r'(\d+)\.(\d+)(?:\.(\d+))?',text)
     return tuple(int(x or 0) for x in m.groups()) if m else (0,0,0)
 
-def check_tools(runner=command):
+def check_tools(runner=command,desktop=False):
     versions={};minimum={'git':(2,28,0),'gh':(2,0,0),'python':(3,11,0),'claude':(2,1,0)}
-    for name,exe in [('git','git'),('gh','gh'),('python',sys.executable),('claude','claude')]:
+    required=[('git','git'),('gh','gh'),('python',sys.executable)]
+    if not desktop:required.append(('claude','claude'))
+    for name,exe in required:
         try:
             lines=runner([exe,'--version']).splitlines()
             if not lines:raise SetupError('Version output is empty')
@@ -68,8 +70,8 @@ def repo_name(value):
 
 def remote_matches(url,full):return url in {f'https://github.com/{full}',f'https://github.com/{full}.git',f'git@github.com:{full}.git'}
 
-STAGES=('tools','github_auth','course_access','private_repository','clone','git_identity','student_context','claude_auth','claude_launch')
-STEP_STAGE={'tools_verified':'tools','github_verified':'github_auth','course_access_verified':'course_access','private_repository_verified':'private_repository','clone_verified':'clone','local_git_identity_verified':'git_identity','student_context_ready':'student_context','claude_authenticated':'claude_auth','claude_session_returned':'claude_launch'}
+STAGES=('candidate_inputs','tools','github_auth','course_access','private_repository','clone','git_identity','student_context','claude_auth','claude_launch')
+STEP_STAGE={'candidate_inputs_verified':'candidate_inputs','tools_verified':'tools','github_verified':'github_auth','course_access_verified':'course_access','private_repository_verified':'private_repository','clone_verified':'clone','local_git_identity_verified':'git_identity','student_context_ready':'student_context','claude_authenticated':'claude_auth','claude_session_returned':'claude_launch'}
 
 def source_provenance():
     value={'setup_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'course_options_sha256':hashlib.sha256((ROOT/'course-options.json').read_bytes()).hexdigest(),'bootstrap':'unmeasured','installer_revision':'unavailable'}
@@ -120,11 +122,12 @@ def setup_lock(state_root,name):
             if os.name=='nt':msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
             else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
-def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None):
+def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False):
+    if desktop and (not preview_bundle or course['id']=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
     name=repo_name(name);workspace=safe_workspace(workspace)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     with setup_lock(state_root,name):
-        return _setup(course,workspace,name,state_root,runner,no_launch,distribution,distribution_sha256)
+        return _setup(course,workspace,name,state_root,runner,no_launch,distribution,distribution_sha256,preview_bundle,distribution_lock,rehearsal_id,desktop)
 
 def resume_clone(folder,temporary,full,default_branch,runner):
     if temporary.is_symlink():raise SetupError('Interrupted clone path is a symlink. Preserve it and choose a local folder.')
@@ -145,7 +148,7 @@ def resume_clone(folder,temporary,full,default_branch,runner):
     if folder.exists():raise SetupError('Destination appeared during cloning. Both folders are preserved; review before continuing.')
     temporary.rename(folder)
 
-def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,distribution_sha256=None):
+def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False):
     started=time.monotonic();workspace=safe_workspace(workspace);name=repo_name(name)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     statefile=state_root/(name+'.json')
@@ -153,7 +156,9 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
     try:state=json.loads(statefile.read_text(encoding='utf-8')) if statefile.exists() else {'schema_version':'aibl.setup-progress/v1','repository_name':name,'attempts':[]}
     except json.JSONDecodeError:raise SetupError('Setup progress is damaged. Preserve it and ask for recovery; existing repositories have not been changed.')
     if not isinstance(state,dict) or state.get('schema_version')!='aibl.setup-progress/v1' or state.get('repository_name')!=name or not isinstance(state.get('attempts'),list):raise SetupError('Setup progress has an unexpected identity or format. Preserve it for diagnosis.')
-    attempt={'course':course['id'],'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'manual_interventions':0,'manual_interventions_scope':'observed browser logins only; course/name/OS consent measured separately','os_prompts':'unmeasured','steps':[],'result':'in_progress','stages':dict.fromkeys(STAGES,'NOT_RUN'),'last_proven_stage':None,'failed_stage':None,'failure_domain':None,'provenance':source_provenance()};state['attempts'].append(attempt);write(statefile,state)
+    client='claude_desktop' if desktop else 'claude_code'
+    desktop_observations=dict.fromkeys(('desktop_authentication','desktop_session','native_runtime'),'NOT_OBSERVED') if desktop else {}
+    attempt={'course':course['id'],'client':client,'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'manual_interventions':0,'manual_interventions_scope':'observed browser logins only; course/name/OS consent measured separately','os_prompts':'unmeasured','steps':[],'result':'in_progress','stages':dict.fromkeys(STAGES,'NOT_RUN'),'last_proven_stage':None,'failed_stage':None,'failure_domain':None,'provenance':source_provenance(),**desktop_observations};state['attempts'].append(attempt);write(statefile,state)
     active_stage=None
     def enter(label):
         nonlocal active_stage
@@ -164,6 +169,30 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             proven=STEP_STAGE[label];attempt['stages'][proven]='PASS';attempt['last_proven_stage']=proven
         write(statefile,state)
     try:
+        saved_client=state.get('client','claude_code')
+        if saved_client not in ('claude_code','claude_desktop'):raise SetupError('Saved setup client is invalid. Preserve this project for diagnosis.')
+        if saved_client!=client and (state.get('client') or state.get('repository') or state.get('distribution_sha256')):
+            raise SetupError('This saved setup uses another client. Use a fresh project name to change clients; its original route is preserved.')
+        if rehearsal_id and (not preview_bundle or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}',rehearsal_id)):
+            raise SetupError('Automated rehearsal needs a local candidate bundle and a portable rehearsal ID.')
+        if preview_bundle and (not distribution or not distribution_lock):raise SetupError('Local candidate setup requires the independent frozen distribution lock and digest.')
+        if state.get('local_candidate') and not preview_bundle:raise SetupError('This project uses a local candidate. Resume with its explicit bundle; no release download fallback is allowed.')
+        if preview_bundle and not state.get('local_candidate') and (state.get('repository') or state.get('distribution_sha256')):
+            raise SetupError('This saved setup uses the published course route. Use a fresh project name for a local candidate; its original setup and resume route are preserved.')
+        if state.get('rehearsal_id')!=rehearsal_id and (state.get('rehearsal_id') or (rehearsal_id and state.get('repository'))):raise SetupError('Saved project rehearsal identity differs; preserve this project and choose the matching rehearsal.')
+        state['client']=client;write(statefile,state)
+        if preview_bundle:
+            enter('candidate_inputs')
+            from pinned_distribution import preview_bundle as verify_preview,local_input,digest
+            lock_path=local_input(distribution_lock)
+            if lock_path.stat().st_size>65536:raise SetupError('Candidate distribution lock is oversized.')
+            lock_bytes=lock_path.read_bytes()
+            if digest(lock_bytes)!=distribution_sha256 or json.loads(lock_bytes)!=distribution:raise SetupError('Candidate distribution lock differs from its independently supplied digest or selected source.')
+            verify_preview(preview_bundle,distribution)
+            state['local_candidate']=True;state['rehearsal_id']=rehearsal_id
+            attempt['provenance']['delivery_mode']='local_candidate'
+            if rehearsal_id:attempt.update({'actor':'automated_test','rehearsal_id':rehearsal_id,'course_credit':False})
+            step('candidate_inputs_verified')
         if state.get('distribution_sha256') and not distribution:raise SetupError('This project uses a frozen distribution. Resume with its reviewed pinned launcher; earlier work is preserved.')
         if distribution:
             from pinned_distribution import validate_lock
@@ -176,23 +205,28 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             attempt['provenance']['source_release_pins']=distribution['source_release_pins']
             write(statefile,state)
         enter('tools')
-        versions=check_tools(runner);attempt['versions']=versions;step('tools_verified')
+        versions=check_tools(runner,desktop);attempt['versions']=versions;step('tools_verified')
         enter('github_auth')
-        try:runner(['gh','auth','status','--hostname','github.com'])
-        except SetupError:
-            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True);runner(['gh','auth','status','--hostname','github.com'])
-        user=json.loads(runner(['gh','api','user']));full=user['login']+'/'+name
+        # Qualify the selected account, not every saved account. An inactive
+        # account can make `gh auth status` fail while the selected API works.
+        try:user=json.loads(runner(['gh','api','user']))
+        except SetupError as exc:
+            if exc.reason!='authentication_missing':raise
+            if rehearsal_id:raise SetupError('Automated rehearsal requires the existing GitHub sign-in; no account enrollment or login is automated.','authentication_missing')
+            print('Sign in to GitHub in the browser. Do not paste account codes into Claude chat.');attempt['manual_interventions']+=1;runner(['gh','auth','login','--hostname','github.com','--git-protocol','https','--web'],interactive=True)
+            user=json.loads(runner(['gh','api','user']))
+        full=user['login']+'/'+name
         if state.get('repository') and state['repository']!=full:raise SetupError('This saved setup belongs to another GitHub account. Sign into that account or choose a new repository name.')
         if state.get('workspace') and state['workspace']!=str(workspace):raise SetupError('This setup already has a local folder. Resume there or choose a new name; duplicate clones are not created.')
         state['repository']=full;state['workspace']=str(workspace);step('github_verified')
-        enter('course_access')
-        for upstream in course['access']:
+        if not preview_bundle:enter('course_access')
+        for upstream in ([] if preview_bundle else course['access']):
             try:meta=json.loads(runner(['gh','api','repos/'+upstream]))
             except SetupError as exc:
                 if exc.reason!='not_found':raise
                 raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.','missing_access')
             if not meta.get('private'):raise SetupError('Course destination privacy changed. Ask the course team to review before continuing.')
-        step('course_access_verified')
+        if not preview_bundle:step('course_access_verified')
         enter('private_repository')
         folder=workspace/name
         if folder.exists():verify_existing(folder,full,runner)
@@ -219,15 +253,22 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             workspace.mkdir(parents=True,exist_ok=True)
             temp=workspace/('.'+name+'-clone-in-progress')
             if distribution:
-                from pinned_distribution import download_bundle,seed_project
-                with tempfile.TemporaryDirectory(prefix='aibl-pinned-release-') as bundle:
-                    manifest,payload=download_bundle(distribution,bundle,runner)
-                    seed_project(folder,temp,full,manifest,payload,distribution,distribution_sha256,user,runner)
+                from pinned_distribution import download_bundle,seed_project,preview_bundle as verify_preview
+                if preview_bundle:
+                    manifest,payload=verify_preview(preview_bundle,distribution)['agent-essentials']
+                    seed_project(folder,temp,full,manifest,payload,distribution,distribution_sha256,user,runner,local_candidate=True)
+                else:
+                    with tempfile.TemporaryDirectory(prefix='aibl-pinned-release-') as bundle:
+                        manifest,payload=download_bundle(distribution,bundle,runner)
+                        seed_project(folder,temp,full,manifest,payload,distribution,distribution_sha256,user,runner)
             else:resume_clone(folder,temp,full,meta.get('default_branch'),runner)
         verify_existing(folder,full,runner)
         if distribution:
             from pinned_distribution import verify_installed_helper
             verify_installed_helper(folder,distribution,distribution_sha256)
+            if preview_bundle:
+                from pinned_distribution import record_candidate_transport
+                record_candidate_transport(folder,preview_bundle,distribution_lock,distribution,distribution_sha256,rehearsal_id)
         attempt['provenance']['student_observed_commit']=runner(['git','rev-parse','HEAD'],cwd=folder)
         attempt['provenance']['student_observed_tree']=runner(['git','rev-parse','HEAD^{tree}'],cwd=folder)
         step('clone_verified')
@@ -241,22 +282,31 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
         runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder);step('student_context_ready')
         onboarding=folder/'.aibl-local/onboarding.json'
         if onboarding.parent.is_symlink() or onboarding.is_symlink():raise SetupError('Private onboarding state must not be a symlink.')
-        if not onboarding.exists():write(onboarding,{'started_at':state['attempts'][0]['started_at'],'course':course['id'],'first_artifact':None,'measurement_scope':'Python setup and Claude exercise; OS bootstrap prompts and duration not captured'})
+        if not onboarding.exists():write(onboarding,{'started_at':state['attempts'][0]['started_at'],'course':course['id'],'first_artifact':None,'measurement_scope':('Python setup only; Desktop authentication, session and exercise not observed' if desktop else 'Python setup and Claude exercise; OS bootstrap prompts and duration not captured')})
+        start_request='/aibl-teach' if distribution else '/aibl-setup'
+        prompt=('Use /aibl-teach in this workbench. Read the installed mission map and saved learning state; resume the pending checkpoint, or begin ANW-M0-01 if no learning record exists. Preserve prior attempts and ask for my actual choices and explanations.' if distribution else 'Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.')
+        if rehearsal_id:prompt=('This is isolated automated_test rehearsal '+rehearsal_id+'. Use /aibl-teach and the real installed missions. Every learning helper call must include --rehearsal '+rehearsal_id+' --actor automated_test. Record explicit automated test responses, never human answers, approval, assessment or credit. Resume the pending test checkpoint, or begin ANW-M0-01. Use the verified local candidate transport for adoption after the rehearsal prerequisites; never download a release or use a channel fallback.')
+        if desktop:
+            attempt['result']='files_ready_for_desktop';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
+            result={'status':'files_ready_for_desktop','client':client,'course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Desktop exercise; no timing promise','next':start_request,'handoff_prompt':prompt+(' This rehearsal has course_credit=false.' if rehearsal_id else ''),'delivery_mode':'local_candidate','student_observed_commit':attempt['provenance']['student_observed_commit'],'student_observed_tree':attempt['provenance']['student_observed_tree'],'last_proven_stage':attempt['last_proven_stage'],'stages':dict(attempt['stages']),**desktop_observations}
+            if rehearsal_id:result.update({'rehearsal_id':rehearsal_id,'actor':'automated_test','course_credit':False})
+            print(json.dumps(result,indent=2));return result
         enter('claude_auth')
         # Do not persist auth payloads. Browser consent stays visible and is rechecked each run.
         try:
             auth=json.loads(runner(['claude','auth','status','--json']))
             if not auth.get('loggedIn'):raise SetupError('Claude login required')
         except (SetupError,json.JSONDecodeError):
+            if rehearsal_id:raise SetupError('Automated rehearsal requires existing supported Claude Code access; no login is automated.')
             print('Sign into your supported Claude Code account in the browser.');attempt['manual_interventions']+=1;runner(['claude','auth','login'],interactive=True)
             auth=json.loads(runner(['claude','auth','status','--json']))
             if not auth.get('loggedIn'):raise SetupError('Claude sign-in is not complete. Finish browser consent and rerun.')
         step('claude_authenticated');attempt['result']='ready';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
-        start_request='/aibl-teach' if distribution else '/aibl-setup'
         result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':start_request}
+        if preview_bundle:result['delivery_mode']='local_candidate'
+        if rehearsal_id:result.update({'rehearsal_id':rehearsal_id,'actor':'automated_test','course_credit':False})
         print(json.dumps(result,indent=2))
         if not no_launch:
-            prompt=('Use /aibl-teach in this workbench. Read the installed mission map and saved learning state; resume the pending checkpoint, or begin ANW-M0-01 if no learning record exists. Preserve prior attempts and ask for my actual choices and explanations.' if distribution else 'Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.')
             enter('claude_launch');runner(['claude',prompt],cwd=folder,interactive=True);step('claude_session_returned')
         return result
     except (OSError,ValueError) as e:
@@ -265,17 +315,23 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
         write(statefile,state);raise
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');p.add_argument('--preview-bundle');p.add_argument('--rehearsal-id');p.add_argument('--desktop',action='store_true',help='Prepare a local preview for a separate Claude Desktop session; authentication and runtime remain unobserved.');a=p.parse_args()
     try:
+        if a.desktop and (not a.preview_bundle or a.course=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
         distribution=None;distribution_sha256=None
         if a.distribution_lock or a.distribution_sha256:
             if not a.distribution_lock or not a.distribution_sha256:raise SetupError('Pinned setup needs both the reviewed lock and its separate digest.')
             from pinned_distribution import load_lock
             distribution,distribution_sha256=load_lock(a.distribution_lock,a.distribution_sha256,ROOT,command,os.environ.get('AIBL_BOOTSTRAP_PATH'))
+        if a.preview_bundle:
+            if not distribution:raise SetupError('Local candidate setup requires the reviewed distribution lock and independent digest.')
+            from pinned_distribution import preview_bundle
+            preview_bundle(a.preview_bundle,distribution)
+        if a.rehearsal_id and not a.preview_bundle:raise SetupError('Rehearsal setup requires an explicit local candidate bundle.')
         course=choose(a.course or (distribution['course_id'] if distribution else None))
         if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
         if course['id']=='legacy-workshop':command(['node',str(ROOT/'install.mjs'),'--workspace',a.workspace],interactive=True);return 0
         name=a.repo_name or input('Private project name [my-workbench]: ').strip() or 'my-workbench'
-        setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256);return 0
+        setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256,preview_bundle=a.preview_bundle,distribution_lock=a.distribution_lock,rehearsal_id=a.rehearsal_id,desktop=a.desktop);return 0
     except (OSError,ValueError) as e:print('Setup paused: '+str(e));return 1
 if __name__=='__main__':sys.exit(main())

@@ -60,8 +60,8 @@ def safe_name(name):
     require(name not in ('.aibl/distribution.json', '.aibl/installed-agent-essentials.json'), 'Payload collides with installer provenance.')
     return name
 
-def verify_bundle(bundle, pin):
-    validate_pin(pin, 'agent-essentials')
+def verify_bundle(bundle, pin, product='agent-essentials'):
+    validate_pin(pin, product)
     bundle = Path(bundle)
     require(not bundle.is_symlink(), 'Bundle root must not be a symlink.')
     for name in ('manifest.json', 'payload.zip'):
@@ -90,8 +90,52 @@ def verify_bundle(bundle, pin):
             data = archive_file.read(member)
             require(digest(data) == entries[member.filename]['sha256'], 'Archive file differs from manifest.')
             payload[member.filename] = data
-    require('scripts/aibl.py' in payload, 'Essentials setup helper is missing.')
+    if product == 'agent-essentials':require('scripts/aibl.py' in payload, 'Essentials setup helper is missing.')
     return manifest, payload
+
+def local_input(value, directory=False):
+    path=Path(value).expanduser().absolute()
+    require('..' not in path.parts and not any(p.is_symlink() for p in [path,*path.parents]), 'Candidate input has a linked or traversal path.')
+    require(path.is_dir() if directory else path.is_file(), 'Candidate input is missing. Supply its explicit local path; no release fallback is used.')
+    return path
+
+def preview_bundle(directory, distribution):
+    """Verify both local products against independently supplied frozen pins."""
+    validate_lock(distribution);directory=local_input(directory,True);products={}
+    for product in PRODUCTS:
+        folder=local_input(directory/product,True)
+        for name in ('manifest.json','payload.zip'):local_input(folder/name)
+        products[product]=verify_bundle(folder,distribution['source_release_pins'][product],product)
+    return products
+
+def record_candidate_transport(folder, directory, lock_path, distribution, distribution_sha256, rehearsal_id=None):
+    folder=Path(folder).resolve();directory=local_input(directory,True);lock_path=local_input(lock_path)
+    provenance=folder/'.aibl/distribution.json'
+    require(not provenance.parent.is_symlink() and not provenance.is_symlink() and provenance.is_file(), 'Installed candidate provenance is missing or linked; preserve the project.')
+    installed=json.loads(provenance.read_bytes())
+    require(isinstance(installed,dict) and installed.get('delivery_mode')=='local_candidate'
+            and installed.get('distribution_sha256')==distribution_sha256
+            and installed.get('source_release_pins')==distribution['source_release_pins']
+            and installed.get('installer_commit')==distribution['installer']['commit'],
+            'This installed project is not the matching local candidate. Use a fresh project; published provenance is never converted.')
+    lock_bytes=lock_path.read_bytes()
+    require(digest(lock_bytes)==distribution_sha256, 'Candidate lock changed before transport was recorded.')
+    require(json.loads(lock_bytes)==distribution, 'Candidate distribution changed before transport was recorded.')
+    preview_bundle(directory,distribution)
+    local=folder/'.aibl-local';require(not local.is_symlink(), 'Candidate local state cannot be a symlink.');local.mkdir(exist_ok=True)
+    record={'schema_version':'aibl.candidate-transport/v1','project_root':str(folder),
+            'bundle_root':str(directory),'distribution_lock':str(lock_path),
+            'distribution_sha256':distribution_sha256,
+            'source_revision':distribution['source_release_pins']['agent-essentials']['source_revision']}
+    marker={'schema_version':'aibl.rehearsal-project/v1','rehearsal_id':rehearsal_id,'actor':'automated_test','course_credit':False}
+    files={'candidate-distribution.json':record}
+    if rehearsal_id:files['rehearsal.json']=marker
+    for name,value in files.items():
+        path=local/name;require(not path.is_symlink(), 'Candidate local record cannot be a symlink.')
+        if path.exists():require(json.loads(path.read_bytes())==value, 'Candidate local transport differs. Explicitly relink and verify it before resuming.')
+        else:
+            with path.open('xb') as stream:stream.write(encoded(value))
+            path.chmod(0o600)
 
 def download_bundle(distribution, directory, runner):
     pin = distribution['source_release_pins']['agent-essentials']
@@ -112,7 +156,7 @@ def ensure_private_repository(full, existing, state, distribution_sha256, runner
     require(intent['repository'] == full and intent['distribution_sha256'] == distribution_sha256, 'Saved creation intent belongs to another distribution.')
     runner(['gh', 'repo', 'create', full, '--private', '--description', intent['description']])
 
-def seed_project(folder, temporary, full, manifest, payload, distribution, distribution_sha256, user, runner):
+def seed_project(folder, temporary, full, manifest, payload, distribution, distribution_sha256, user, runner, local_candidate=False):
     """Resume only the installer's staging folder. Never rewrite a student's project."""
     folder = Path(folder); temporary = Path(temporary)
     require(not folder.exists() and not temporary.is_symlink(), 'Pinned setup destination is occupied or linked. Preserve it for review.')
@@ -127,6 +171,8 @@ def seed_project(folder, temporary, full, manifest, payload, distribution, distr
     files = dict(payload)
     files['.aibl/installed-agent-essentials.json'] = encoded(manifest)
     files['.aibl/distribution.json'] = encoded({'schema_version': 'aibl.installed-distribution/v1', 'distribution_sha256': distribution_sha256, 'installer_commit': distribution['installer']['commit'], 'source_release_pins': distribution['source_release_pins'], 'workforce_adoption': 'pending Essentials gate'})
+    if local_candidate:
+        record=json.loads(files['.aibl/distribution.json']);record['delivery_mode']='local_candidate';files['.aibl/distribution.json']=encoded(record)
     # Walk before writing; reject symlinks and preserve every unexpected file.
     for path in temporary.rglob('*'):
         rel = path.relative_to(temporary).as_posix()
