@@ -443,6 +443,7 @@ const clauses = inspectionCommands.flatMap(command => splitShell(command, false)
 // Split into simple-command segments so "env FOO=bar cmd" (setter) is distinguished
 // from a bare "env" (whole-environment dump).
 const segments = inspectionCommands.flatMap(command => splitShell(command, true));
+const topLevelSegments = new Set(splitShell(c, true));
 // Readers differ by shell: in PowerShell, cat/type/gc are all Get-Content aliases. Match the
 // executable token, not words inside quoted grep patterns or an unrelated neighboring command.
 // Whole-file printers: every non-option token is a filename. The Bash list is POSIX text
@@ -698,6 +699,35 @@ const RUNTIME_INTROSPECTORS = new Set([
   'gcloud', 'az', 'lxc', 'incus', 'minikube', 'k3s', 'fly', 'flyctl', 'heroku', 'railway', 'doctl',
 ]);
 const QUALIFIED_DUMP_VERBS = new Set(['show', 'describe']);
+const SAFE_DOCKER_INSPECT_ACTIONS = new Set([
+  'json .Id',
+  'json .RepoDigests',
+  'json .Architecture',
+  'json .Config.User',
+  'json (index .Config.Labels "org.opencontainers.image.revision")',
+  'json (index .Config.Labels "io.ragnos.knowledge.product-revision")',
+]);
+function selectsSafeDockerInspectFormat(segment, tokens) {
+  if (/\$|`|[;&|<>]|[\r\n]/.test(segment)) return false;
+  const args = tokens.slice(1);
+  const inspectAt = args[0] === 'inspect' ? 0 :
+    (args[0] === 'image' && args[1] === 'inspect' ? 1 : -1);
+  if (inspectAt < 0) return false;
+  const tail = args.slice(inspectAt + 1);
+  let format;
+  let target;
+  if (tail.length === 3 && (tail[0] === '-f' || tail[0] === '--format'))
+    [, format, target] = tail;
+  else if (tail.length === 2 && tail[0].startsWith('--format='))
+    [format, target] = [tail[0].slice('--format='.length), tail[1]];
+  else return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:@/+\-]*$/.test(target)) return false;
+  const actions = [...format.matchAll(/{{([^{}]+)}}/g)];
+  const literals = format.replace(/{{[^{}]+}}/g, '');
+  if (actions.length === 0 || literals.includes('{{') || literals.includes('}}')) return false;
+  return actions.every(([, action]) =>
+    SAFE_DOCKER_INSPECT_ACTIONS.has(action.trim().replace(/\s+/g, ' ')));
+}
 // `systemctl show -p Restart` selects named properties and cannot print Environment. The deny
 // message below tells people to do exactly this, so it has to stay allowed.
 function selectsNonEnvProperty(tokens) {
@@ -722,7 +752,9 @@ for (const segment of segments) {
     // A verb with no target introspects nothing, so `npm run inspect` stays allowed.
     const dumps = CONFIG_DUMP_VERBS.has(verb) ||
       (QUALIFIED_DUMP_VERBS.has(verb) && RUNTIME_INTROSPECTORS.has(binary));
-    if (dumps)
+    const safeDockerMetadata = binary === 'docker' && verb === 'inspect' &&
+      topLevelSegments.has(segment) && selectsSafeDockerInspectFormat(segment, tokens);
+    if (dumps && !safeDockerMetadata)
       deny(`\`${binary} ${verb}\` renders the target's full configuration, which includes its environment variables. Read the single setting you need, or pass a --format/--property selector that excludes Env.`);
   }
   // `kubectl get pod -o yaml` prints the whole spec; plain `kubectl get pods` does not. Key on
