@@ -409,14 +409,9 @@ check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
   const mine = path.join(root, "mine");
   fs.mkdirSync(path.join(mine, ".claude"), { recursive: true });
   fs.mkdirSync(path.join(mine, ".codex"), { recursive: true });
-  const claudeMd = "# My global rules
-Always answer in French.
-";
-  const agentsMd = "# My Codex rules
-Never touch prod.
-";
-  const priorSettings = JSON.stringify({ theme: "dark", permissions: { allow: ["Bash(ls:*)"] } }, null, 2) + "
-";
+  const claudeMd = ["# My global rules", "Always answer in French.", ""].join("\n");
+  const agentsMd = ["# My Codex rules", "Never touch prod.", ""].join("\n");
+  const priorSettings = JSON.stringify({ theme: "dark", permissions: { allow: ["Bash(ls:*)"] } }, null, 2) + "\n";
   fs.writeFileSync(path.join(mine, ".claude", "CLAUDE.md"), claudeMd);
   fs.writeFileSync(path.join(mine, ".codex", "AGENTS.md"), agentsMd);
   fs.writeFileSync(path.join(mine, ".claude", "settings.json"), priorSettings);
