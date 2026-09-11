@@ -236,9 +236,17 @@ Run `gh auth login --hostname github.com --git-protocol https --web`. The studen
 
 ## Step 7: The secrets guard, installed and proven
 
-Say why once:
+Say why once, in these four parts, in your own words but keeping every part:
 
-> "Last safety piece. I am installing a guard that runs before every command your agent tries. If a command would print an API key or a password to the screen, or read a `.env` file, the guard refuses it. You will not need keys in this course, but you will someday, and this is the moment to put the seatbelt on. It works in every project, not only this one."
+> "Last safety piece, and the one I want you to understand rather than just accept.
+>
+> **What a hook is.** A hook is a small check that runs automatically every time your agent is about to run a command or write a file. It is not a rule the AI has to remember; the app runs it whether the AI remembers or not. That difference is the whole point. A written rule works until the one time the model forgets it.
+>
+> **What these two do.** The first runs *before* a command: if the command would print a password or an API key to the screen, or read a secrets file like `.env`, it refuses and tells you why. The second runs *after* a command: if something slipped past anyway, it blanks the secret out of the output before the AI sees it and makes a dated note, names only, never the value.
+>
+> **Why it lives with the app, not in a project.** I am installing it into the app's own settings on your machine, so it protects every folder you ever open in this app, including client work you have not started yet. A guard inside one project only protects that project, and the day you make a second folder you would have none.
+>
+> **Why it matters.** It only takes one time. One key printed to the screen, pasted into a chat, or written into a file that gets pushed, and it is exposed. Then you are rotating keys, checking what had access, and telling people. This guard is the seatbelt: you will not need keys in this course, but you will someday, and it should already be on."
 
 **One command, for the app the student is in:** run `node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --claude` in Claude, or `--codex` in Codex (Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs --claude` or `--codex`). It installs the guard for that app at the user level, verifies every file against a pinned hash first, and ends with "on-disk installation verified for" that app. It does not touch the other app's settings. If the student says they also use the other app, run it again with the other flag; never assume, since they may not have an account there and it is their choice. If it says a settings file is not valid JSON, stop and fix that file with the student; never delete it. If it says a file does not match its pinned hash, stop; that is not a student mistake, and the student should tell their program's channel.
 

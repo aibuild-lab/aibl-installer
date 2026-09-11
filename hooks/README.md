@@ -16,6 +16,10 @@ app must then be fully quit and reopened, and Codex trusted once (below), before
 actually running. The installer prompt passes the student's app and offers the other; a student
 who chose one app never gets the other app's files unless they ask.
 
+In one line for students: it only takes one time. One key printed to the screen, pasted into a chat,
+or written into a file that gets pushed, and it is exposed; then you are rotating keys, checking what
+had access, and telling people. The guard is the seatbelt, installed before anyone needs it.
+
 Why a hook and not a CLAUDE.md rule: a written rule only works if the model chooses to obey
 it every time. A `PreToolUse` hook inspects the literal command and refuses the dangerous
 class deterministically, whether or not the model "remembers." (Anthropic issue #32523.)
