@@ -1,9 +1,14 @@
 #!/bin/sh
 set -eu
-python3 -m unittest discover -s tests -p 'test_*.py'
-python3 -m py_compile scripts/course_setup.py
+# Windows ships a Store stub named python3 that only prints an install hint; fall back to python.
+PY=python3; python3 -c 'import sys' >/dev/null 2>&1 || PY=python
+"$PY" -m unittest discover -s tests -p 'test_*.py'
+"$PY" -m py_compile scripts/course_setup.py
 bash -n start.sh
+node hooks/manifest.test.mjs
 node hooks/secrets-guard.test.mjs
 node hooks/secrets-tripwire.test.mjs
 node hooks/install.test.mjs
+node hooks/codex-secrets-guard.test.mjs
+node hooks/refresh-guard.test.mjs
 git diff --check

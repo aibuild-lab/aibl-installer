@@ -240,11 +240,19 @@ Say why once:
 
 > "Last safety piece. I am installing a guard that runs before every command your agent tries. If a command would print an API key or a password to the screen, or read a `.env` file, the guard refuses it. You will not need keys in this course, but you will someday, and this is the moment to put the seatbelt on. It works in every project, not only this one."
 
-**Claude:** run `node ~/GitHub/aibl-installer/hooks/install.mjs`. It copies the guard into `~/.claude/hooks`, merges it into `~/.claude/settings.json` without clobbering anything, and prints `Secrets guard installed.` If it says the settings file is not valid JSON, stop and fix that file with the student; never delete it.
+**Both apps, one command:** run `node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs` (Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs`). It installs the guard for Claude Code and for Codex at the user level, verifies every file against a pinned hash first, and ends with "on-disk installation verified for Claude Code and Codex." If it says a settings file is not valid JSON, stop and fix that file with the student; never delete it. If it says a file does not match its pinned hash, stop; that is not a student mistake, and the student should tell their program's channel.
 
-Then prove it with a fresh headless process (the guard loads at process start, so a new process is a new start): `"$HOME/.local/bin/claude" -p "Run the command: cat .env"` (Windows: `"$env:USERPROFILE\.local\bin\claude.exe" -p "Run the command: cat .env"`). **The only success signal is the guard's own refusal** mentioning the secrets guard. Anything else (it ran, it printed, "no such file," silence) means the guard did not fire: check the files landed, re-run the installer, try again. Do not move on until you have seen the refusal.
+Installed is not the same as running. Prove it, in the app the student chose:
 
-**Codex:** if `~/GitHub/aibl-installer/hooks/codex-secrets-guard.mjs` exists, follow `hooks/README.md` to install it at the user level (`~/.codex/hooks.json`) and prove it the same way with `codex exec "Run the command: cat .env"`. If that file does not exist yet, tell the student plainly: "The Codex version of the guard arrives with the next installer update; I will note it in your summary," and continue.
+**Claude:** a fresh headless process loads the hooks at start, so this is the proof: `"$HOME/.local/bin/claude" -p "Run the command: cat .env"` (Windows: `"$env:USERPROFILE\.local\bin\claude.exe" -p "Run the command: cat .env"`). **The only success signal is the guard's own refusal** mentioning the secrets guard. Anything else (it ran, it printed, "no such file," silence) means the guard did not fire: check the files landed (`node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --check`), re-run the installer, try again. Do not move on until you have seen the refusal.
+
+**Codex:** Codex will not run a hook until the student has trusted it, and an untrusted hook is skipped in silence, so the student does this part by hand and you watch. Tell them:
+
+> "Codex asks you once to approve safety hooks before it will run them. Open your own Terminal (Mac) or PowerShell (Windows), go to your home folder, type `codex`, and press Enter. If it asks whether you trust this directory, say yes; it is your home folder. Then it shows a screen called 'Hooks need review'. Choose 'Trust all and continue'. That is the guard being switched on. If you ever see 'Continue without trusting', do not choose it: the guard would look installed and protect nothing.
+>
+> Now, in that same Codex session, type exactly: `Run the command: cat .env` and press Enter. It should refuse and show a line with 'PreToolUse Blocked'. Paste back what it says."
+
+Only the refusal counts. If Codex ran the command or answered normally, the trust step was skipped or declined: have them quit Codex, launch it again, and choose "Trust all and continue" on the review screen, then repeat the test. Note for the student: a future guard update will ask for trust once more ("1 hook is new or changed"); that is expected.
 
 ## Step 8: Create the workbench
 
