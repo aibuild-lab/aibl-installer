@@ -27,7 +27,7 @@ class PreviewTests(unittest.TestCase):
 
     def run_setup(self,services,root,bundle,lock,sha,rehearsal='ui-first',desktop=False,no_launch=True):
         with contextlib.redirect_stdout(io.StringIO()):
-            return setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+            return setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',
                 root/'state',services,no_launch,services.distribution,sha,str(bundle) if bundle is not None else None,str(lock),rehearsal,desktop)
 
     def test_desktop_handoff_never_calls_cli_and_preserves_unobserved_boundary_on_retry(self):
@@ -73,7 +73,7 @@ class PreviewTests(unittest.TestCase):
                 self.assertFalse(any(call[:2]==['gh','auth'] or '--global' in call for call in services.calls))
 
     def test_desktop_requires_preview_before_effects(self):
-        for course,bundle in [('agent-native-workforce',None)]:
+        for course,bundle in [('agent-workforce',None)]:
             with self.subTest(course=course),tempfile.TemporaryDirectory() as directory:
                 root=Path(directory).resolve();services,bundle_root,lock,sha=self.prepare(root)
                 with self.assertRaisesRegex(setup.SetupError,'explicit local candidate preview'):
@@ -82,7 +82,7 @@ class PreviewTests(unittest.TestCase):
                         preview_bundle=str(bundle_root) if bundle else None,distribution_lock=str(lock),desktop=True)
                 self.assertFalse(services.calls);self.assertFalse((root/'state').exists())
                 self.assertFalse((root/'projects').exists())
-        for argv in [['course_setup.py','--desktop'],['course_setup.py','--desktop','--course','agent-native-workforce']]:
+        for argv in [['course_setup.py','--desktop'],['course_setup.py','--desktop','--course','agent-workforce']]:
             with self.subTest(argv=argv),patch.object(setup.sys,'argv',argv),patch.object(setup,'command',side_effect=AssertionError('No command may run')),patch.object(setup,'setup',side_effect=AssertionError('No setup may run')),contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(setup.main(),1)
 
@@ -191,7 +191,7 @@ class PreviewTests(unittest.TestCase):
                     services.calls.append(args);raise setup.SetupError('Inactive saved account is invalid','authentication')
                 return services(args,**kwargs)
             with contextlib.redirect_stdout(io.StringIO()):
-                result=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                result=setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',
                     root/'state',selected,True,services.distribution,sha,str(bundle),str(lock),'ui-first')
             self.assertEqual(result['status'],'ready');self.assertEqual(result['actor'],'automated_test')
             self.assertFalse(any(call[:2]==['gh','auth'] for call in services.calls))
@@ -205,7 +205,7 @@ class PreviewTests(unittest.TestCase):
                     services.calls.append(args);raise setup.SetupError('Authentication required','authentication_missing')
                 return services(args,**kwargs)
             with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(setup.SetupError,'no account enrollment or login'):
-                setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',
                     root/'state',missing,True,services.distribution,sha,str(bundle),str(lock),'ui-first')
             self.assertFalse(any(call[:2]==['gh','auth'] or call[:3]==['gh','repo','create'] for call in services.calls))
             attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]
@@ -244,7 +244,7 @@ class PreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory).resolve();services,bundle,lock,sha=self.prepare(root)
             with contextlib.redirect_stdout(io.StringIO()):
-                result=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                result=setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',
                     root/'state',services,True,services.distribution,sha)
             project=Path(result['workspace']);record=project/'.aibl/distribution.json'
             original=record.read_bytes();statefile=root/'state/my-workbench.json'
@@ -263,7 +263,7 @@ class PreviewTests(unittest.TestCase):
                 pinned.record_candidate_transport(project,bundle,lock,services.distribution,sha)
             self.assertFalse((project/'.aibl-local/candidate-distribution.json').exists())
             with contextlib.redirect_stdout(io.StringIO()):
-                resumed=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',
+                resumed=setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',
                     root/'state',services,True,services.distribution,sha)
             self.assertEqual(resumed['status'],'ready');self.assertNotIn('delivery_mode',resumed)
             self.assertEqual(record.read_bytes(),original)

@@ -36,11 +36,37 @@ class Fake:
   return '{}'
 
 class SetupTests(unittest.TestCase):
- def run_setup(self,fake,root,course='agent-native-workforce'):
+ def run_setup(self,fake,root,course='agent-workforce'):
   with contextlib.redirect_stdout(io.StringIO()):return setup.setup(setup.choose(course),Path(root)/'local','my-workbench',Path(root)/'state',fake,True)
  def test_course_selection_minimal_dependencies(self):
-  for name in ['agent-essentials','agent-native-workforce']:self.assertEqual(setup.choose(name)['requirements'],['git','gh','python','claude'])
+  for name in ['agent-essentials','agent-workforce','the-lab']:self.assertEqual(setup.choose(name)['requirements'],['git','gh','python','claude'])
   with self.assertRaises(setup.SetupError):setup.choose('legacy-workshop')
+ def test_registry_ids_are_the_ledger_slugs_and_resolve(self):
+  reg=setup.registry();ids=[p['id'] for p in reg['programs']]
+  self.assertEqual(ids,['agent-essentials','agent-workforce','the-lab'])
+  self.assertEqual(reg['hub']['template'],'aibuild-lab/agent-essentials')
+  for p in reg['programs']:
+   r=setup.choose(p['id']);self.assertEqual(r['template'],'aibuild-lab/agent-essentials');self.assertTrue(r['access'])
+   for ref in (*p['requires'],*p['includes']):self.assertIn(ref,ids)
+  w=setup.choose('agent-workforce');self.assertEqual(w['access'],['aibuild-lab/agent-essentials','aibuild-lab/agent-native-workforce']);self.assertEqual([i['id'] for i in w['included']],['the-lab'])
+  l=setup.choose('the-lab');self.assertEqual(l['access'],['aibuild-lab/agent-essentials','aibuild-lab/the-lab']);self.assertEqual(l['included'],[])
+ def test_included_program_access_is_reported_not_required(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake()
+   def lab_pending(args,**kwargs):
+    if args[:2]==['gh','api'] and args[2]=='repos/aibuild-lab/the-lab':raise setup.SetupError('HTTP 404','not_found')
+    return f(args,**kwargs)
+   r=self.run_setup(lab_pending,d);self.assertEqual(r['status'],'ready');self.assertEqual(r['included_access'],{'the-lab':'not yet'});self.assertTrue(f.exists)
+  with tempfile.TemporaryDirectory() as d:
+   r2=self.run_setup(Fake(),d);self.assertEqual(r2['included_access'],{'the-lab':'found'})
+ def test_required_program_access_blocks_before_any_repository_is_created(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake()
+   def lab_missing(args,**kwargs):
+    if args[:2]==['gh','api'] and args[2]=='repos/aibuild-lab/the-lab':raise setup.SetupError('HTTP 404','not_found')
+    return f(args,**kwargs)
+   with self.assertRaisesRegex(setup.SetupError,'invitation'):self.run_setup(lab_missing,d,course='the-lab')
+   self.assertFalse(f.exists)
  def test_fresh_and_resume_do_not_duplicate_repository(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();self.assertEqual(self.run_setup(f,d)['status'],'ready');self.run_setup(f,d)

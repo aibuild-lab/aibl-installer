@@ -26,18 +26,26 @@ def command(args,cwd=None,interactive=False):
         raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
     return '' if interactive else result.stdout.strip()
 
-def options():return json.loads((ROOT/'course-options.json').read_text())['courses']
+def registry():return json.loads((ROOT/'course-options.json').read_text(encoding='utf-8'))
+def options():return registry()['programs']
+def resolve(program,reg):
+    # The registry names programs; setup needs repositories. Required access is strict, included access is reported.
+    by_id={p['id']:p for p in reg['programs']}
+    for ref in (*program['requires'],*program['includes']):
+        if ref not in by_id:raise SetupError(f'Program registry names an unknown program: {ref}. Ask the course team to review the installer.')
+    return {**program,'template':reg['hub']['template'],'access':[by_id[r]['publisher'] for r in program['requires']],'included':[{'id':r,'label':by_id[r]['label'],'publisher':by_id[r]['publisher']} for r in program['includes']]}
 def choose(course):
-    courses=options()
+    reg=registry();programs=reg['programs']
     if course:
-        for c in courses:
-            if c['id']==course:return c
-        raise SetupError('Unknown course. Use a listed course option.')
-    print('Which class are you joining?')
-    for i,c in enumerate(courses,1):print(f'{i}. {c["label"]}')
-    answer=input('Choose '+' or '.join(str(x) for x in range(1,len(courses)+1))+': ').strip()
-    if answer not in [str(x) for x in range(1,len(courses)+1)]:raise SetupError('Choose one listed course; rerun to select again.')
-    return courses[int(answer)-1]
+        for c in programs:
+            if c['id']==course:return resolve(c,reg)
+        raise SetupError('Unknown program. Use a listed program id.')
+    menu=[c for c in programs if c.get('menu')]
+    print('Which program are you joining?')
+    for i,c in enumerate(menu,1):print(f'{i}. {c["label"]}')
+    answer=input('Choose '+' or '.join(str(x) for x in range(1,len(menu)+1))+': ').strip()
+    if answer not in [str(x) for x in range(1,len(menu)+1)]:raise SetupError('Choose one listed program; rerun to select again.')
+    return resolve(menu[int(answer)-1],reg)
 
 def safe_workspace(path):
     path=Path(path).expanduser().absolute()
@@ -226,6 +234,14 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
                 if exc.reason!='not_found':raise
                 raise SetupError(f'Your GitHub account cannot read {upstream}. Accept the course invitation in GitHub, or ask the course team to check access for your signed-in account. Rerun this same launcher afterward.','missing_access')
             if not meta.get('private'):raise SetupError('Course destination privacy changed. Ask the course team to review before continuing.')
+        attempt['included_access']={}
+        for included in ([] if preview_bundle else course.get('included',[])):
+            # Bundled programs (a Workforce purchase includes the Lab) may be granted a little later than the purchase. Report, never block.
+            try:runner(['gh','api','repos/'+included['publisher']]);attempt['included_access'][included['id']]='found'
+            except SetupError as exc:
+                if exc.reason!='not_found':raise
+                attempt['included_access'][included['id']]='not yet';print(included['label'].split(' (')[0]+': not yet. Your invitation may still be on its way; it lands in your workbench later through the update path.')
+        write(statefile,state)
         if not preview_bundle:step('course_access_verified')
         enter('private_repository')
         folder=workspace/name
@@ -302,7 +318,7 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             auth=json.loads(runner(['claude','auth','status','--json']))
             if not auth.get('loggedIn'):raise SetupError('Claude sign-in is not complete. Finish browser consent and rerun.')
         step('claude_authenticated');attempt['result']='ready';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
-        result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':start_request}
+        result={'status':'ready','course':course['id'],'repository':full,'workspace':str(folder),'versions':versions,'manual_interventions':attempt['manual_interventions'],'elapsed_seconds':attempt['elapsed_seconds'],'first_useful_artifact':'pending Claude exercise; no timing promise','next':start_request,'included_access':attempt.get('included_access',{})}
         if preview_bundle:result['delivery_mode']='local_candidate'
         if rehearsal_id:result.update({'rehearsal_id':rehearsal_id,'actor':'automated_test','course_credit':False})
         print(json.dumps(result,indent=2))

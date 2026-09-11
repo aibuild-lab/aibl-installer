@@ -73,7 +73,7 @@ class LocalServices:
 class GitSetupIntegrationTests(unittest.TestCase):
     def setup_project(self,services,root):
         with contextlib.redirect_stdout(io.StringIO()):
-            return setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',root/'state',services,True)
+            return setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',root/'state',services,True)
 
     def test_real_git_clone_python_handoff_and_repeat(self):
         with tempfile.TemporaryDirectory() as td:
@@ -135,7 +135,7 @@ class SetupEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td).resolve();services=LocalServices(root);services.interrupt_clone=True
             with contextlib.redirect_stdout(io.StringIO()),self.assertRaises(setup.SetupError):
-                setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',root/'state',services,True)
+                setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',root/'state',services,True)
             attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]
             self.assertEqual(attempt['failed_stage'],'clone')
             self.assertEqual(attempt['last_proven_stage'],'private_repository')
@@ -149,7 +149,7 @@ class SetupEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td).resolve();services=LocalServices(root)
             with contextlib.redirect_stdout(io.StringIO()):
-                result=setup.setup(setup.choose('agent-native-workforce'),root/'projects','my-workbench',root/'state',services,True)
+                result=setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',root/'state',services,True)
             attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]
             self.assertEqual(attempt['provenance']['student_observed_tree'],services.git('rev-parse','HEAD^{tree}',cwd=result['workspace']))
             self.assertEqual(attempt['failed_stage'],None)

@@ -1,7 +1,74 @@
 {
-  "schema_version": "aibl.course-options/v1",
-  "courses": [
-    {"id":"agent-essentials","label":"Agent Essentials","template":"aibuild-lab/agent-essentials","access":["aibuild-lab/agent-essentials"],"requirements":["git","gh","python","claude"],"start_skill":"aibl-setup"},
-    {"id":"agent-native-workforce","label":"Agent Workforce (includes Essentials)","template":"aibuild-lab/agent-essentials","access":["aibuild-lab/agent-essentials","aibuild-lab/agent-native-workforce"],"requirements":["git","gh","python","claude"],"start_skill":"aibl-setup"}
+  "schema_version": "aibl.program-registry/v1",
+  "about": "One line per program. Ids are the site ledger's program slugs. The installer menu is generated from entries with menu=true. 'requires' is checked strictly before setup (a missing invitation stops with a plain message); 'includes' is checked softly and reported (a bundled program lands later through the workbench's update path when its invitation catches up). 'publisher' is the repository a student must be able to read; 'source_repository' is where the release is built and is informational here.",
+  "hub": {
+    "template": "aibuild-lab/agent-essentials",
+    "default_name": "my-workbench"
+  },
+  "programs": [
+    {
+      "id": "agent-essentials",
+      "label": "Agent Essentials",
+      "kind": "foundation",
+      "publisher": "aibuild-lab/agent-essentials",
+      "source_repository": "aibuild-lab/agent-native-workforce-internal",
+      "teams": "any students-* team",
+      "menu": true,
+      "requires": [
+        "agent-essentials"
+      ],
+      "includes": [],
+      "requirements": [
+        "git",
+        "gh",
+        "python",
+        "claude"
+      ],
+      "start_skill": "aibl-setup"
+    },
+    {
+      "id": "agent-workforce",
+      "label": "Agent Workforce (includes Essentials, and The Lab for three months)",
+      "kind": "course",
+      "publisher": "aibuild-lab/agent-native-workforce",
+      "source_repository": "aibuild-lab/agent-native-workforce-internal",
+      "teams": "students-agent-workforce-*",
+      "menu": true,
+      "requires": [
+        "agent-essentials",
+        "agent-workforce"
+      ],
+      "includes": [
+        "the-lab"
+      ],
+      "requirements": [
+        "git",
+        "gh",
+        "python",
+        "claude"
+      ],
+      "start_skill": "aibl-setup"
+    },
+    {
+      "id": "the-lab",
+      "label": "The Lab (includes Essentials)",
+      "kind": "membership",
+      "publisher": "aibuild-lab/the-lab",
+      "source_repository": null,
+      "teams": "students-the-lab-*",
+      "menu": true,
+      "requires": [
+        "agent-essentials",
+        "the-lab"
+      ],
+      "includes": [],
+      "requirements": [
+        "git",
+        "gh",
+        "python",
+        "claude"
+      ],
+      "start_skill": "aibl-setup"
+    }
   ]
 }

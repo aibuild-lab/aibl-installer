@@ -2,8 +2,9 @@
 
 [Start here: choose your program](START-HERE.md)
 
-One entry point for every AI Build Lab program. Choose **Essentials** or
-**Agent Workforce** (which includes Essentials). The launcher checks the tools
+One entry point for every AI Build Lab program. Choose **Agent Essentials**,
+**Agent Workforce** (which includes Essentials, and The Lab for three months),
+or **The Lab** (which includes Essentials). The launcher checks the tools
 for that choice, guides browser sign-in, and creates your own private workbench
 repository with independent history. Claude takes over after setup.
 

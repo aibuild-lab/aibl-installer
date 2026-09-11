@@ -16,7 +16,7 @@ def bundle_fixture():
     archive = stream.getvalue(); manifest_bytes = pinned.encoded(manifest)
     essentials = {'schema_version': 'aibl.release-pin/v3', 'product': 'agent-essentials', 'release_id': manifest['release_id'], 'source_revision': manifest['source_revision'], 'archive_sha256': pinned.digest(archive), 'manifest_sha256': pinned.digest(manifest_bytes)}
     workforce = {**essentials, 'product': 'agent-native-workforce', 'release_id': 'agent-native-workforce-v0.0.0-synthetic'}
-    distribution = {'schema_version': 'aibl.course-distribution/v1', 'course_id': 'agent-native-workforce', 'installer': {'repository': 'aibuild-lab/aibl-installer', 'commit': 'b' * 40, 'files': {name: 'c' * 64 for name in pinned.INSTALLER_FILES}}, 'source_release_pins': {'agent-essentials': essentials, 'agent-native-workforce': workforce}}
+    distribution = {'schema_version': 'aibl.course-distribution/v1', 'course_id': 'agent-workforce', 'installer': {'repository': 'aibuild-lab/aibl-installer', 'commit': 'b' * 40, 'files': {name: 'c' * 64 for name in pinned.INSTALLER_FILES}}, 'source_release_pins': {'agent-essentials': essentials, 'agent-native-workforce': workforce}}
     return manifest_bytes, archive, distribution
 
 class PinnedServices(LocalServices):
@@ -47,7 +47,7 @@ class PinnedServices(LocalServices):
 class PinnedSetupTests(unittest.TestCase):
     def run_setup(self, services, root, sha='d' * 64):
         with contextlib.redirect_stdout(io.StringIO()):
-            return setup.setup(setup.choose('agent-native-workforce'), root / 'projects', 'my-workbench', root / 'state', services, True, services.distribution, sha)
+            return setup.setup(setup.choose('agent-workforce'), root / 'projects', 'my-workbench', root / 'state', services, True, services.distribution, sha)
 
     def test_exact_release_seeds_independent_private_history_and_preserves_rerun_work(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -100,7 +100,7 @@ class PinnedSetupTests(unittest.TestCase):
             project = Path(self.run_setup(services, root)['workspace']); calls = len(services.calls)
             (project / 'context/project.md').write_text('Preserve my decision')
             with self.assertRaisesRegex(setup.SetupError, 'reviewed pinned launcher'):
-                setup.setup(setup.choose('agent-native-workforce'), root / 'projects', 'my-workbench', root / 'state', services, True)
+                setup.setup(setup.choose('agent-workforce'), root / 'projects', 'my-workbench', root / 'state', services, True)
             self.assertEqual(len(services.calls), calls)
             self.assertEqual((project / 'context/project.md').read_text(), 'Preserve my decision')
 

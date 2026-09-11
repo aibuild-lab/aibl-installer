@@ -1,8 +1,9 @@
 # Start your AI Build Lab course
 
-**One installer, only the requirements for your class.** Choose Essentials or
-Agent Workforce (which includes Essentials). Your workbench is a private
-repository on your own GitHub account.
+**One installer, only the requirements for your program.** Choose Agent
+Essentials, Agent Workforce (which includes Essentials, and The Lab for three
+months), or The Lab (which includes Essentials). Your workbench is one private
+repository on your own GitHub account; every program you join lands in it.
 
 Have a GitHub account, accepted course invitations and supported Claude Code
 access ready. You sign into accounts in the browser. Do not paste tokens in chat.
@@ -11,7 +12,7 @@ Claude in that folder. Claude guides the first useful artifact and Git checkpoin
 
 ## Mac
 
-Open Terminal, paste this launch command and follow the course choice:
+Open Terminal, paste this launch command and choose your program when asked:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/start.sh -o /tmp/aibl-start.sh
@@ -25,7 +26,7 @@ in place. No course Node or Infisical setup is required for Essentials/Workforce
 
 ## Native Windows
 
-Open PowerShell, paste this launch command and follow the course choice:
+Open PowerShell, paste this launch command and choose your program when asked:
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/start.ps1 -OutFile "$env:TEMP\aibl-start.ps1"
@@ -44,6 +45,8 @@ is not visible, then rerun this same entry point.
 
 - Missing invitation: accept the GitHub invitation for the signed-in account.
   If it is absent, ask the course team to check access, then rerun.
+- A bundled program (The Lab with Agent Workforce) reported as "not yet": setup
+  continues. It lands in your workbench later, once its invitation arrives.
 - Expired authentication: finish the named browser sign-in and rerun.
 - Existing folder or repository name: use another name or ask Claude to review
   the existing project. Setup does not delete or replace it.

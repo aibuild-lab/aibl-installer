@@ -16,7 +16,7 @@ python3 scripts/pin-course-distribution.py --essentials-pin "$ESSENTIALS_PIN" --
 
 The output directory must be outside this checkout. Existing output is never
 replaced. The candidate has `aibl.course-distribution/v1`, course ID
-`agent-native-workforce`, the exact installer repository/commit and five source
+`agent-workforce` (the registry program id), the exact installer repository/commit and five source
 file hashes, and both exact `aibl.release-pin/v3` objects. Both product pins
 must name the same accepted internal source commit. The release handoff
 independently reviews and distributes the lock's SHA-256 and each launcher
@@ -37,14 +37,14 @@ the launcher/lock hash check before installing missing prerequisites.
 On macOS, after substituting the reviewed values:
 
 ```sh
-bash ./start.sh agent-native-workforce ./course-distribution.json "$LOCK_SHA256" "$INSTALLER_COMMIT" "$START_SH_SHA256"
+bash ./start.sh agent-workforce ./course-distribution.json "$LOCK_SHA256" "$INSTALLER_COMMIT" "$START_SH_SHA256"
 ```
 
 On native Windows PowerShell, after verifying the downloaded script's hash and
 using the device's approved execution policy:
 
 ```powershell
-./start.ps1 -Course agent-native-workforce -DistributionLock ./course-distribution.json -DistributionSHA256 $LockSHA256 -InstallerCommit $InstallerCommit -LauncherSHA256 $StartPS1SHA256
+./start.ps1 -Course agent-workforce -DistributionLock ./course-distribution.json -DistributionSHA256 $LockSHA256 -InstallerCommit $InstallerCommit -LauncherSHA256 $StartPS1SHA256
 ```
 
 No command disables or bypasses execution policy. An effective Restricted or

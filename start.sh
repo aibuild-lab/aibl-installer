@@ -8,18 +8,11 @@ DISTRIBUTION_SHA256="${3:-}"
 INSTALLER_COMMIT="${4:-}"
 LAUNCHER_SHA256="${5:-}"
 if [[ -n "$DISTRIBUTION_LOCK$DISTRIBUTION_SHA256$INSTALLER_COMMIT$LAUNCHER_SHA256" ]]; then
-  if [[ "$COURSE" != agent-native-workforce || ! -f "$DISTRIBUTION_LOCK" || ! "$DISTRIBUTION_SHA256" =~ ^[a-f0-9]{64}$ || ! "$INSTALLER_COMMIT" =~ ^[a-f0-9]{40}$ || ! "$LAUNCHER_SHA256" =~ ^[a-f0-9]{64}$ ]]; then echo 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.'; exit 1; fi
+  if [[ "$COURSE" != agent-workforce || ! -f "$DISTRIBUTION_LOCK" || ! "$DISTRIBUTION_SHA256" =~ ^[a-f0-9]{64}$ || ! "$INSTALLER_COMMIT" =~ ^[a-f0-9]{40}$ || ! "$LAUNCHER_SHA256" =~ ^[a-f0-9]{64}$ ]]; then echo 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.'; exit 1; fi
   if [[ "$(shasum -a 256 "$AIBL_BOOTSTRAP_PATH" | cut -d' ' -f1)" != "$LAUNCHER_SHA256" || "$(shasum -a 256 "$DISTRIBUTION_LOCK" | cut -d' ' -f1)" != "$DISTRIBUTION_SHA256" ]]; then echo 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.'; exit 1; fi
   DISTRIBUTION_LOCK="$(cd "$(dirname "$DISTRIBUTION_LOCK")" && pwd)/$(basename "$DISTRIBUTION_LOCK")"
 fi
-if [[ -z "$COURSE" ]]; then
-  echo 'Which class are you joining?'
-  echo '1. Agent Essentials'
-  echo '2. Agent Workforce (includes Essentials)'
-  read -r -p 'Choose 1 or 2: ' choice
-  case "$choice" in 1) COURSE=agent-essentials;; 2) COURSE=agent-native-workforce;; *) echo 'Rerun and choose a listed course.'; exit 1;; esac
-fi
-case "$COURSE" in agent-essentials|agent-native-workforce) ;; *) echo 'Unknown course.'; exit 1;; esac
+# The program menu lives in course-options.json and is asked by scripts/course_setup.py once the tools are ready.
 if [[ "$(uname -s)" != Darwin ]]; then echo 'Use start.ps1 on native Windows. This entry supports macOS.'; exit 1; fi
 if [[ "$(sw_vers -productVersion | cut -d. -f1)" -lt 13 ]]; then echo 'macOS 13 or later is required.'; exit 1; fi
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -53,4 +46,5 @@ elif [[ ! -f "$INSTALLER_DIR/course-options.json" ]]; then
   git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git "$INSTALLER_DIR"
 fi
 if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
-exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE"
+if [[ -n "$COURSE" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE"; fi
+exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py"

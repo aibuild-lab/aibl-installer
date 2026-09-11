@@ -27,7 +27,8 @@ def validate_pin(pin, product):
 
 def validate_lock(value):
     exact(value, ('schema_version', 'course_id', 'installer', 'source_release_pins'), 'Distribution lock')
-    require(value['schema_version'] == 'aibl.course-distribution/v1' and value['course_id'] == 'agent-native-workforce', 'Unsupported pinned course.')
+    # course_id is the registry program id; the source_release_pins keys below stay the release tool's product ids.
+    require(value['schema_version'] == 'aibl.course-distribution/v1' and value['course_id'] == 'agent-workforce', 'Unsupported pinned course.')
     exact(value['installer'], ('repository', 'commit', 'files'), 'Installer pin')
     require(value['installer']['repository'] == 'aibuild-lab/aibl-installer' and re.fullmatch('[a-f0-9]{40}', value['installer']['commit'] or ''), 'Wrong installer identity.')
     exact(value['installer']['files'], INSTALLER_FILES, 'Installer file inventory')

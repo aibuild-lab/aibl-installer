@@ -1,7 +1,9 @@
 # Shared course installer contract
 
-One public entry selects the course; each course names only its required tools
-and private payload repositories in course-options.json. The earlier Agent Native
+One public entry selects the program from the registry in course-options.json,
+which lists every program with the site ledger's ids, its publisher repository,
+what it requires (checked strictly) and what it includes (checked softly and
+reported). Adding a program is one line there. The earlier Agent Native
 OS workshop is served by aibuild-lab/workshop-installer, which is frozen; nothing
 from that route is installed here.
 

@@ -2,22 +2,12 @@ param([string]$Course = "", [string]$DistributionLock = "", [string]$Distributio
 $ErrorActionPreference = 'Stop'
 $env:AIBL_BOOTSTRAP_PATH = $PSCommandPath
 if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $LauncherSHA256) {
-  if ($Course -ne 'agent-native-workforce' -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
+  if ($Course -ne 'agent-workforce' -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
   if ((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $LauncherSHA256 -or (Get-FileHash -LiteralPath $DistributionLock -Algorithm SHA256).Hash.ToLowerInvariant() -ne $DistributionSHA256) { throw 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.' }
   $DistributionLock = (Resolve-Path -LiteralPath $DistributionLock).Path
 }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
-if (-not $Course) {
-  Write-Host 'Which class are you joining?'
-  Write-Host '1. Agent Essentials'
-  Write-Host '2. Agent Workforce (includes Essentials)'
-  switch (Read-Host 'Choose 1 or 2') {
-    '1' { $Course = 'agent-essentials' }
-    '2' { $Course = 'agent-native-workforce' }
-    default { throw 'Rerun and choose a listed course.' }
-  }
-}
-if ($Course -notin @('agent-essentials','agent-native-workforce')) { throw 'Unknown course.' }
+# The program menu lives in course-options.json and is asked by scripts\course_setup.py once the tools are ready.
 function Refresh-ProcessPath {
   $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
 }
@@ -83,5 +73,6 @@ if ($InstallerCommit) {
   & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE
 }
-& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course
+if ($Course) { & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course; exit $LASTEXITCODE }
+& $Python (Join-Path $InstallerDir 'scripts\course_setup.py')
 exit $LASTEXITCODE
