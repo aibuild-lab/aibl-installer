@@ -407,6 +407,7 @@ check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
 // --- a student's own global instruction files are never touched ---
 {
   const mine = path.join(root, "mine");
+  writeManifest("good", STUB); // the unpinned case above deliberately left a manifest with no ref
   fs.mkdirSync(path.join(mine, ".claude"), { recursive: true });
   fs.mkdirSync(path.join(mine, ".codex"), { recursive: true });
   const claudeMd = ["# My global rules", "Always answer in French.", ""].join("\n");
@@ -419,6 +420,7 @@ check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
     env: { ...process.env, HOME: mine, USERPROFILE: mine, GUARD_SOURCE_DIR: src }, encoding: "utf8",
   });
   check("install succeeds beside a student's own global files", r.status === 0);
+  if (r.status !== 0) console.error(`[global-files case] exit ${r.status}\n${r.stderr}\n${r.stdout.slice(-400)}`);
   check("student's global ~/.claude/CLAUDE.md is byte-identical after install", fs.readFileSync(path.join(mine, ".claude", "CLAUDE.md"), "utf8") === claudeMd);
   check("student's global ~/.codex/AGENTS.md is byte-identical after install", fs.readFileSync(path.join(mine, ".codex", "AGENTS.md"), "utf8") === agentsMd);
   const merged = JSON.parse(fs.readFileSync(path.join(mine, ".claude", "settings.json"), "utf8"));

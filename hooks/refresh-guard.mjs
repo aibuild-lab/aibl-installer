@@ -732,8 +732,8 @@ function loadManifest() {
   if (!manifest.ref || manifest.ref === "REPLACE_AT_RELEASE") {
     fail([
       "The secrets guard is not pinned to a released version yet (manifest `ref` is unset).",
-      "This build must not auto-update the guard from a mutable branch. Ask a TA / Gigawatt to",
-      "publish the pinned release and update configs/secrets-guard.manifest.json.",
+      "This build must not install an unreviewed guard. Ask your program's channel to",
+      "publish the reviewed hooks/secrets-guard.manifest.json.",
     ].join("\n"));
   }
   if (!manifest.files || typeof manifest.files !== "object") {
