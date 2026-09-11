@@ -49,6 +49,7 @@ class SetupTests(unittest.TestCase):
   reg=setup.registry();ids=[p['id'] for p in reg['programs']]
   self.assertEqual(ids,['agent-essentials','agent-workforce','the-lab'])
   self.assertEqual(reg['hub']['template'],'aibuild-lab/agent-essentials')
+  self.assertEqual({p['id']:p['release_product'] for p in reg['programs']},{'agent-essentials':'agent-essentials','agent-workforce':'agent-native-workforce','the-lab':'the-lab'})
   for p in reg['programs']:
    r=setup.choose(p['id']);self.assertEqual(r['template'],'aibuild-lab/agent-essentials');self.assertTrue(r['access'])
    for ref in (*p['requires'],*p['includes']):self.assertIn(ref,ids)

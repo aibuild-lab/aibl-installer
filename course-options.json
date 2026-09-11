@@ -1,6 +1,6 @@
 {
   "schema_version": "aibl.program-registry/v1",
-  "about": "One line per program. Ids are the site ledger's program slugs. The installer menu is generated from entries with menu=true. 'requires' is checked strictly before setup (a missing invitation stops with a plain message); 'includes' is checked softly and reported (a bundled program lands later through the workbench's update path when its invitation catches up). 'publisher' is the repository a student must be able to read; 'source_repository' is where the release is built and is informational here.",
+  "about": "One line per program. Ids are the site ledger's program slugs. The installer menu is generated from entries with menu=true. 'requires' is checked strictly before setup (a missing invitation stops with a plain message); 'includes' is checked softly and reported (a bundled program lands later through the workbench's update path when its invitation catches up). 'publisher' is the repository a student must be able to read; 'source_repository' is where the release is built and is informational here. 'release_product' is the id the workbench's adoption tool and the publisher's release pins use; where it differs from 'id', the registry is the only place that knows both, so nothing in the release tooling has to rename.",
   "hub": {
     "template": "aibuild-lab/agent-essentials",
     "default_name": "my-workbench"
@@ -11,6 +11,7 @@
       "label": "Agent Essentials",
       "kind": "foundation",
       "publisher": "aibuild-lab/agent-essentials",
+      "release_product": "agent-essentials",
       "source_repository": "aibuild-lab/agent-native-workforce-internal",
       "teams": "any students-* team",
       "menu": true,
@@ -31,6 +32,7 @@
       "label": "Agent Workforce (includes Essentials, and The Lab for three months)",
       "kind": "course",
       "publisher": "aibuild-lab/agent-native-workforce",
+      "release_product": "agent-native-workforce",
       "source_repository": "aibuild-lab/agent-native-workforce-internal",
       "teams": "students-agent-workforce-*",
       "menu": true,
@@ -54,6 +56,7 @@
       "label": "The Lab (includes Essentials)",
       "kind": "membership",
       "publisher": "aibuild-lab/the-lab",
+      "release_product": "the-lab",
       "source_repository": null,
       "teams": "students-the-lab-*",
       "menu": true,
