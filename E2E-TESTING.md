@@ -26,7 +26,8 @@ It labels the simulated account/network boundaries and never supplies human appr
 
 Use a fresh macOS 13+ account and a native Windows 10/11 account with approved
 device permissions. Use student-level private course access, not an organization
-administrator's access. Open START-HERE, select Workforce, and record:
+administrator's access. Run START-HERE twice, once in the Claude app and once
+in the Codex app, selecting Agent Workforce, and record:
 
 1. Every manual action, OS prompt, failure and recovery, beginning before Python
    is available. Capture actual tool versions, account-access state and time.

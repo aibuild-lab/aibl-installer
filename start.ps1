@@ -1,4 +1,4 @@
-param([string]$Course = "", [string]$DistributionLock = "", [string]$DistributionSHA256 = "", [string]$InstallerCommit = "", [string]$LauncherSHA256 = "")
+param([string]$Course = "", [string]$DistributionLock = "", [string]$DistributionSHA256 = "", [string]$InstallerCommit = "", [string]$LauncherSHA256 = "", [ValidateSet('claude','codex')][string]$Harness = 'claude')
 $ErrorActionPreference = 'Stop'
 $env:AIBL_BOOTSTRAP_PATH = $PSCommandPath
 if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $LauncherSHA256) {
@@ -35,6 +35,7 @@ function Install-Missing([string]$Command, [string]$Package) {
 Refresh-ProcessPath
 Install-Missing 'git' 'Git.Git'
 Install-Missing 'gh' 'GitHub.cli'
+Install-Missing 'node' 'OpenJS.NodeJS.LTS'
 $Python = Find-CompatiblePython
 if (-not $Python) {
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Install Microsoft App Installer, then rerun.' }
@@ -44,10 +45,17 @@ if (-not $Python) {
   $Python = Find-CompatiblePython
   if (-not $Python) { throw 'Open a fresh PowerShell window and rerun so the installed Python is visible.' }
 }
-if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+if ($Harness -eq 'claude' -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
   $ClaudeInstaller = Join-Path ([IO.Path]::GetTempPath()) 'aibl-claude-install.ps1'
   Invoke-WebRequest 'https://claude.ai/install.ps1' -OutFile $ClaudeInstaller
   & $ClaudeInstaller
+  Refresh-ProcessPath
+}
+if ($Harness -eq 'codex' -and -not (Get-Command codex -ErrorAction SilentlyContinue)) {
+  $CodexInstaller = Join-Path ([IO.Path]::GetTempPath()) 'aibl-codex-install.ps1'
+  Invoke-WebRequest 'https://chatgpt.com/codex/install.ps1' -OutFile $CodexInstaller
+  & $CodexInstaller
+  $env:Path = $env:Path + ';' + (Join-Path $HOME '.codex\bin')
   Refresh-ProcessPath
 }
 $InstallerDir = $PSScriptRoot
@@ -70,9 +78,9 @@ if ($InstallerCommit) {
   if ($LASTEXITCODE -ne 0) { throw 'Download failed. Rerun when GitHub is reachable.' }
 }
 if ($InstallerCommit) {
-  & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
+  & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE
 }
-if ($Course) { & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course; exit $LASTEXITCODE }
-& $Python (Join-Path $InstallerDir 'scripts\course_setup.py')
+if ($Course) { & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness; exit $LASTEXITCODE }
+& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --harness $Harness
 exit $LASTEXITCODE

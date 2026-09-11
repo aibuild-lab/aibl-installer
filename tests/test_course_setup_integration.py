@@ -40,6 +40,9 @@ class LocalServices:
             return p.stdout.strip()
         if args[:2]==['gh','--version']:return 'gh version 2.70.0'
         if args[:2]==['claude','--version']:return '2.1.228 (synthetic account boundary)'
+        if args[:2]==['node','--version']:return 'v22.12.0 (synthetic)'
+        if args[:2]==['codex','--version']:return 'codex-cli 0.147.0 (synthetic)'
+        if args[:3]==['codex','login','status']:return 'Logged in using ChatGPT'
         if args[:3]==['gh','auth','status']:return ''
         if args==['gh','api','user']:return json.dumps({'login':'synthetic-student','name':'Synthetic Student','id':123})
         if args[:2]==['gh','api']:

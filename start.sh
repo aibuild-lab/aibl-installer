@@ -3,6 +3,8 @@
 set -euo pipefail
 export AIBL_BOOTSTRAP_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 COURSE="${1:-}"
+HARNESS="${AIBL_HARNESS:-claude}"
+case "$HARNESS" in claude|codex) ;; *) echo 'AIBL_HARNESS must be claude or codex.'; exit 1;; esac
 DISTRIBUTION_LOCK="${2:-}"
 DISTRIBUTION_SHA256="${3:-}"
 INSTALLER_COMMIT="${4:-}"
@@ -16,7 +18,7 @@ fi
 if [[ "$(uname -s)" != Darwin ]]; then echo 'Use start.ps1 on native Windows. This entry supports macOS.'; exit 1; fi
 if [[ "$(sw_vers -productVersion | cut -d. -f1)" -lt 13 ]]; then echo 'macOS 13 or later is required.'; exit 1; fi
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-if ! git --version >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1 || ! python3 -c 'import sys; sys.exit(sys.version_info < (3,11))' >/dev/null 2>&1; then
+if ! git --version >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1 || ! python3 -c 'import sys; sys.exit(sys.version_info < (3,11))' >/dev/null 2>&1; then
  if ! command -v brew >/dev/null 2>&1; then
   echo 'Homebrew installs missing prerequisites. Its official installer may ask for macOS consent.'
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -24,14 +26,20 @@ if ! git --version >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1 || ! pytho
 fi
 if ! git --version >/dev/null 2>&1; then brew install git; fi
 if ! command -v gh >/dev/null 2>&1; then brew install gh; fi
+if ! command -v node >/dev/null 2>&1; then brew install node; fi
 PYTHON=python3
 if ! python3 -c 'import sys; sys.exit(sys.version_info < (3,11))' >/dev/null 2>&1; then
  brew install python@3.13
  PYTHON="$(brew --prefix python@3.13)/bin/python3.13"
 fi
-if ! command -v claude >/dev/null 2>&1; then
+if [[ "$HARNESS" == claude ]] && ! command -v claude >/dev/null 2>&1; then
   curl -fsSL https://claude.ai/install.sh -o "${TMPDIR:-/tmp}/aibl-claude-install.sh"
   bash "${TMPDIR:-/tmp}/aibl-claude-install.sh"
+fi
+if [[ "$HARNESS" == codex ]] && ! command -v codex >/dev/null 2>&1; then
+  curl -fsSL https://chatgpt.com/codex/install.sh -o "${TMPDIR:-/tmp}/aibl-codex-install.sh"
+  sh "${TMPDIR:-/tmp}/aibl-codex-install.sh"
+  export PATH="$HOME/.codex/bin:$PATH"
 fi
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -n "$INSTALLER_COMMIT" ]]; then
@@ -45,6 +53,6 @@ elif [[ ! -f "$INSTALLER_DIR/course-options.json" ]]; then
   INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aibl-course-installer.XXXXXX")"
   git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git "$INSTALLER_DIR"
 fi
-if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
-if [[ -n "$COURSE" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE"; fi
-exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py"
+if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
+if [[ -n "$COURSE" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS"; fi
+exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --harness "$HARNESS"

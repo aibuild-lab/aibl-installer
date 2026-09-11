@@ -22,8 +22,10 @@ must name the same accepted internal source commit. The release handoff
 independently reviews and distributes the lock's SHA-256 and each launcher
 SHA-256. Taking a pin from the archive being downloaded is not verification.
 
-The five pinned files are `start.sh`, `start.ps1`, `course-options.json`,
-`scripts/course_setup.py` and `scripts/pinned_distribution.py`. The lock
+The six pinned files are `start.sh`, `start.ps1`, `course-options.json`,
+`scripts/course_setup.py`, `scripts/pinned_distribution.py` and
+`SETUP-PROMPT.md` (the guided app-first entry, so a cohort's instructions are
+byte-identical too). The lock
 generator is an operator tool; its output is independently reviewed and not
 executed by the student launcher.
 

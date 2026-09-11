@@ -4,12 +4,15 @@
 
 One entry point for every AI Build Lab program. Choose **Agent Essentials**,
 **Agent Workforce** (which includes Essentials, and The Lab for three months),
-or **The Lab** (which includes Essentials). The launcher checks the tools
-for that choice, guides browser sign-in, and creates your own private workbench
-repository with independent history. Claude takes over after setup.
+or **The Lab** (which includes Essentials). You open the app you chose on your
+home folder and paste one prompt; the app checks your machine, installs only
+what is missing, guides the two browser sign-ins, and creates your own private
+workbench repository with independent history, then you open it in the app.
 
-Git, GitHub CLI, Python, and native Claude Code are the required tools. Your
-sign-ins, visible device permissions, project choices, and judgment remain yours.
+You work in the app you chose, Claude or Codex; the installer sets up its
+command-line twin alongside. Git, GitHub CLI, Python and Node are the shared
+tools. Your sign-ins, visible device permissions, project choices, and judgment
+remain yours.
 
 - Setup recovery and verification limits: [START-HERE.md](START-HERE.md)
 - What this repository promises each program: [COURSE-INSTALLER-CONTRACT.md](COURSE-INSTALLER-CONTRACT.md)

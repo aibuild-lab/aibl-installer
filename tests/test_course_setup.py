@@ -5,10 +5,10 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import course_setup as setup
 
 class Fake:
- def __init__(self):self.calls=[];self.exists=False;self.github=True;self.inactive_status_invalid=False;self.claude=True;self.access=True;self.private=True;self.template='aibuild-lab/agent-essentials'
+ def __init__(self):self.calls=[];self.exists=False;self.github=True;self.inactive_status_invalid=False;self.claude=True;self.codex=True;self.access=True;self.private=True;self.template='aibuild-lab/agent-essentials'
  def __call__(self,args,cwd=None,interactive=False):
   self.calls.append(args)
-  if args[-1]=='--version':return {'git':'git version 2.49.0','gh':'gh version 2.70.0','claude':'2.1.228'}.get(args[0],'Python 3.13.0')
+  if args[-1]=='--version':return {'git':'git version 2.49.0','gh':'gh version 2.70.0','claude':'2.1.228','node':'v22.12.0','codex':'codex-cli 0.147.0'}.get(args[0],'Python 3.13.0')
   if args[:3]==['gh','auth','status']:
    if not self.github or self.inactive_status_invalid:raise setup.SetupError('Saved account status failed','authentication')
    return ''
@@ -33,13 +33,17 @@ class Fake:
    return ''
   if args[:3]==['claude','auth','status']:return json.dumps({'loggedIn':self.claude})
   if args[:3]==['claude','auth','login']:self.claude=True;return ''
+  if args[:3]==['codex','login','status']:
+   if not self.codex:raise setup.SetupError('Not logged in','authentication')
+   return 'Logged in using ChatGPT'
+  if args[:2]==['codex','login']:self.codex=True;return ''
   return '{}'
 
 class SetupTests(unittest.TestCase):
- def run_setup(self,fake,root,course='agent-workforce'):
-  with contextlib.redirect_stdout(io.StringIO()):return setup.setup(setup.choose(course),Path(root)/'local','my-workbench',Path(root)/'state',fake,True)
+ def run_setup(self,fake,root,course='agent-workforce',harness='claude'):
+  with contextlib.redirect_stdout(io.StringIO()):return setup.setup(setup.choose(course),Path(root)/'local','my-workbench',Path(root)/'state',fake,True,harness=harness)
  def test_course_selection_minimal_dependencies(self):
-  for name in ['agent-essentials','agent-workforce','the-lab']:self.assertEqual(setup.choose(name)['requirements'],['git','gh','python','claude'])
+  for name in ['agent-essentials','agent-workforce','the-lab']:self.assertEqual(setup.choose(name)['requirements'],['git','gh','python','node'])
   with self.assertRaises(setup.SetupError):setup.choose('legacy-workshop')
  def test_registry_ids_are_the_ledger_slugs_and_resolve(self):
   reg=setup.registry();ids=[p['id'] for p in reg['programs']]
@@ -59,6 +63,32 @@ class SetupTests(unittest.TestCase):
    r=self.run_setup(lab_pending,d);self.assertEqual(r['status'],'ready');self.assertEqual(r['included_access'],{'the-lab':'not yet'});self.assertTrue(f.exists)
   with tempfile.TemporaryDirectory() as d:
    r2=self.run_setup(Fake(),d);self.assertEqual(r2['included_access'],{'the-lab':'found'})
+ def test_codex_harness_signs_in_with_its_own_cli_and_never_receives_slash_text(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();f.codex=False
+   r=self.run_setup(f,d,harness='codex');self.assertEqual(r['status'],'ready');self.assertEqual(r['harness'],'codex')
+   self.assertIn(['codex','login'],f.calls);self.assertIn(['codex','--version'],f.calls);self.assertNotIn(['claude','--version'],f.calls);self.assertFalse(any(c[:2]==['claude','auth'] for c in f.calls))
+   state=json.loads((Path(d)/'state'/'my-workbench.json').read_text());self.assertEqual(state['client'],'codex_cli');self.assertEqual(state['attempts'][0]['harness'],'codex')
+   onboarding=json.loads((Path(d)/'local'/'my-workbench'/'.aibl-local'/'onboarding.json').read_text());self.assertEqual(onboarding['harness'],'codex')
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();launched=[]
+   def capture(args,**kwargs):
+    if args[0] in ('claude','codex') and len(args)==2 and 'Essentials' in args[1]:launched.append(args);return ''
+    return f(args,**kwargs)
+   with contextlib.redirect_stdout(io.StringIO()):setup.setup(setup.choose('agent-essentials'),Path(d)/'local','my-workbench',Path(d)/'state',capture,False,harness='codex')
+   self.assertEqual(len(launched),1);self.assertEqual(launched[0][0],'codex');self.assertNotIn('Use /aibl',launched[0][1]);self.assertNotRegex(launched[0][1],r'(^|\s)/aibl-');self.assertIn('.claude/skills/aibl-setup/SKILL.md',launched[0][1])
+ def test_switching_apps_on_an_existing_project_needs_a_fresh_name(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();self.run_setup(f,d,harness='claude')
+   with self.assertRaisesRegex(setup.SetupError,'fresh project name'):self.run_setup(f,d,harness='codex')
+ def test_node_is_part_of_the_floor(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake()
+   def old_node(args,**kwargs):
+    if args==['node','--version']:return 'v16.20.0'
+    return f(args,**kwargs)
+   with self.assertRaisesRegex(setup.SetupError,'node is older'):self.run_setup(old_node,d)
+   self.assertFalse(f.exists)
  def test_required_program_access_blocks_before_any_repository_is_created(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake()

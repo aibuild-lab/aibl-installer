@@ -7,14 +7,16 @@ reported). Adding a program is one line there. The earlier Agent Native
 OS workshop is served by aibuild-lab/workshop-installer, which is frozen; nothing
 from that route is installed here.
 
-The Essentials and Workforce routes use Git, GitHub CLI, Python and native Claude
-Code. Only the template creates a new independent Git history; Workforce is
+Every program route uses Git, GitHub CLI, Python, Node, and the command-line
+twin of the app the student chose (Claude Code or Codex). The desktop app is
+what the student works in; SETUP-PROMPT.md is the guided, app-first entry and
+the shell launchers are the terminal fallback. Only the template creates a new independent Git history; Workforce is
 adopted as verified files later. Account consent remains in browser flows.
 No tokens, student data or private course payloads belong in this repository.
 
 Current tested local baseline: macOS, Python 3.13.12, Claude Code 2.1.228.
 Compatibility floors checked in Python: Git 2.28, GitHub CLI 2, Python 3.11,
-Claude Code 2.1. These are code floors, not certification of every intermediate
+Node 18, Claude Code 2.1 or Codex CLI 0.140. These are code floors, not certification of every intermediate
 version. Native Windows and first-time student setup require separate observed
 walkthroughs. No setup-time claim is accepted.
 
