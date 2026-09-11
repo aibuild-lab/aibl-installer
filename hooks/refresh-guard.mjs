@@ -57,6 +57,11 @@ const REQUIRED_DENY = [
   "Read(**/.env.*)", "Read(**/secrets/**)",
 ];
 const args = new Set(process.argv.slice(2));
+// Which app to protect. A student who chose one app should not have the other app's
+// configuration written for them; the installer prompt passes the chosen flag and offers the
+// other. With neither flag, both (the original Camp behavior, where everyone had both).
+const APPS = { claude: args.has("--claude") || !args.has("--codex"), codex: args.has("--codex") || !args.has("--claude") };
+const appsLabel = APPS.claude && APPS.codex ? "Claude Code and Codex" : APPS.claude ? "Claude Code" : "Codex";
 
 main().catch((error) => fail(error.message || String(error)));
 
@@ -66,7 +71,7 @@ async function main() {
   if (args.has("--check") && args.has("--session-check")) {
     fail("Use either --check or --session-check, not both.");
   }
-  const unknown = [...args].filter((arg) => !["--check", "--session-check", "--json"].includes(arg));
+  const unknown = [...args].filter((arg) => !["--check", "--session-check", "--json", "--claude", "--codex"].includes(arg));
   if (unknown.length > 0) fail(`Unknown option: ${unknown.join(", ")}`);
   if (args.has("--json") && !args.has("--check")) {
     fail("Use --json with --check.");
@@ -145,22 +150,22 @@ async function main() {
 
   // Validate both merge targets before writing any hook bytes. A malformed user file is never
   // replaced or silently repaired because it may contain unrelated settings and hooks.
-  validateClaudeHooksMergeTarget(readJsonObjectIfExists(claudeSettingsPath, "~/.claude/settings.json"));
-  validateCodexHooksMergeTarget(readJsonObjectIfExists(codexHooksPath, "~/.codex/hooks.json"));
+  if (APPS.claude) validateClaudeHooksMergeTarget(readJsonObjectIfExists(claudeSettingsPath, "~/.claude/settings.json"));
+  if (APPS.codex) validateCodexHooksMergeTarget(readJsonObjectIfExists(codexHooksPath, "~/.codex/hooks.json"));
 
   // 2. Stage + atomically swap only the files that differ. Both clients use the same pinned
   // canonical bytes plus narrowly scoped, checksum-pinned local supplements/adapters.
   const desired = [
-    ...FILES.map((file) => ({ target: path.join(claudeHooksDir, file), bytes: fetched[file], label: `Claude/${file}` })),
-    ...CLAUDE_SUPPLEMENTAL_FILES.map((file) => ({
+    ...(APPS.claude ? FILES.map((file) => ({ target: path.join(claudeHooksDir, file), bytes: fetched[file], label: `Claude/${file}` })) : []),
+    ...(APPS.claude ? CLAUDE_SUPPLEMENTAL_FILES.map((file) => ({
       target: path.join(claudeHooksDir, file), bytes: localGuardFiles[file], label: `Claude/${file}`,
-    })),
-    ...["secrets-guard.js", "secrets-tripwire.js"].map((file) => ({
+    })) : []),
+    ...(APPS.codex ? ["secrets-guard.js", "secrets-tripwire.js"].map((file) => ({
       target: path.join(codexHooksDir, file), bytes: fetched[file], label: `Codex/${file}`,
-    })),
-    ...CODEX_LOCAL_FILES.map((file) => ({
+    })) : []),
+    ...(APPS.codex ? CODEX_LOCAL_FILES.map((file) => ({
       target: path.join(codexHooksDir, file), bytes: localGuardFiles[file], label: `Codex/${file}`,
-    })),
+    })) : []),
   ];
   const changed = desired.filter(({ target, bytes }) => {
     const current = readIfExists(target);
@@ -199,12 +204,14 @@ async function main() {
   // 4. ALWAYS validate/repair the settings wiring — even when nothing downloaded. A guard whose
   //    PreToolUse hook is missing from settings.json is silently inactive; the installer is
   //    idempotent, so this is a quiet no-op when everything is already correct.
-  const result = spawnSync(process.execPath, [path.join(claudeHooksDir, "install.mjs")], { stdio: "inherit" });
-  if (result.status !== 0) {
-    fail("The guard installer did not finish cleanly. Read the message above; do not delete ~/.claude/settings.json.");
+  if (APPS.claude) {
+    const result = spawnSync(process.execPath, [path.join(claudeHooksDir, "install.mjs")], { stdio: "inherit" });
+    if (result.status !== 0) {
+      fail("The guard installer did not finish cleanly. Read the message above; do not delete ~/.claude/settings.json.");
+    }
+    installClaudeSupplementalHooks();
   }
-  installClaudeSupplementalHooks();
-  installCodexHooks();
+  if (APPS.codex) installCodexHooks();
 
   const after = inspectInstalledGuard(manifest);
   if (!after.healthy) {
@@ -217,18 +224,19 @@ async function main() {
 
   if (changed.length > 0 || !before.healthy) {
     console.log("");
-    console.log("User-global secrets guard on-disk installation verified for Claude Code and Codex.");
+    console.log(`User-global secrets guard on-disk installation verified for ${appsLabel}.`);
     console.log("Runtime activation is not observable from this installer.");
-    console.log("Manual proof required: fully quit and reopen both clients, inspect /hooks, trust the exact Codex hooks, and run the synthetic canaries.");
+    console.log(`Manual proof required: fully quit and reopen ${APPS.claude && APPS.codex ? "both apps" : "the app"}${APPS.codex ? ", trust the Codex hooks on the review screen," : ""} and run the synthetic canaries.`);
   } else {
-    console.log("User-global Claude Code and Codex secrets guard on-disk installation is healthy and already current.");
+    console.log(`User-global ${appsLabel} secrets guard on-disk installation is healthy and already current.`);
     console.log("Runtime activation is not observable from this installer; restart, inspect /hooks, trust, and run synthetic canaries to prove it.");
   }
 }
 
 function inspectInstalledGuard(manifest) {
-  const claude = inspectClaudeGuard(manifest);
-  const codex = inspectCodexGuard(manifest);
+  const skipped = { healthy: true, issues: [], skipped: true };
+  const claude = APPS.claude ? inspectClaudeGuard(manifest) : skipped;
+  const codex = APPS.codex ? inspectCodexGuard(manifest) : skipped;
   return {
     healthy: claude.healthy && codex.healthy,
     claude,
@@ -681,7 +689,7 @@ function normalizePath(value) { return value.replaceAll("\\", "/"); }
 function isAbsolutePortable(value) { return path.posix.isAbsolute(value) || path.win32.isAbsolute(value); }
 
 function printStatus(status) {
-  console.log("Secrets guard scope: user-global (Claude Code and Codex projects for this OS account)");
+  console.log(`Secrets guard scope: user-global (${appsLabel} projects for this OS account)`);
   console.log(`On-disk status: ${status.healthy ? "healthy" : "incomplete"}`);
   if (!status.healthy) {
     for (const issue of status.issues) console.log(`- ${issue}`);
@@ -698,11 +706,11 @@ function jsonStatus(status) {
     onDisk: {
       status: status.healthy ? "healthy" : "incomplete",
       claude: {
-        status: status.claude.healthy ? "healthy" : "incomplete",
+        status: status.claude.skipped ? "not selected" : status.claude.healthy ? "healthy" : "incomplete",
         issues: status.claude.issues,
       },
       codex: {
-        status: status.codex.healthy ? "healthy" : "incomplete",
+        status: status.codex.skipped ? "not selected" : status.codex.healthy ? "healthy" : "incomplete",
         issues: status.codex.issues,
       },
     },

@@ -9,9 +9,12 @@ This directory is the canonical home of the guard as of 09-11-2026. It was porte
 the pending Stripe rule from workshop-installer #17 and the trust-step documentation from
 agent-native-os #89), so new students receive the current guard from one place.
 
-**One command installs both guards:** `node hooks/refresh-guard.mjs`. `--check` inspects the
-on-disk installation without changing anything. Both apps must then be fully quit and reopened,
-and Codex must be trusted once (below), before either guard is actually running.
+**One command per app:** `node hooks/refresh-guard.mjs --claude` or `--codex` installs that app's
+guard and touches nothing of the other's; with neither flag it installs both. `--check` inspects the
+on-disk installation without changing anything (an app not selected reports "not selected"). The
+app must then be fully quit and reopened, and Codex trusted once (below), before its guard is
+actually running. The installer prompt passes the student's app and offers the other; a student
+who chose one app never gets the other app's files unless they ask.
 
 Why a hook and not a CLAUDE.md rule: a written rule only works if the model chooses to obey
 it every time. A `PreToolUse` hook inspects the literal command and refuses the dangerous

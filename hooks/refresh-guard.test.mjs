@@ -404,6 +404,25 @@ check("restored LF supplement installs cleanly after the CRLF cases", run().stat
 writeManifest("REPLACE_AT_RELEASE", STUB);
 const c = run();
 check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
+// --- opt-in per app: --claude must not touch ~/.codex, --codex must not touch ~/.claude ---
+{
+  const only = path.join(root, "only");
+  fs.mkdirSync(only, { recursive: true });
+  writeManifest("good", STUB);
+  const runOnly = (flags) => spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), ...flags], {
+    env: { ...process.env, HOME: only, USERPROFILE: only, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  const c = runOnly(["--claude"]);
+  check("--claude installs the Claude guard", c.status === 0 && fs.existsSync(path.join(only, ".claude", "hooks", "secrets-guard.js")));
+  check("--claude leaves ~/.codex untouched", !fs.existsSync(path.join(only, ".codex")));
+  const cc = runOnly(["--check", "--claude", "--json"]);
+  check("--check --claude is healthy and reports Codex as not selected", cc.status === 0 && /"status": "not selected"/.test(cc.stdout));
+  const x = runOnly(["--codex"]);
+  check("--codex installs the Codex guard", x.status === 0 && fs.existsSync(path.join(only, ".codex", "hooks.json")));
+  const both = runOnly(["--check", "--json"]);
+  check("after both opt-ins, the no-flag check sees both as healthy", both.status === 0 && !/not selected|incomplete/.test(both.stdout));
+}
+
 check("unpinned error says it is not pinned to a release", /not pinned to a released version/.test(c.stderr));
 
 try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }

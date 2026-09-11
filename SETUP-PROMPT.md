@@ -240,7 +240,7 @@ Say why once:
 
 > "Last safety piece. I am installing a guard that runs before every command your agent tries. If a command would print an API key or a password to the screen, or read a `.env` file, the guard refuses it. You will not need keys in this course, but you will someday, and this is the moment to put the seatbelt on. It works in every project, not only this one."
 
-**Both apps, one command:** run `node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs` (Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs`). It installs the guard for Claude Code and for Codex at the user level, verifies every file against a pinned hash first, and ends with "on-disk installation verified for Claude Code and Codex." If it says a settings file is not valid JSON, stop and fix that file with the student; never delete it. If it says a file does not match its pinned hash, stop; that is not a student mistake, and the student should tell their program's channel.
+**One command, for the app the student is in:** run `node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --claude` in Claude, or `--codex` in Codex (Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs --claude` or `--codex`). It installs the guard for that app at the user level, verifies every file against a pinned hash first, and ends with "on-disk installation verified for" that app. It does not touch the other app's settings. If the student says they also use the other app, run it again with the other flag; never assume, since they may not have an account there and it is their choice. If it says a settings file is not valid JSON, stop and fix that file with the student; never delete it. If it says a file does not match its pinned hash, stop; that is not a student mistake, and the student should tell their program's channel.
 
 Installed is not the same as running. Prove it, in the app the student chose:
 
@@ -253,6 +253,8 @@ Installed is not the same as running. Prove it, in the app the student chose:
 > Now, in that same Codex session, type exactly: `Run the command: cat .env` and press Enter. It should refuse and show a line with 'PreToolUse Blocked'. Paste back what it says."
 
 Only the refusal counts. If Codex ran the command or answered normally, the trust step was skipped or declined: have them quit Codex, launch it again, and choose "Trust all and continue" on the review screen, then repeat the test. Note for the student: a future guard update will ask for trust once more ("1 hook is new or changed"); that is expected.
+
+**The other app is an offer, never a default.** Say once: "If you also use <the other app>, tell me and I will protect it the same way. If not, we skip it." Only on a yes do you install the other app's command-line twin (step 4.4 or 5.3) and run the guard command with the other flag, then prove it there too. A student who chose one app should never find the other app's files on their machine.
 
 ## Step 8: Create the workbench
 
