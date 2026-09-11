@@ -404,6 +404,32 @@ check("restored LF supplement installs cleanly after the CRLF cases", run().stat
 writeManifest("REPLACE_AT_RELEASE", STUB);
 const c = run();
 check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
+// --- a student's own global instruction files are never touched ---
+{
+  const mine = path.join(root, "mine");
+  fs.mkdirSync(path.join(mine, ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(mine, ".codex"), { recursive: true });
+  const claudeMd = "# My global rules
+Always answer in French.
+";
+  const agentsMd = "# My Codex rules
+Never touch prod.
+";
+  const priorSettings = JSON.stringify({ theme: "dark", permissions: { allow: ["Bash(ls:*)"] } }, null, 2) + "
+";
+  fs.writeFileSync(path.join(mine, ".claude", "CLAUDE.md"), claudeMd);
+  fs.writeFileSync(path.join(mine, ".codex", "AGENTS.md"), agentsMd);
+  fs.writeFileSync(path.join(mine, ".claude", "settings.json"), priorSettings);
+  const r = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs")], {
+    env: { ...process.env, HOME: mine, USERPROFILE: mine, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  check("install succeeds beside a student's own global files", r.status === 0);
+  check("student's global ~/.claude/CLAUDE.md is byte-identical after install", fs.readFileSync(path.join(mine, ".claude", "CLAUDE.md"), "utf8") === claudeMd);
+  check("student's global ~/.codex/AGENTS.md is byte-identical after install", fs.readFileSync(path.join(mine, ".codex", "AGENTS.md"), "utf8") === agentsMd);
+  const merged = JSON.parse(fs.readFileSync(path.join(mine, ".claude", "settings.json"), "utf8"));
+  check("student's existing settings keys survive the merge", merged.theme === "dark" && merged.permissions.allow.includes("Bash(ls:*)"));
+}
+
 // --- opt-in per app: --claude must not touch ~/.codex, --codex must not touch ~/.claude ---
 {
   const only = path.join(root, "only");

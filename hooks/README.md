@@ -16,6 +16,10 @@ app must then be fully quit and reopened, and Codex trusted once (below), before
 actually running. The installer prompt passes the student's app and offers the other; a student
 who chose one app never gets the other app's files unless they ask.
 
+The installer never touches a student's own global instruction files (`~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md`) or any settings key it does not own; `refresh-guard.test.mjs` proves it with
+pre-existing files that must be byte-identical afterward.
+
 In one line for students: it only takes one time. One key printed to the screen, pasted into a chat,
 or written into a file that gets pushed, and it is exposed; then you are rotating keys, checking what
 had access, and telling people. The guard is the seatbelt, installed before anyone needs it.
