@@ -29,7 +29,7 @@ def validate_lock(value):
     exact(value, ('schema_version', 'course_id', 'installer', 'source_release_pins'), 'Distribution lock')
     require(value['schema_version'] == 'aibl.course-distribution/v1' and value['course_id'] == 'agent-native-workforce', 'Unsupported pinned course.')
     exact(value['installer'], ('repository', 'commit', 'files'), 'Installer pin')
-    require(value['installer']['repository'] == 'aibuild-lab/workshop-installer' and re.fullmatch('[a-f0-9]{40}', value['installer']['commit'] or ''), 'Wrong installer identity.')
+    require(value['installer']['repository'] == 'aibuild-lab/aibl-installer' and re.fullmatch('[a-f0-9]{40}', value['installer']['commit'] or ''), 'Wrong installer identity.')
     exact(value['installer']['files'], INSTALLER_FILES, 'Installer file inventory')
     require(all(re.fullmatch('[a-f0-9]{64}', sha or '') for sha in value['installer']['files'].values()), 'Invalid installer file hash.')
     exact(value['source_release_pins'], PRODUCTS, 'Course product pins')

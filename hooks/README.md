@@ -1,7 +1,7 @@
 # Secrets guard (Claude Code hooks)
 
 Harness-level protection that stops Claude Code from printing a student's secrets to the
-terminal. Installed by `SETUP-PROMPT.md` Step 5.3.5 into the student's user-level settings
+terminal. Installed by the AIBL installer into the student's user-level settings
 (`~/.claude/settings.json`), so it applies in **every** project, not just the workshop repo.
 
 Why a hook and not a CLAUDE.md rule: a written rule only works if the model chooses to obey

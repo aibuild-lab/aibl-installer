@@ -72,8 +72,8 @@ class PreviewTests(unittest.TestCase):
                 self.assertEqual(sum(call[:3]==['gh','repo','create'] for call in services.calls),1)
                 self.assertFalse(any(call[:2]==['gh','auth'] or '--global' in call for call in services.calls))
 
-    def test_desktop_requires_preview_and_rejects_legacy_before_effects(self):
-        for course,bundle in [('agent-native-workforce',None),('legacy-workshop','candidate')]:
+    def test_desktop_requires_preview_before_effects(self):
+        for course,bundle in [('agent-native-workforce',None)]:
             with self.subTest(course=course),tempfile.TemporaryDirectory() as directory:
                 root=Path(directory).resolve();services,bundle_root,lock,sha=self.prepare(root)
                 with self.assertRaisesRegex(setup.SetupError,'explicit local candidate preview'):
@@ -82,7 +82,7 @@ class PreviewTests(unittest.TestCase):
                         preview_bundle=str(bundle_root) if bundle else None,distribution_lock=str(lock),desktop=True)
                 self.assertFalse(services.calls);self.assertFalse((root/'state').exists())
                 self.assertFalse((root/'projects').exists())
-        for argv in [['course_setup.py','--desktop'],['course_setup.py','--desktop','--course','legacy-workshop','--preview-bundle','candidate']]:
+        for argv in [['course_setup.py','--desktop'],['course_setup.py','--desktop','--course','agent-native-workforce']]:
             with self.subTest(argv=argv),patch.object(setup.sys,'argv',argv),patch.object(setup,'command',side_effect=AssertionError('No command may run')),patch.object(setup,'setup',side_effect=AssertionError('No setup may run')),contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(setup.main(),1)
 

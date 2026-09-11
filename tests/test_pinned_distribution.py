@@ -16,7 +16,7 @@ def bundle_fixture():
     archive = stream.getvalue(); manifest_bytes = pinned.encoded(manifest)
     essentials = {'schema_version': 'aibl.release-pin/v3', 'product': 'agent-essentials', 'release_id': manifest['release_id'], 'source_revision': manifest['source_revision'], 'archive_sha256': pinned.digest(archive), 'manifest_sha256': pinned.digest(manifest_bytes)}
     workforce = {**essentials, 'product': 'agent-native-workforce', 'release_id': 'agent-native-workforce-v0.0.0-synthetic'}
-    distribution = {'schema_version': 'aibl.course-distribution/v1', 'course_id': 'agent-native-workforce', 'installer': {'repository': 'aibuild-lab/workshop-installer', 'commit': 'b' * 40, 'files': {name: 'c' * 64 for name in pinned.INSTALLER_FILES}}, 'source_release_pins': {'agent-essentials': essentials, 'agent-native-workforce': workforce}}
+    distribution = {'schema_version': 'aibl.course-distribution/v1', 'course_id': 'agent-native-workforce', 'installer': {'repository': 'aibuild-lab/aibl-installer', 'commit': 'b' * 40, 'files': {name: 'c' * 64 for name in pinned.INSTALLER_FILES}}, 'source_release_pins': {'agent-essentials': essentials, 'agent-native-workforce': workforce}}
     return manifest_bytes, archive, distribution
 
 class PinnedServices(LocalServices):

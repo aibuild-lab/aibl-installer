@@ -2,7 +2,6 @@
   "schema_version": "aibl.course-options/v1",
   "courses": [
     {"id":"agent-essentials","label":"Agent Essentials","template":"aibuild-lab/agent-essentials","access":["aibuild-lab/agent-essentials"],"requirements":["git","gh","python","claude"],"start_skill":"aibl-setup"},
-    {"id":"agent-native-workforce","label":"Agent Native Workforce (includes Essentials)","template":"aibuild-lab/agent-essentials","access":["aibuild-lab/agent-essentials","aibuild-lab/agent-native-workforce"],"requirements":["git","gh","python","claude"],"start_skill":"aibl-setup"},
-    {"id":"legacy-workshop","label":"Existing Agent Native OS workshop","launcher":"install.mjs","requirements":["git","node","gh","python","claude","infisical"]}
+    {"id":"agent-native-workforce","label":"Agent Workforce (includes Essentials)","template":"aibuild-lab/agent-essentials","access":["aibuild-lab/agent-essentials","aibuild-lab/agent-native-workforce"],"requirements":["git","gh","python","claude"],"start_skill":"aibl-setup"}
   ]
 }

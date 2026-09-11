@@ -40,7 +40,7 @@ class SetupTests(unittest.TestCase):
   with contextlib.redirect_stdout(io.StringIO()):return setup.setup(setup.choose(course),Path(root)/'local','my-workbench',Path(root)/'state',fake,True)
  def test_course_selection_minimal_dependencies(self):
   for name in ['agent-essentials','agent-native-workforce']:self.assertEqual(setup.choose(name)['requirements'],['git','gh','python','claude'])
-  self.assertIn('infisical',setup.choose('legacy-workshop')['requirements'])
+  with self.assertRaises(setup.SetupError):setup.choose('legacy-workshop')
  def test_fresh_and_resume_do_not_duplicate_repository(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();self.assertEqual(self.run_setup(f,d)['status'],'ready');self.run_setup(f,d)

@@ -35,7 +35,7 @@ def choose(course):
         raise SetupError('Unknown course. Use a listed course option.')
     print('Which class are you joining?')
     for i,c in enumerate(courses,1):print(f'{i}. {c["label"]}')
-    answer=input('Choose 1, 2 or 3: ').strip()
+    answer=input('Choose '+' or '.join(str(x) for x in range(1,len(courses)+1))+': ').strip()
     if answer not in [str(x) for x in range(1,len(courses)+1)]:raise SetupError('Choose one listed course; rerun to select again.')
     return courses[int(answer)-1]
 
@@ -123,7 +123,7 @@ def setup_lock(state_root,name):
             else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
 def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False):
-    if desktop and (not preview_bundle or course['id']=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
+    if desktop and not preview_bundle:raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
     name=repo_name(name);workspace=safe_workspace(workspace)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     with setup_lock(state_root,name):
@@ -317,7 +317,7 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');p.add_argument('--preview-bundle');p.add_argument('--rehearsal-id');p.add_argument('--desktop',action='store_true',help='Prepare a local preview for a separate Claude Desktop session; authentication and runtime remain unobserved.');a=p.parse_args()
     try:
-        if a.desktop and (not a.preview_bundle or a.course=='legacy-workshop'):raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
+        if a.desktop and not a.preview_bundle:raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
         distribution=None;distribution_sha256=None
         if a.distribution_lock or a.distribution_sha256:
             if not a.distribution_lock or not a.distribution_sha256:raise SetupError('Pinned setup needs both the reviewed lock and its separate digest.')
@@ -330,7 +330,6 @@ def main():
         if a.rehearsal_id and not a.preview_bundle:raise SetupError('Rehearsal setup requires an explicit local candidate bundle.')
         course=choose(a.course or (distribution['course_id'] if distribution else None))
         if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
-        if course['id']=='legacy-workshop':command(['node',str(ROOT/'install.mjs'),'--workspace',a.workspace],interactive=True);return 0
         name=a.repo_name or input('Private project name [my-workbench]: ').strip() or 'my-workbench'
         setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256,preview_bundle=a.preview_bundle,distribution_lock=a.distribution_lock,rehearsal_id=a.rehearsal_id,desktop=a.desktop);return 0
     except (OSError,ValueError) as e:print('Setup paused: '+str(e));return 1

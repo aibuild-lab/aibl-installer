@@ -1,9 +1,9 @@
 # Shared course installer contract
 
 One public entry selects the course; each course names only its required tools
-and private payload repositories in course-options.json. Existing workshop
-scripts and guard hooks remain the authority for the legacy option. They are not
-installed as global Workforce dependencies.
+and private payload repositories in course-options.json. The earlier Agent Native
+OS workshop is served by aibuild-lab/workshop-installer, which is frozen; nothing
+from that route is installed here.
 
 The Essentials and Workforce routes use Git, GitHub CLI, Python and native Claude
 Code. Only the template creates a new independent Git history; Workforce is

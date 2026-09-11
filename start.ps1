@@ -10,16 +10,14 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use st
 if (-not $Course) {
   Write-Host 'Which class are you joining?'
   Write-Host '1. Agent Essentials'
-  Write-Host '2. Agent Native Workforce (includes Essentials)'
-  Write-Host '3. Existing Agent Native OS workshop'
-  switch (Read-Host 'Choose 1, 2 or 3') {
+  Write-Host '2. Agent Workforce (includes Essentials)'
+  switch (Read-Host 'Choose 1 or 2') {
     '1' { $Course = 'agent-essentials' }
     '2' { $Course = 'agent-native-workforce' }
-    '3' { $Course = 'legacy-workshop' }
     default { throw 'Rerun and choose a listed course.' }
   }
 }
-if ($Course -notin @('agent-essentials','agent-native-workforce','legacy-workshop')) { throw 'Unknown course.' }
+if ($Course -notin @('agent-essentials','agent-native-workforce')) { throw 'Unknown course.' }
 function Refresh-ProcessPath {
   $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
 }
@@ -68,7 +66,7 @@ if ($InstallerCommit) {
   New-Item -ItemType Directory -Path $InstallerDir | Out-Null
   git -C $InstallerDir init --quiet
   if ($LASTEXITCODE -ne 0) { throw 'Pinned installer directory could not be initialized.' }
-  git -C $InstallerDir remote add origin https://github.com/aibuild-lab/workshop-installer.git
+  git -C $InstallerDir remote add origin https://github.com/aibuild-lab/aibl-installer.git
   if ($LASTEXITCODE -ne 0) { throw 'Pinned installer origin could not be set.' }
   git -C $InstallerDir fetch --depth 1 origin $InstallerCommit
   if ($LASTEXITCODE -ne 0) { throw 'Frozen installer download failed. Rerun when GitHub is reachable.' }
@@ -78,10 +76,9 @@ if ($InstallerCommit) {
   if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision was not fetched.' }
 } elseif (-not (Test-Path (Join-Path $InstallerDir 'course-options.json'))) {
   $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-course-installer-' + [guid]::NewGuid().ToString('N'))
-  git clone --depth 1 https://github.com/aibuild-lab/workshop-installer.git $InstallerDir
+  git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git $InstallerDir
   if ($LASTEXITCODE -ne 0) { throw 'Download failed. Rerun when GitHub is reachable.' }
 }
-if ($Course -eq 'legacy-workshop') { & (Join-Path $InstallerDir 'install.ps1'); exit $LASTEXITCODE }
 if ($InstallerCommit) {
   & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE

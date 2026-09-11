@@ -1,8 +1,8 @@
 # Start your AI Build Lab course
 
-**One installer, only the requirements for your class.** Choose Essentials,
-Agent Native Workforce (which includes Essentials), or the existing Agent Native
-OS workshop. Your course repositories remain private and separate.
+**One installer, only the requirements for your class.** Choose Essentials or
+Agent Workforce (which includes Essentials). Your workbench is a private
+repository on your own GitHub account.
 
 Have a GitHub account, accepted course invitations and supported Claude Code
 access ready. You sign into accounts in the browser. Do not paste tokens in chat.
@@ -14,7 +14,7 @@ Claude in that folder. Claude guides the first useful artifact and Git checkpoin
 Open Terminal, paste this launch command and follow the course choice:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aibuild-lab/workshop-installer/main/start.sh -o /tmp/aibl-start.sh
+curl -fsSL https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/start.sh -o /tmp/aibl-start.sh
 bash /tmp/aibl-start.sh
 ```
 
@@ -28,7 +28,7 @@ in place. No course Node or Infisical setup is required for Essentials/Workforce
 Open PowerShell, paste this launch command and follow the course choice:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/aibuild-lab/workshop-installer/main/start.ps1 -OutFile "$env:TEMP\aibl-start.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/start.ps1 -OutFile "$env:TEMP\aibl-start.ps1"
 & "$env:TEMP\aibl-start.ps1"
 ```
 
@@ -72,7 +72,8 @@ elapsed time; the first artifact records a later timestamp. OS bootstrap prompts
 and time before Python begins are explicitly unmeasured. No automatic telemetry
 or timing promise is included.
 
-[Legacy workshop instructions](README.md) remain available.
+The earlier Agent Native OS workshop keeps its own installer at
+[aibuild-lab/workshop-installer](https://github.com/aibuild-lab/workshop-installer).
 [Claude supported installation and access](https://code.claude.com/docs/en/setup).
 
 Facilitators: [end-to-end testing and real-device walkthrough](E2E-TESTING.md).
