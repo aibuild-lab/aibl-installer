@@ -7,7 +7,7 @@ program with the site ledger's ids, its publisher repository, what it requires
 softly and reported) and its adoption skill. Programs join the hub later from
 inside the workbench through scripts/enroll.py, which reads that registry, asks
 GitHub what the signed-in account can read, confirms with the student, records
-the decision in .aibl/enroll.json and names the adoption skill to run; it never
+the decision in .aibl/enroll.json and names the adoption skill to run; selection is not installation and it never
 handles release pins. Adding a program is one line in the registry and no
 installer change. An explicit course argument remains for pinned cohort setups. The earlier Agent Native
 OS workshop is served by aibuild-lab/workshop-installer, which is frozen; nothing
@@ -48,3 +48,9 @@ AIBL bootstrap and installer files to both accepted product pins. It seeds a
 private independent repository from the verified Essentials release archive,
 preserving the legacy selector and default-template route for existing callers.
 The frozen route must be used when qualifying a named immutable distribution.
+
+Program selection distinguishes repository readability from installed release
+records. Unavailable repository access does not prove an absent or pending
+invitation. Invalid installed records stop for diagnosis. `--check` and declined
+selection write nothing and never refresh the installer. The retained engine
+locations and frozen successor identity are specified in PINNED-COURSE-DELIVERY.md.

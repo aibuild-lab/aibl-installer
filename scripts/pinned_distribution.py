@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib, io, json, os, re, stat, tempfile, uuid, zipfile
 from pathlib import Path, PurePosixPath
 
-INSTALLER_FILES = ('start.sh', 'start.ps1', 'course-options.json', 'scripts/course_setup.py', 'scripts/pinned_distribution.py', 'SETUP-PROMPT.md')
+INSTALLER_FILES = ('start.sh', 'start.ps1', 'course-options.json', 'scripts/course_setup.py', 'scripts/pinned_distribution.py', 'SETUP-PROMPT.md', 'scripts/enroll.py')
 PRODUCTS = ('agent-essentials', 'agent-native-workforce')
 MAX_BYTES = 16 * 1024 * 1024
 

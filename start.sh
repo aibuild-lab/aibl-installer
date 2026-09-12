@@ -41,18 +41,26 @@ if [[ "$HARNESS" == codex ]] && ! command -v codex >/dev/null 2>&1; then
   sh "${TMPDIR:-/tmp}/aibl-codex-install.sh"
   export PATH="$HOME/.codex/bin:$PATH"
 fi
-INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -n "$INSTALLER_COMMIT" ]]; then
-  INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aibl-pinned-installer.XXXXXX")"
-  git -C "$INSTALLER_DIR" init --quiet
-  git -C "$INSTALLER_DIR" remote add origin https://github.com/aibuild-lab/aibl-installer.git
-  git -C "$INSTALLER_DIR" fetch --depth 1 origin "$INSTALLER_COMMIT"
-  git -C "$INSTALLER_DIR" checkout --detach --quiet FETCH_HEAD
-  if [[ "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision was not fetched.'; exit 1; fi
-elif [[ ! -f "$INSTALLER_DIR/course-options.json" ]]; then
-  INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aibl-course-installer.XXXXXX")"
-  git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git "$INSTALLER_DIR"
+# Keep the enrollment engine after Terminal closes. Existing files are never reset.
+INSTALLER_DIR="$HOME/GitHub/aibl-installer"
+if [[ -n "$INSTALLER_COMMIT" ]]; then INSTALLER_DIR="$HOME/.aibl/installers/$INSTALLER_COMMIT"; fi
+if [[ -L "$INSTALLER_DIR" ]]; then echo 'Installer directory is linked. Preserve it for review.'; exit 1; fi
+if [[ ! -e "$INSTALLER_DIR" ]]; then
+  mkdir -p "$(dirname "$INSTALLER_DIR")"
+  if [[ -n "$INSTALLER_COMMIT" ]]; then
+    mkdir "$INSTALLER_DIR"
+    git -C "$INSTALLER_DIR" init --quiet
+    git -C "$INSTALLER_DIR" remote add origin https://github.com/aibuild-lab/aibl-installer.git
+    git -C "$INSTALLER_DIR" fetch --depth 1 origin "$INSTALLER_COMMIT"
+    git -C "$INSTALLER_DIR" checkout --detach --quiet FETCH_HEAD
+  else
+    git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git "$INSTALLER_DIR"
+  fi
 fi
+if [[ ! -d "$INSTALLER_DIR/.git" || -L "$INSTALLER_DIR/.git" || "$(git -C "$INSTALLER_DIR" remote get-url origin)" != https://github.com/aibuild-lab/aibl-installer.git ]]; then echo 'Installer path is occupied by another project. Preserve it for review.'; exit 1; fi
+if [[ -n "$(git -C "$INSTALLER_DIR" status --porcelain)" ]]; then echo 'Installer has local work. Preserve it for review; no update was applied.'; exit 1; fi
+if [[ -n "$INSTALLER_COMMIT" && "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision differs. Preserve it for review.'; exit 1; fi
+if [[ ! -f "$INSTALLER_DIR/scripts/enroll.py" ]]; then echo 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.'; exit 1; fi
 if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
 if [[ -n "$COURSE" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS"; fi
 exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course agent-essentials --harness "$HARNESS"

@@ -58,25 +58,40 @@ if ($Harness -eq 'codex' -and -not (Get-Command codex -ErrorAction SilentlyConti
   $env:Path = $env:Path + ';' + (Join-Path $HOME '.codex\bin')
   Refresh-ProcessPath
 }
-$InstallerDir = $PSScriptRoot
-if ($InstallerCommit) {
-  $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-pinned-installer-' + [guid]::NewGuid().ToString('N'))
-  New-Item -ItemType Directory -Path $InstallerDir | Out-Null
-  git -C $InstallerDir init --quiet
-  if ($LASTEXITCODE -ne 0) { throw 'Pinned installer directory could not be initialized.' }
-  git -C $InstallerDir remote add origin https://github.com/aibuild-lab/aibl-installer.git
-  if ($LASTEXITCODE -ne 0) { throw 'Pinned installer origin could not be set.' }
-  git -C $InstallerDir fetch --depth 1 origin $InstallerCommit
-  if ($LASTEXITCODE -ne 0) { throw 'Frozen installer download failed. Rerun when GitHub is reachable.' }
-  git -C $InstallerDir checkout --detach --quiet FETCH_HEAD
-  if ($LASTEXITCODE -ne 0) { throw 'Frozen installer checkout failed.' }
-  $ObservedInstallerCommit = git -C $InstallerDir rev-parse HEAD
-  if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision was not fetched.' }
-} elseif (-not (Test-Path (Join-Path $InstallerDir 'course-options.json'))) {
-  $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-course-installer-' + [guid]::NewGuid().ToString('N'))
-  git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git $InstallerDir
-  if ($LASTEXITCODE -ne 0) { throw 'Download failed. Rerun when GitHub is reachable.' }
+# Retain the engine. Do not reset, pull or replace an existing checkout.
+$InstallerDir = Join-Path $HOME 'GitHub/aibl-installer'
+if ($InstallerCommit) { $InstallerDir = Join-Path $HOME ('.aibl/installers/' + $InstallerCommit) }
+if (Test-Path -LiteralPath $InstallerDir) {
+  if ((Get-Item -LiteralPath $InstallerDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer directory is linked. Preserve it for review.' }
+} else {
+  New-Item -ItemType Directory -Force -Path (Split-Path $InstallerDir) | Out-Null
+  if ($InstallerCommit) {
+    New-Item -ItemType Directory -Path $InstallerDir | Out-Null
+    git -C $InstallerDir init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Installer initialization failed.' }
+    git -C $InstallerDir remote add origin https://github.com/aibuild-lab/aibl-installer.git
+    if ($LASTEXITCODE -ne 0) { throw 'Installer origin could not be set.' }
+    git -C $InstallerDir fetch --depth 1 origin $InstallerCommit
+    if ($LASTEXITCODE -ne 0) { throw 'Frozen installer download failed. Preserve this interrupted directory for recovery.' }
+    git -C $InstallerDir checkout --detach --quiet FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Frozen installer checkout failed.' }
+  } else {
+    git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git $InstallerDir
+    if ($LASTEXITCODE -ne 0) { throw 'Download failed. Preserve this interrupted directory for recovery.' }
+  }
 }
+$GitDir = Join-Path $InstallerDir '.git'
+if (-not (Test-Path -LiteralPath $GitDir -PathType Container)) { throw 'Installer path is occupied by another project. Preserve it for review.' }
+if ((Get-Item -LiteralPath $GitDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer Git metadata is linked. Preserve it for review.' }
+$InstallerOrigin = git -C $InstallerDir remote get-url origin
+if ($LASTEXITCODE -ne 0 -or $InstallerOrigin -ne 'https://github.com/aibuild-lab/aibl-installer.git') { throw 'Installer origin differs. Preserve it for review.' }
+$InstallerChanges = git -C $InstallerDir status --porcelain
+if ($LASTEXITCODE -ne 0 -or $InstallerChanges) { throw 'Installer has local work. Preserve it for review; no update was applied.' }
+if ($InstallerCommit) {
+  $ObservedInstallerCommit = git -C $InstallerDir rev-parse HEAD
+  if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision differs. Preserve it for review.' }
+}
+if (-not (Test-Path (Join-Path $InstallerDir 'scripts/enroll.py') -PathType Leaf)) { throw 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.' }
 if ($InstallerCommit) {
   & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE

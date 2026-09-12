@@ -16,15 +16,15 @@ python3 scripts/pin-course-distribution.py --essentials-pin "$ESSENTIALS_PIN" --
 
 The output directory must be outside this checkout. Existing output is never
 replaced. The candidate has `aibl.course-distribution/v1`, course ID
-`agent-workforce` (the registry program id), the exact installer repository/commit and five source
+`agent-workforce` (the registry program id), the exact installer repository/commit and seven source
 file hashes, and both exact `aibl.release-pin/v3` objects. Both product pins
 must name the same accepted internal source commit. The release handoff
 independently reviews and distributes the lock's SHA-256 and each launcher
 SHA-256. Taking a pin from the archive being downloaded is not verification.
 
-The six pinned files are `start.sh`, `start.ps1`, `course-options.json`,
+The seven pinned files are `start.sh`, `start.ps1`, `course-options.json`,
 `scripts/course_setup.py`, `scripts/pinned_distribution.py` and
-`SETUP-PROMPT.md` (the guided app-first entry, so a cohort's instructions are
+`scripts/enroll.py` and `SETUP-PROMPT.md` (the guided app-first entry, so a cohort's instructions are
 byte-identical too). The lock
 generator is an operator tool; its output is independently reviewed and not
 executed by the student launcher.
@@ -101,3 +101,25 @@ versions, which are recorded at runtime. A frozen lock alone does not certify
 every vendor version, bootstrap duration, native device policy, account flow or
 beginner outcome. The course's complete distribution qualification must retain
 those observed versions and untested boundaries.
+
+## Successor distribution and retained engine
+
+This successor accepts the `aibl-installer` repository and `agent-workforce`
+program ID. Historical locks for `workshop-installer` and
+`agent-native-workforce` remain byte-for-byte unchanged and use their historical
+launcher. Do not rewrite old locks, release archives or installed records.
+A successor handoff needs a newly reviewed lock and independent digests binding
+the accepted installer plus both accepted product pins. Enrollment code is now
+in the exact installer inventory. No new distribution is published by this change.
+
+Frozen launchers retain the clean exact installer at
+`~/.aibl/installers/<installer_commit>`; ordinary launchers retain
+`~/GitHub/aibl-installer`. Neither replaces existing modified or unrelated
+files. An interrupted installer download is held for recovery, not deleted.
+Enrollment performs no implicit pull and refuses a frozen workbench whose
+installer commit differs. The ordinary initial route remains unpinned and must
+not be offered as qualification of an immutable cohort distribution.
+
+A different installed distribution still stops. A safe version-to-version
+upgrade, transition approval, product replacement and rollback remain outside
+this implementation and require the separate course-launch decision and proof.

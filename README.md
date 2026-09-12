@@ -9,12 +9,13 @@ browser sign-ins, and creates your own private workbench repository with
 independent history, then you open it in the app. That workbench is the
 Essentials hub.
 
-Programs join the hub later, from inside it: **Agent Workforce** (which includes
+Supported programs can be adopted into the hub later: **Agent Workforce** (which includes
 Essentials, and The Lab for three months) or **The Lab** (which includes
 Essentials). When your program starts, one command in your workbench,
 `scripts/enroll.py` from these same installer files, reads which program
 repositories your GitHub account can read, shows you the list, and on your
-yes records the choice and hands off to that program's adoption skill. Run it
+yes records the choice and names that program's adoption step. Selection does not install files,
+grant access or establish invitation status. The Lab has no verified adoption route yet. Run it
 again whenever you join something new; what is already there is left alone.
 
 You work in the app you chose, Claude or Codex; the installer sets up its
@@ -32,3 +33,7 @@ The earlier Agent Native OS workshop keeps its own installer there; nothing from
 that route ships here.
 
 Need help? Ask in your program's Slack channel.
+
+The ordinary entry is an unpinned setup route. Cohort qualification must use the
+independently reviewed frozen distribution, not a moving default branch.
+Program selection reuses the retained installer without pulling updates.

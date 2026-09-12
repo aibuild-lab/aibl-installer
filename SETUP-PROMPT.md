@@ -42,7 +42,7 @@ Do not continue from the wrong folder.
 
 The installer's own files (the program list, the setup script, the secrets guard) live in a public repository. Put them at `~/GitHub/aibl-installer`:
 
-- If `~/GitHub/aibl-installer/.git` exists: `git -C ~/GitHub/aibl-installer pull --ff-only`
+- If `~/GitHub/aibl-installer` exists: verify it is an unlinked Git checkout, its origin is `https://github.com/aibuild-lab/aibl-installer.git`, and `git status --porcelain` is empty. Reuse its current revision. If occupied, modified or missing `scripts/enroll.py`, stop and preserve it for the course team to review; do not reset, pull or overwrite it.
 - Otherwise: `mkdir -p ~/GitHub` then `git clone https://github.com/aibuild-lab/aibl-installer ~/GitHub/aibl-installer`
 
 If `git` is not available yet, that is step 0 of START-HERE not done: on a Mac, run `xcode-select --install` and hand off as in step 4.1; on Windows, send the student to install Git for Windows from git-scm.com, restart this app, and paste the prompt again.
@@ -333,3 +333,14 @@ End with one clean message, real versions filled in:
 - Anything involving passwords, payment, account changes, or deleting things: hand it to the student. The handoff is a feature.
 - Trust the student's screenshots over your assumptions.
 - The tested script in step 8 is the one place you do not improvise. Everything else is a conversation.
+
+## Later program selection
+
+The engine remains at `~/GitHub/aibl-installer/scripts/enroll.py` on both ordinary
+setup routes. Run it with `--workbench` naming the actual project folder.
+`--check --json` is read-only and never updates the installer. Selection records
+intent and returns an adoption step; it does not grant access or install files.
+Use the released `aibl-enroll` skill when the verified workbench includes it.
+A frozen cohort uses `~/.aibl/installers/<installer_commit>/scripts/enroll.py`
+from its independently accepted distribution instead. Do not run the ordinary
+engine on a frozen workbench or replace its lock.

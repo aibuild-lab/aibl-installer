@@ -2,11 +2,10 @@
 
 **One installer, every program, your own workbench.** You will end with one
 private repository on your GitHub account, open in the app you chose. The
-installer does not ask which program you are in. Every program you join lands
-inside that same workbench later, with one command from inside it; you never
-set up a second one.
+installer does not ask which program you are in. Supported programs can be added to that workbench later through verified adoption.
+Program selection does not itself install course files; The Lab has no adoption route yet.
 
-You need: a GitHub account, the invitation for your program accepted, and an
+You need: a GitHub account, access to the private Essentials repository established, and an
 account for the app you want to work in (Claude, or Codex). Sign-ins happen in
 your browser. Nothing here asks you to paste a token or a password into chat.
 
@@ -22,9 +21,11 @@ The apps cannot start a local session without Git. Do this first.
 
 ## Step 0b: accept your GitHub invitation
 
-Buying a program puts you on its team the moment Learn knows your GitHub name.
-The team add sends you a GitHub invitation (email, or the bell at github.com).
-Accept it. The installer cannot create your workbench until you do.
+Make sure the GitHub account you will use can read `aibuild-lab/agent-essentials`.
+If the course team sent an invitation, accept it. If access is unavailable,
+check the account with the team before setup. Free Essentials still uses a
+private repository. Later paid-program access is a separate step; the installer
+does not grant access or determine whether an invitation is pending.
 
 ## Step 1: download the app you chose, and sign in
 

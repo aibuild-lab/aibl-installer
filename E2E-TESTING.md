@@ -86,3 +86,16 @@ covers this route with real local Git and simulated private account/release
 boundaries. Qualification must use its exact reviewed lock, retain observed
 vendor-tool versions and exercise native Mac/Windows consent and recovery.
 Those device/account outcomes remain unobserved here.
+
+## September 12 source integration checks
+
+The retained-installer fixtures execute the macOS launcher's retention block
+against local Git repositories, proving reuse, dirty-file/collision preservation,
+wrong-origin refusal, and separate frozen cache identity. Enrollment fixtures
+exercise read-only checking, invalid marker refusal, work/local-progress
+preservation and refusal of a different frozen engine. These do not observe
+browser access, native Windows, or an ordinary student's journey.
+
+Before offering a route, qualify its actual accepted installer and product tuple,
+including first setup, rerun, interrupted download recovery, the installed wrapper,
+adoption and cold return. No distribution upgrade is implemented by this change.
