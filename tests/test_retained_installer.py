@@ -60,6 +60,13 @@ class RetainedInstallerTests(unittest.TestCase):
             self.assertNotEqual(self.run_block(home,'a'*40).returncode,0)
             self.assertEqual(self.git(wrong,'rev-parse','HEAD'),head)
 
+    def test_corrupt_index_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            home=Path(d);folder=home/'GitHub/aibl-installer';self.seed(folder)
+            (folder/'.git/index').write_text('broken index')
+            self.assertNotEqual(self.run_block(home).returncode,0)
+            self.assertEqual((folder/'.git/index').read_text(),'broken index')
+
     def test_wrong_origin_is_rejected_without_changes(self):
         with tempfile.TemporaryDirectory() as d:
             home=Path(d);folder=home/'GitHub/aibl-installer';head=self.seed(folder)

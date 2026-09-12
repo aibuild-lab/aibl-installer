@@ -113,6 +113,12 @@ class EnrollTests(unittest.TestCase):
    fake=FakeGh()
    with self.assertRaises(setup.SetupError):self.run_enroll(wb,fake,check=True)
    self.assertFalse(any(call[0]=='gh' for call in fake.calls))
+ def test_dangling_distribution_link_is_not_unpinned(self):
+  with tempfile.TemporaryDirectory() as d:
+   wb=workbench(d);(wb/'.aibl/distribution.json').symlink_to(Path(d)/'absent')
+   fake=FakeGh()
+   with self.assertRaises(setup.SetupError):self.run_enroll(wb,fake,check=True)
+   self.assertEqual(fake.calls,[])
  def test_linked_record_is_not_followed(self):
   with tempfile.TemporaryDirectory() as d:
    wb=workbench(d);target=Path(d)/'keep';target.write_text('keep')

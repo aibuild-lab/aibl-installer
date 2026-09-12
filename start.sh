@@ -58,7 +58,8 @@ if [[ ! -e "$INSTALLER_DIR" ]]; then
   fi
 fi
 if [[ ! -d "$INSTALLER_DIR/.git" || -L "$INSTALLER_DIR/.git" || "$(git -C "$INSTALLER_DIR" remote get-url origin)" != https://github.com/aibuild-lab/aibl-installer.git ]]; then echo 'Installer path is occupied by another project. Preserve it for review.'; exit 1; fi
-if [[ -n "$(git -C "$INSTALLER_DIR" status --porcelain)" ]]; then echo 'Installer has local work. Preserve it for review; no update was applied.'; exit 1; fi
+INSTALLER_CHANGES="$(git -C "$INSTALLER_DIR" status --porcelain)"
+if [[ -n "$INSTALLER_CHANGES" ]]; then echo 'Installer has local work. Preserve it for review; no update was applied.'; exit 1; fi
 if [[ -n "$INSTALLER_COMMIT" && "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision differs. Preserve it for review.'; exit 1; fi
 if [[ ! -f "$INSTALLER_DIR/scripts/enroll.py" ]]; then echo 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.'; exit 1; fi
 if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi

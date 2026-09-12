@@ -29,8 +29,8 @@ def find_workbench(explicit=None):
 def verify_engine(workbench,runner=command):
     """Read only. A pinned workbench must use its independently accepted installer."""
     record=Path(workbench)/'.aibl'/'distribution.json'
-    if not record.exists():return {'refreshed':False,'mode':'unpinned'}
     if record.is_symlink():raise SetupError('Distribution record is linked; preserve it for review.','local_state')
+    if not record.exists():return {'refreshed':False,'mode':'unpinned'}
     value=json.loads(record.read_text(encoding='utf-8'))
     commit=value.get('installer_commit')
     if not isinstance(commit,str) or not re.fullmatch(r'[a-f0-9]{40}',commit):raise SetupError('Distribution installer identity is damaged.','local_state')
