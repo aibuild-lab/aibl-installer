@@ -1,9 +1,10 @@
 # Start your AI Build Lab program
 
 **One installer, every program, your own workbench.** You will end with one
-private repository on your GitHub account, open in the app you chose. Every
-program you join lands inside that same workbench; you never set up a second
-one.
+private repository on your GitHub account, open in the app you chose. The
+installer does not ask which program you are in. Every program you join lands
+inside that same workbench later, with one command from inside it; you never
+set up a second one.
 
 You need: a GitHub account, the invitation for your program accepted, and an
 account for the app you want to work in (Claude, or Codex). Sign-ins happen in
@@ -23,7 +24,7 @@ The apps cannot start a local session without Git. Do this first.
 
 Buying a program puts you on its team the moment Learn knows your GitHub name.
 The team add sends you a GitHub invitation (email, or the bell at github.com).
-Accept it. The installer cannot see your program until you do.
+Accept it. The installer cannot create your workbench until you do.
 
 ## Step 1: download the app you chose, and sign in
 
@@ -72,8 +73,6 @@ chat instead. Same setup, delivered by hand.
 
 - **"Accept the course invitation":** step 0b was skipped. Accept it, then
   tell the app to try again. Nothing is lost between attempts.
-- **A bundled program reported as "not yet"** (The Lab with Agent Workforce):
-  setup continues. It lands in your workbench later, once its invitation arrives.
 - **A popup you did not expect:** ask the app what it is. It will tell you what
   to click and why.
 - **Existing folder or repository name:** the app reuses it if it is yours; it
@@ -87,7 +86,7 @@ with a Git identity set only inside it.
 ## Fallback: the terminal route
 
 If the app cannot run commands on your machine, the same setup runs from a
-terminal. It installs the tools, then asks which program you are joining.
+terminal. It installs the tools and creates the same workbench.
 
 **Mac.** Open Terminal and paste:
 

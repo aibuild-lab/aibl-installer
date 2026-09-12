@@ -1,13 +1,21 @@
 # AIBL Installer
 
-[Start here: choose your program](START-HERE.md)
+[Start here](START-HERE.md)
 
-One entry point for every AI Build Lab program. Choose **Agent Essentials**,
-**Agent Workforce** (which includes Essentials, and The Lab for three months),
-or **The Lab** (which includes Essentials). You open the app you chose on your
-home folder and paste one prompt; the app checks your machine, installs only
-what is missing, guides the two browser sign-ins, and creates your own private
-workbench repository with independent history, then you open it in the app.
+One entry point for every AI Build Lab program, and it never asks which one
+you are in. You open the app you chose on your home folder and paste one prompt;
+the app checks your machine, installs only what is missing, guides the two
+browser sign-ins, and creates your own private workbench repository with
+independent history, then you open it in the app. That workbench is the
+Essentials hub.
+
+Programs join the hub later, from inside it: **Agent Workforce** (which includes
+Essentials, and The Lab for three months) or **The Lab** (which includes
+Essentials). When your program starts, one command in your workbench,
+`scripts/enroll.py` from these same installer files, reads which program
+repositories your GitHub account can read, shows you the list, and on your
+yes records the choice and hands off to that program's adoption skill. Run it
+again whenever you join something new; what is already there is left alone.
 
 You work in the app you chose, Claude or Codex; the installer sets up its
 command-line twin alongside. Git, GitHub CLI, Python and Node are the shared

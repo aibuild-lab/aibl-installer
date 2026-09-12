@@ -7,7 +7,7 @@ if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $Launcher
   $DistributionLock = (Resolve-Path -LiteralPath $DistributionLock).Path
 }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
-# The program menu lives in course-options.json and is asked by scripts\course_setup.py once the tools are ready.
+# The installer builds the Essentials hub for everyone; programs join the workbench later through scripts\enroll.py. An explicit -Course is kept for pinned cohort setups.
 function Refresh-ProcessPath {
   $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
 }
@@ -82,5 +82,5 @@ if ($InstallerCommit) {
   exit $LASTEXITCODE
 }
 if ($Course) { & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness; exit $LASTEXITCODE }
-& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --harness $Harness
+& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course agent-essentials --harness $Harness
 exit $LASTEXITCODE

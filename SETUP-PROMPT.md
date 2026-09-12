@@ -38,7 +38,7 @@ If it is anything else (Desktop, Documents, Downloads, a project), stop:
 
 Do not continue from the wrong folder.
 
-## Step 2: Get the installer files and ask which program
+## Step 2: Get the installer files
 
 The installer's own files (the program list, the setup script, the secrets guard) live in a public repository. Put them at `~/GitHub/aibl-installer`:
 
@@ -47,7 +47,7 @@ The installer's own files (the program list, the setup script, the secrets guard
 
 If `git` is not available yet, that is step 0 of START-HERE not done: on a Mac, run `xcode-select --install` and hand off as in step 4.1; on Windows, send the student to install Git for Windows from git-scm.com, restart this app, and paste the prompt again.
 
-Read `~/GitHub/aibl-installer/course-options.json`. Present every program whose `menu` is true, by label, and ask which one the student is joining. Remember its `id`. If the student is not sure, the labels say what each includes; do not choose for them.
+Do not ask which program the student is in. The installer builds the Essentials workbench for everyone; programs join it later from inside the workbench (`scripts/enroll.py` in these same files). If the student asks about their program now, say: "Your program lands in this workbench after setup, with one command. We build the workbench first."
 
 ## Step 3: Detection sweep, plan, and one confirmation
 
@@ -266,16 +266,15 @@ Only the refusal counts. If Codex ran the command or answered normally, the trus
 
 ## Step 8: Create the workbench
 
-This is the one step that runs a tested script rather than you improvising, so every student's workbench is made the same way. Run, with `<id>` from step 2 and `<harness>` as `claude` or `codex`:
+This is the one step that runs a tested script rather than you improvising, so every student's workbench is made the same way. Run, with `<harness>` as `claude` or `codex`:
 
-- Mac: `python3 ~/GitHub/aibl-installer/scripts/course_setup.py --course <id> --harness <harness> --repo-name my-workbench --no-launch`
-- Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\course_setup.py --course <id> --harness <harness> --repo-name my-workbench --no-launch` (or `python` if `py` is absent)
+- Mac: `python3 ~/GitHub/aibl-installer/scripts/course_setup.py --course agent-essentials --harness <harness> --repo-name my-workbench --no-launch`
+- Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\course_setup.py --course agent-essentials --harness <harness> --repo-name my-workbench --no-launch` (or `python` if `py` is absent)
 
-It checks tool versions, checks that the student's GitHub account can read the program's repositories, creates the private repository `<username>/my-workbench` from the Essentials template, clones it to `~/GitHub/my-workbench`, sets a repo-local Git identity, seeds the context files, and writes a receipt. It prints JSON at the end; you read it, the student does not need to.
+It checks tool versions, checks that the student's GitHub account can read the Essentials template, creates the private repository `<username>/my-workbench` from the Essentials template, clones it to `~/GitHub/my-workbench`, sets a repo-local Git identity, seeds the context files, and writes a receipt. It prints JSON at the end; you read it, the student does not need to.
 
 If it prints `Setup paused: ...`, relay the sentence in plain words and act on it:
 - "accept the course invitation": the student opens GitHub notifications (or the invitation email) and accepts the AI Build Lab organization invitation, then you re-run the same command. Nothing is lost between runs.
-- A bundled program reported as "not yet" is not a stop; setup continues and that program lands later.
 - Anything else: rule 5.
 
 If `~/GitHub/my-workbench` already existed from a previous attempt, the script reuses it; it never creates a duplicate.
@@ -317,7 +316,7 @@ End with one clean message, real versions filled in:
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
 >
-> Every program you join lands inside that same folder; you never set up a second one. If anything looks wrong, ask in your program's Slack channel with a screenshot."
+> Every program you join lands inside that same folder, with one command from inside it when your program starts; you never set up a second one. If anything looks wrong, ask in your program's Slack channel with a screenshot."
 
 ## When something fails
 

@@ -1,9 +1,15 @@
 # Shared course installer contract
 
-One public entry selects the program from the registry in course-options.json,
-which lists every program with the site ledger's ids, its publisher repository,
-what it requires (checked strictly) and what it includes (checked softly and
-reported). Adding a program is one line there. The earlier Agent Native
+One public entry builds the Essentials hub for every student and does not ask
+which program they are in. The registry in course-options.json lists every
+program with the site ledger's ids, its publisher repository, what it requires
+(checked strictly by the installer for the hub), what it includes (checked
+softly and reported) and its adoption skill. Programs join the hub later from
+inside the workbench through scripts/enroll.py, which reads that registry, asks
+GitHub what the signed-in account can read, confirms with the student, records
+the decision in .aibl/enroll.json and names the adoption skill to run; it never
+handles release pins. Adding a program is one line in the registry and no
+installer change. An explicit course argument remains for pinned cohort setups. The earlier Agent Native
 OS workshop is served by aibuild-lab/workshop-installer, which is frozen; nothing
 from that route is installed here.
 
@@ -21,7 +27,7 @@ version. Native Windows and first-time student setup require separate observed
 walkthroughs. No setup-time claim is accepted.
 
 Source validation: scripts/validate-course-setup. The local suite includes all
-existing guard tests plus the new course-selector and recovery scenarios.
+existing guard tests plus the course-selector, enroll and recovery scenarios.
 Source merging is not permission to publish private course content, enroll users
 or change device/account permissions. Any existing failed required check must be
 resolved; never present missing runtime proof as passed.
