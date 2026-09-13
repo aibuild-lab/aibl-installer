@@ -2,12 +2,12 @@
 
 **One installer, every program, your own workbench.** You will end with one
 private repository on your GitHub account, open in the app you chose. The
-installer does not ask which program you are in. Supported programs can be added to that workbench later through verified adoption.
-Program selection does not itself install course files; The Lab has no adoption route yet.
+installer does not ask which program you are in; the workbench is the same for
+everyone, and programs join it later with one command from inside it.
 
-You need: a GitHub account, access to the private Essentials repository established, and an
-account for the app you want to work in (Claude, or Codex). Sign-ins happen in
-your browser. Nothing here asks you to paste a token or a password into chat.
+You need: a free GitHub account, and an account for the app you want to work in
+(Claude, or Codex). No invitation is needed to set up. Sign-ins happen in your
+browser. Nothing here asks you to paste a token or a password into chat.
 
 ## Step 0: get Git
 
@@ -16,23 +16,16 @@ The apps cannot start a local session without Git. Do this first.
 - **Mac:** open Terminal (Cmd + Space, type Terminal, Enter), type `git --version`,
   press Enter. If a dialog offers to install the command line developer tools,
   click Install and wait for it to finish (10 to 15 minutes, no password).
-- **Windows:** install [Git for Windows](https://git-scm.com/downloads/win)
+- **Windows:** install [Git for Windows](https://git-scm.com/install/windows)
   with the default choices. If the app was already open, close it and reopen it.
-
-## Step 0b: accept your GitHub invitation
-
-Make sure the GitHub account you will use can read `aibuild-lab/agent-essentials`.
-If the course team sent an invitation, accept it. If access is unavailable,
-check the account with the team before setup. Free Essentials still uses a
-private repository. Later paid-program access is a separate step; the installer
-does not grant access or determine whether an invitation is pending.
 
 ## Step 1: download the app you chose, and sign in
 
-- **Claude:** [claude.ai/download](https://claude.ai/download). Sign in, then
+- **Claude:** [claude.com/download](https://claude.com/download). Sign in, then
   open the Code tab.
-- **Codex:** [the Codex app](https://learn.chatgpt.com/codex/app). Sign in
-  with your ChatGPT account.
+- **Codex:** [the ChatGPT app](https://chatgpt.com/download/), which has Codex
+  inside it. Sign in with your ChatGPT account, then choose Codex from the menu
+  at the top left.
 
 Pick one. The course is the same in both; you can switch later.
 
@@ -72,17 +65,19 @@ chat instead. Same setup, delivered by hand.
 
 ## When setup pauses
 
-- **"Accept the course invitation":** step 0b was skipped. Accept it, then
-  tell the app to try again. Nothing is lost between attempts.
 - **A popup you did not expect:** ask the app what it is. It will tell you what
   to click and why.
-- **Existing folder or repository name:** the app reuses it if it is yours; it
-  never deletes or replaces anything.
+- **Existing folder or repository name:** the app reuses it if it is yours and
+  empty; if a repository called my-workbench already has work in it, it asks you
+  for another name. It never deletes or replaces anything.
 - **Restricted device:** bring the exact error to your program's Slack channel.
   Do not disable safeguards to get around a policy.
 
 Your workbench lives at `~/GitHub/my-workbench`, outside cloud-synced folders,
-with a Git identity set only inside it.
+with a Git identity set only inside it. Inside: `context/` (what your agent
+knows about you), `library/` (what you hand it to read), `blueprints/` (plans
+it can follow), the agent notes `CLAUDE.md` and `AGENTS.md`, and the starter
+skills for both apps. The name is yours; rename it whenever you like.
 
 ## Fallback: the terminal route
 
@@ -123,8 +118,6 @@ Do not read "unit tests pass" as "beginner tested." Local records track setup
 steps, failures, browser interventions and elapsed time; no telemetry leaves
 the machine.
 
-The earlier Agent Native OS workshop keeps its own installer at
-[aibuild-lab/workshop-installer](https://github.com/aibuild-lab/workshop-installer).
 [Claude supported installation](https://code.claude.com/docs/en/setup).
 [Codex supported installation](https://learn.chatgpt.com/codex/cli).
 

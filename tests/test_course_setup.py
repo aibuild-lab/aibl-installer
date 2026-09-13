@@ -5,7 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import course_setup as setup
 
 class Fake:
- def __init__(self):self.calls=[];self.exists=False;self.github=True;self.inactive_status_invalid=False;self.claude=True;self.codex=True;self.access=True;self.private=True;self.template='aibuild-lab/agent-essentials'
+ def __init__(self):self.calls=[];self.exists=False;self.github=True;self.inactive_status_invalid=False;self.claude=True;self.codex=True;self.access=True;self.private=True;self.template=None;self.size=0;self.head='';self.pushed=''
  def __call__(self,args,cwd=None,interactive=False):
   self.calls.append(args)
   if args[-1]=='--version':return {'git':'git version 2.49.0','gh':'gh version 2.70.0','claude':'2.1.228','node':'v22.12.0','codex':'codex-cli 0.147.0'}.get(args[0],'Python 3.13.0')
@@ -25,9 +25,22 @@ class Fake:
     if not self.access:raise setup.SetupError('No access','not_found')
     return json.dumps({'private':True})
    if not self.exists:raise setup.SetupError('HTTP 404','not_found')
-   return json.dumps({'private':self.private,'full_name':'synthetic-student/my-workbench','id':100,'template_repository':{'full_name':self.template}})
+   return json.dumps({'private':self.private,'full_name':'synthetic-student/my-workbench','id':100,'size':self.size,'template_repository':({'full_name':self.template} if self.template else None)})
   if args[:3]==['git','remote','get-url']:return 'https://github.com/synthetic-student/my-workbench.git'
   if args==['git','rev-parse','--show-toplevel']:return str(Path(cwd).resolve())
+  # The starter route stages a fresh single-root history and pushes it once.
+  if args[:2]==['git','init']:(Path(cwd)/'.git').mkdir(exist_ok=True);return ''
+  if args[:3]==['git','remote','add']:return ''
+  if args[:3]==['git','rev-parse','--verify']:
+   if not self.head:raise setup.SetupError('fatal: Needed a single revision')
+   return self.head
+  if args[:2]==['git','add']:return ''
+  if args[:2]==['git','commit']:self.head='a1b2c3d4';return ''
+  if args==['git','rev-parse','HEAD']:return self.head
+  if args[:3]==['git','status','--porcelain']:return ''
+  if args[:3]==['git','rev-list','--count']:return '1' if self.head else '0'
+  if args[:3]==['git','ls-remote','--heads']:return self.pushed
+  if args[:2]==['git','push']:self.pushed=self.head+'\trefs/heads/main';return ''
   if args[:3]==['git','config','--local']:
    if '--get' in args:raise setup.SetupError('not set')
    return ''
@@ -48,13 +61,14 @@ class SetupTests(unittest.TestCase):
  def test_registry_ids_are_the_ledger_slugs_and_resolve(self):
   reg=setup.registry();ids=[p['id'] for p in reg['programs']]
   self.assertEqual(ids,['agent-essentials','agent-workforce','the-lab'])
-  self.assertEqual(reg['hub']['template'],'aibuild-lab/agent-essentials')
+  self.assertEqual(reg['hub']['starter'],'workbench-starter');self.assertIsNone(reg['hub'].get('template'))
   self.assertEqual({p['id']:p['release_product'] for p in reg['programs']},{'agent-essentials':'agent-essentials','agent-workforce':'agent-native-workforce','the-lab':'the-lab'})
   for p in reg['programs']:
-   r=setup.choose(p['id']);self.assertEqual(r['template'],'aibuild-lab/agent-essentials');self.assertTrue(r['access'])
+   r=setup.choose(p['id']);self.assertIsNone(r['template']);self.assertEqual(r['starter'],'workbench-starter')
    for ref in (*p['requires'],*p['includes']):self.assertIn(ref,ids)
-  w=setup.choose('agent-workforce');self.assertEqual(w['access'],['aibuild-lab/agent-essentials','aibuild-lab/agent-native-workforce']);self.assertEqual([i['id'] for i in w['included']],['the-lab'])
-  l=setup.choose('the-lab');self.assertEqual(l['access'],['aibuild-lab/agent-essentials','aibuild-lab/the-lab']);self.assertEqual(l['included'],[])
+  e=setup.choose('agent-essentials');self.assertEqual(e['access'],[]);self.assertEqual(e['start_skill'],'aibl-what-do-i-have')
+  w=setup.choose('agent-workforce');self.assertEqual(w['access'],['aibuild-lab/agent-native-workforce']);self.assertEqual([i['id'] for i in w['included']],['the-lab'])
+  l=setup.choose('the-lab');self.assertEqual(l['access'],['aibuild-lab/the-lab']);self.assertEqual(l['included'],[])
  def test_included_program_access_is_reported_not_required(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake()
@@ -74,10 +88,10 @@ class SetupTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();launched=[]
    def capture(args,**kwargs):
-    if args[0] in ('claude','codex') and len(args)==2 and 'Essentials' in args[1]:launched.append(args);return ''
+    if args[0] in ('claude','codex') and len(args)==2 and 'workbench' in args[1]:launched.append(args);return ''
     return f(args,**kwargs)
    with contextlib.redirect_stdout(io.StringIO()):setup.setup(setup.choose('agent-essentials'),Path(d)/'local','my-workbench',Path(d)/'state',capture,False,harness='codex')
-   self.assertEqual(len(launched),1);self.assertEqual(launched[0][0],'codex');self.assertNotIn('Use /aibl',launched[0][1]);self.assertNotRegex(launched[0][1],r'(^|\s)/aibl-');self.assertIn('.claude/skills/aibl-setup/SKILL.md',launched[0][1])
+   self.assertEqual(len(launched),1);self.assertEqual(launched[0][0],'codex');self.assertNotIn('Use /aibl',launched[0][1]);self.assertNotRegex(launched[0][1],r'(^|\s)/aibl-');self.assertIn('Use the aibl-what-do-i-have skill.',launched[0][1])
  def test_switching_apps_on_an_existing_project_needs_a_fresh_name(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();self.run_setup(f,d,harness='claude')
@@ -101,7 +115,7 @@ class SetupTests(unittest.TestCase):
  def test_fresh_and_resume_do_not_duplicate_repository(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();self.assertEqual(self.run_setup(f,d)['status'],'ready');self.run_setup(f,d)
-   self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in f.calls),1);self.assertEqual(sum(c[:3]==['gh','repo','clone'] for c in f.calls),1)
+   self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in f.calls),1);self.assertEqual(sum(c[:2]==['git','push'] for c in f.calls),1);self.assertEqual(sum(c[:2]==['git','init'] for c in f.calls),1)
    self.assertTrue(all('--global' not in c for c in f.calls))
  def test_missing_logins_recover_visibly_and_recheck_selected_api(self):
   with tempfile.TemporaryDirectory() as d:
@@ -155,7 +169,7 @@ class SetupTests(unittest.TestCase):
    self.assertFalse(f.exists)
  def test_repository_collision_preserved(self):
   with tempfile.TemporaryDirectory() as d:
-   f=Fake();f.exists=True;f.template='other/template'
+   f=Fake();f.exists=True;f.size=42
    with self.assertRaisesRegex(setup.SetupError,'collision'):self.run_setup(f,d)
    self.assertFalse(any(c[:3]==['gh','repo','clone'] for c in f.calls))
  def test_public_name_collision_preserved(self):
@@ -196,4 +210,39 @@ class SetupTests(unittest.TestCase):
     return f(args,**kwargs)
    with self.assertRaisesRegex(setup.SetupError,'Network unavailable'):self.run_setup(fail,d)
    self.assertFalse(f.exists)
+ def test_essentials_needs_no_invitation_and_seeds_the_hub_from_the_starter(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();f.access=False
+   r=self.run_setup(f,d,course='agent-essentials');self.assertEqual(r['status'],'ready');self.assertEqual(r['next'],'/aibl-what-do-i-have')
+   self.assertFalse(any(c[:2]==['gh','api'] and c[2].startswith('repos/aibuild-lab/') for c in f.calls))
+   create=[c for c in f.calls if c[:3]==['gh','repo','create']];self.assertEqual(create,[['gh','repo','create','synthetic-student/my-workbench','--private']])
+   self.assertFalse(any(c[:3]==['gh','repo','clone'] for c in f.calls))
+   self.assertIn(['git','init','--initial-branch=main'],[c for c in f.calls if c[:2]==['git','init']])
+   self.assertEqual(sum(c[:2]==['git','push'] for c in f.calls),1)
+   folder=Path(d)/'local'/'my-workbench'
+   for rel in ('CLAUDE.md','AGENTS.md','README.md','.gitignore','context/README.md','library/README.md','blueprints/README.md','.claude/skills/aibl-what-do-i-have/SKILL.md','.claude/skills/aibl-personalize/SKILL.md','.claude/skills/aibl-checkpoint/SKILL.md','.agents/skills/aibl-what-do-i-have/SKILL.md','.agents/skills/aibl-personalize/SKILL.md','.agents/skills/aibl-checkpoint/SKILL.md'):
+    self.assertTrue((folder/rel).is_file(),rel)
+   self.assertEqual((folder/'.agents/skills/aibl-checkpoint/SKILL.md').read_bytes(),(folder/'.claude/skills/aibl-checkpoint/SKILL.md').read_bytes())
+   self.assertFalse((folder/'context'/'project.md').exists())
+   self.assertFalse(any(c[1:3]==['scripts/aibl.py','setup'] for c in f.calls if len(c)>2))
+ def test_starter_files_read_only_from_the_installer_and_mirror_skills_for_codex(self):
+  files=setup.starter_files('workbench-starter')
+  self.assertIn('CLAUDE.md',files);self.assertIn('.agents/skills/aibl-personalize/SKILL.md',files)
+  self.assertEqual(files['.agents/skills/aibl-personalize/SKILL.md'],files['.claude/skills/aibl-personalize/SKILL.md'])
+  self.assertTrue(all(not k.startswith('/') and '..' not in k for k in files))
+  self.assertIn('read every file in `context/`',files['CLAUDE.md'].decode('utf-8'))
+  with self.assertRaisesRegex(setup.SetupError,'starter'):setup.starter_files('no-such-folder')
+ def test_empty_repository_made_by_hand_is_adopted_and_one_with_history_is_not(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();f.exists=True;f.size=0
+   r=self.run_setup(f,d,course='agent-essentials');self.assertEqual(r['status'],'ready');self.assertFalse(any(c[:3]==['gh','repo','create'] for c in f.calls))
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();f.exists=True;f.size=7
+   with self.assertRaisesRegex(setup.SetupError,'already has work'):self.run_setup(f,d,course='agent-essentials')
+   self.assertFalse(any(c[:2]==['git','push'] for c in f.calls))
+ def test_interrupted_seed_with_foreign_files_is_preserved(self):
+  with tempfile.TemporaryDirectory() as d:
+   temp=Path(d)/'local'/'.my-workbench-clone-in-progress';temp.mkdir(parents=True);(temp/'.git').mkdir();(temp/'theirs.txt').write_text('not ours')
+   with self.assertRaisesRegex(setup.SetupError,'preserved'):self.run_setup(Fake(),d,course='agent-essentials')
+   self.assertEqual((temp/'theirs.txt').read_text(),'not ours')
 if __name__=='__main__':unittest.main()

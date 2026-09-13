@@ -1,9 +1,11 @@
 {
   "schema_version": "aibl.program-registry/v1",
-  "about": "One line per program. Ids are the site ledger's program slugs. The installer builds the hub (Essentials) and never asks which program a student is in; 'menu' is kept for tooling that lists programs but the installer no longer reads it. scripts/enroll.py walks every non-foundation entry later, inside the workbench: 'publisher' is the repository a student must be able to read; 'adopt_skill' is the workbench skill that verifies and applies that program's release (null means no adoption route yet, so the student asks for supported delivery). 'requires' is checked strictly by the installer for the hub; 'includes' is reported softly by enroll (inclusion does not prove invitation state). 'source_repository' is where the release is built and is informational here. 'release_product' is the id the workbench's adoption tool and the publisher's release pins use; where it differs from 'id', the registry is the only place that knows both, so nothing in the release tooling has to rename.",
+  "about": "One line per program. Ids are the site ledger's program slugs. The installer builds the hub (Essentials) and never asks which program a student is in; 'menu' is kept for tooling that lists programs but the installer no longer reads it. scripts/enroll.py walks every non-foundation entry later, inside the workbench: 'publisher' is the repository a student must be able to read for that program; the hub itself is built from the installer's own 'hub.starter' folder and needs no invitation; 'adopt_skill' is the workbench skill that verifies and applies that program's release (null means no adoption route yet, so the student asks for supported delivery). 'requires' is checked strictly by the installer for the hub; 'includes' is reported softly by enroll (inclusion does not prove invitation state). 'source_repository' is where the release is built and is informational here. 'release_product' is the id the workbench's adoption tool and the publisher's release pins use; where it differs from 'id', the registry is the only place that knows both, so nothing in the release tooling has to rename.",
   "hub": {
-    "template": "aibuild-lab/agent-essentials",
-    "default_name": "my-workbench"
+    "starter": "workbench-starter",
+    "default_name": "my-workbench",
+    "template": null,
+    "template_note": "Retired 09-13-2026. The hub is seeded from hub.starter; a pinned cohort distribution still seeds from its own release bundle. A template repository here would reintroduce the invitation gate for the free program."
   },
   "programs": [
     {
@@ -16,9 +18,7 @@
       "source_repository": "aibuild-lab/agent-native-workforce-internal",
       "teams": "any students-* team",
       "menu": true,
-      "requires": [
-        "agent-essentials"
-      ],
+      "requires": [],
       "includes": [],
       "requirements": [
         "git",
@@ -26,7 +26,7 @@
         "python",
         "node"
       ],
-      "start_skill": "aibl-setup"
+      "start_skill": "aibl-what-do-i-have"
     },
     {
       "id": "agent-workforce",
@@ -39,7 +39,6 @@
       "teams": "students-agent-workforce-*",
       "menu": true,
       "requires": [
-        "agent-essentials",
         "agent-workforce"
       ],
       "includes": [
@@ -64,7 +63,6 @@
       "teams": "students-the-lab-*",
       "menu": true,
       "requires": [
-        "agent-essentials",
         "the-lab"
       ],
       "includes": [],

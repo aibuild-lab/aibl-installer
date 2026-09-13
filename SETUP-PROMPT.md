@@ -22,7 +22,7 @@ Read the whole file before you begin. Follow it in order. Do not summarize it to
 
 Greet briefly:
 
-> "Hi. I am going to set up your machine for your AI Build Lab program. I will check what is already installed, install only what is missing, guide two sign-ins, and create your private workbench. Before I start, let me check your operating system and what is already here."
+> "Hi. This is the AI Build Lab installer. I am going to set up your computer for your program. I will check what is already installed, install only what is missing, guide two sign-ins in your browser, and create your own private workbench. Before I start, let me check which computer this is and what is already here."
 
 **Operating system.** Run `uname -s` in a shell. `Darwin` means Mac. Anything with `MINGW`, `MSYS`, or `CYGWIN`, or a PowerShell prompt, means Windows. If it is unclear, ask.
 
@@ -271,10 +271,10 @@ This is the one step that runs a tested script rather than you improvising, so e
 - Mac: `python3 ~/GitHub/aibl-installer/scripts/course_setup.py --course agent-essentials --harness <harness> --repo-name my-workbench --no-launch`
 - Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\course_setup.py --course agent-essentials --harness <harness> --repo-name my-workbench --no-launch` (or `python` if `py` is absent)
 
-It checks tool versions, checks that the student's GitHub account can read the Essentials template, creates the private repository `<username>/my-workbench` from the Essentials template, clones it to `~/GitHub/my-workbench`, sets a repo-local Git identity, seeds the context files, and writes a receipt. It prints JSON at the end; you read it, the student does not need to.
+It checks tool versions, creates the empty private repository `<username>/my-workbench`, fills it from the installer's own `workbench-starter` folder (the agent notes, the three folders, the starter skills, for both apps), makes the first commit and push, sets a repo-local Git identity, and writes a receipt. No invitation and no template repository are involved; the workbench is the same for every program, and programs join it later from inside. It prints JSON at the end; you read it, the student does not need to.
 
 If it prints `Setup paused: ...`, relay the sentence in plain words and act on it:
-- "accept the course invitation": the student opens GitHub notifications (or the invitation email) and accepts the AI Build Lab organization invitation, then you re-run the same command. Nothing is lost between runs.
+- "name collision" or "already has work in it": a repository called my-workbench already exists on their account with history in it. Ask whether it is theirs and wanted; if so rerun with `--repo-name` and a name they choose. Never delete or empty anything.
 - Anything else: rule 5.
 
 If `~/GitHub/my-workbench` already existed from a previous attempt, the script reuses it; it never creates a duplicate.
@@ -290,7 +290,7 @@ Tell the student, using the block for your harness:
 > 1. Start a new session in this app (top left, same way you started this one).
 > 2. When it asks for a folder, choose `GitHub`, then `my-workbench`. On a Mac: Cmd + Shift + H, then GitHub, then my-workbench. On Windows: This PC, Local Disk (C:), Users, your name, GitHub, my-workbench.
 > 3. If it asks whether you trust the folder, click Trust. It is your folder.
-> 4. In the new session, type: `Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact.`"
+> 4. In the new session, type a forward slash. A small menu opens; every item starting with `aibl-` came with your workbench. Pick `aibl-what-do-i-have`, or type: `Use /aibl-what-do-i-have. Tell me what is in this workbench and what it can do, in plain words.`"
 
 **Codex:**
 
@@ -298,7 +298,7 @@ Tell the student, using the block for your harness:
 >
 > 1. In this app, open a new project or folder and choose `GitHub`, then `my-workbench` (Mac: your home folder, then GitHub; Windows: This PC, Local Disk (C:), Users, your name, GitHub).
 > 2. If it asks whether you trust the folder, say yes. It is your folder.
-> 3. In the new session, paste: `Read .claude/skills/aibl-setup/SKILL.md and follow it. Continue my Essentials prerequisite and help me make the first useful artifact.`"
+> 3. In the new session, type a dollar sign. A small menu opens; every item starting with `aibl-` came with your workbench. Pick `aibl-what-do-i-have`, or type: `Use the aibl-what-do-i-have skill. Tell me what is in this workbench and what it can do, in plain words.`"
 
 ## Step 10: Final summary
 
@@ -316,7 +316,7 @@ End with one clean message, real versions filled in:
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
 >
-> Every program you join lands inside that same folder, with one command from inside it when your program starts; you never set up a second one. If anything looks wrong, ask in your program's Slack channel with a screenshot."
+> Inside it: `context/` (what your agent knows about you; empty until it interviews you), `library/` (what you hand it to read), `blueprints/` (plans it can follow), and the starter skills. Every program you join lands inside that same folder, with one command from inside it when your program starts; you never set up a second one. If anything looks wrong, ask in your program's Slack channel with a screenshot."
 
 ## When something fails
 

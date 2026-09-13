@@ -18,7 +18,7 @@ import course_setup as setup
 class LocalServices:
     def __init__(self,root,template=None):
         self.root=Path(root);self.template=template;self.server=self.root/'student.git'
-        self.calls=[];self.interrupt_clone=False;self.lose_create_reply=False
+        self.calls=[];self.interrupt_clone=False;self.interrupt_push=False;self.lose_create_reply=False
         self.env={**os.environ,'GIT_CONFIG_GLOBAL':os.devnull,'GIT_CONFIG_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0'}
 
     def git(self,*args,cwd=None):
@@ -33,6 +33,11 @@ class LocalServices:
         self.calls.append(args)
         if args==['git','fetch','origin']:
             return self.git('fetch',str(self.server),'+refs/heads/*:refs/remotes/origin/*',cwd=cwd)
+        # The starter route talks to origin twice: ls-remote before the first push, and the push itself. Both go to the local bare server.
+        if args==['git','ls-remote','--heads','origin']:return self.git('ls-remote','--heads',str(self.server),cwd=cwd)
+        if args[:2]==['git','push']:
+            if self.interrupt_push:self.interrupt_push=False;raise setup.SetupError('Interrupted push','network')
+            return self.git('push',str(self.server),'HEAD:refs/heads/main',cwd=cwd)
         if args[0]=='git':return self.git(*args[1:],cwd=cwd)
         if args[0]==sys.executable:
             p=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',capture_output=True,env=self.env)
@@ -48,17 +53,11 @@ class LocalServices:
         if args[:2]==['gh','api']:
             if args[2].startswith('repos/aibuild-lab/'):return json.dumps({'private':True})
             if not self.server.exists():raise setup.SetupError('HTTP 404','not_found')
-            return json.dumps({'private':True,'full_name':'synthetic-student/my-workbench','id':456,'default_branch':'main','template_repository':{'full_name':'aibuild-lab/agent-essentials'}})
+            size=0 if not self.git('ls-remote','--heads',str(self.server)) else 1
+            return json.dumps({'private':True,'full_name':'synthetic-student/my-workbench','id':456,'size':size,'default_branch':'main','template_repository':None})
         if args[:3]==['gh','repo','create']:
-            seed=self.root/'seed';seed.mkdir()
-            if self.template:shutil.copytree(self.template,seed,dirs_exist_ok=True,ignore=shutil.ignore_patterns('.git','.aibl-local','__pycache__'))
-            else:
-                (seed/'scripts').mkdir();(seed/'scripts/aibl.py').write_text("from pathlib import Path\np=Path('context');p.mkdir(exist_ok=True)\nf=p/'project.md'\nif not f.exists():f.write_text('Synthetic starter')\n")
-            self.git('init','--initial-branch=main',cwd=seed)
-            self.git('config','--local','user.name','Synthetic Template',cwd=seed)
-            self.git('config','--local','user.email','fixture@example.invalid',cwd=seed)
-            self.git('add','.',cwd=seed);self.git('commit','-m','Independent synthetic student start',cwd=seed)
-            self.git('clone','--bare',str(seed),str(self.server))
+            # A private repository created without a template is empty; the installer seeds it from its starter folder.
+            self.git('init','--bare','--initial-branch=main',str(self.server))
             if self.lose_create_reply:self.lose_create_reply=False;raise setup.SetupError('Lost creation reply','network')
             return ''
         if args[:3]==['gh','repo','clone']:
@@ -82,23 +81,29 @@ class GitSetupIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td).resolve();services=LocalServices(root)
             result=self.setup_project(services,root);project=Path(result['workspace'])
-            self.assertEqual((project/'context/project.md').read_text(),'Synthetic starter')
+            self.assertTrue((project/'context/README.md').is_file());self.assertFalse((project/'context/project.md').exists())
+            self.assertTrue((project/'.claude/skills/aibl-personalize/SKILL.md').is_file());self.assertTrue((project/'.agents/skills/aibl-personalize/SKILL.md').is_file())
+            self.assertEqual(services.git('rev-list','--count','HEAD',cwd=project),'1')
+            self.assertEqual(services.git('ls-remote','--heads',str(services.server)).split()[1],'refs/heads/main')
             (project/'context/project.md').write_text('Student choice')
             again=self.setup_project(services,root)
             self.assertEqual((project/'context/project.md').read_text(),'Student choice')
             self.assertEqual(result['workspace'],again['workspace'])
             self.assertEqual(services.git('config','--local','user.email',cwd=project),'123+synthetic-student@users.noreply.github.com')
             self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in services.calls),1)
-            self.assertEqual(sum(c[:3]==['gh','repo','clone'] for c in services.calls),1)
+            self.assertEqual(sum(c[:3]==['gh','repo','clone'] for c in services.calls),0)
+            self.assertEqual(sum(c[:2]==['git','push'] for c in services.calls),1)
 
-    def test_partial_clone_resumes_without_second_repository(self):
+    def test_interrupted_push_resumes_without_second_repository_or_second_commit(self):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td).resolve();services=LocalServices(root);services.interrupt_clone=True
-            with self.assertRaisesRegex(setup.SetupError,'Interrupted clone'):self.setup_project(services,root)
-            result=self.setup_project(services,root)
-            self.assertTrue((Path(result['workspace'])/'context/project.md').is_file())
+            root=Path(td).resolve();services=LocalServices(root);services.interrupt_push=True
+            with self.assertRaisesRegex(setup.SetupError,'Interrupted push'):self.setup_project(services,root)
+            result=self.setup_project(services,root);project=Path(result['workspace'])
+            self.assertTrue((project/'context/README.md').is_file())
+            self.assertEqual(services.git('rev-list','--count','HEAD',cwd=project),'1')
             self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in services.calls),1)
-            self.assertEqual(sum(c[:3]==['gh','repo','clone'] for c in services.calls),1)
+            self.assertEqual(sum(c[:2]==['git','commit'] for c in services.calls),1)
+            self.assertEqual(sum(c[:2]==['git','push'] for c in services.calls),2)
 
     def test_creation_reply_lost_is_reconciled_before_retry(self):
         with tempfile.TemporaryDirectory() as td:
@@ -107,12 +112,12 @@ class GitSetupIntegrationTests(unittest.TestCase):
             self.assertEqual(self.setup_project(services,root)['status'],'ready')
             self.assertEqual(sum(c[:3]==['gh','repo','create'] for c in services.calls),1)
 
-    def test_incomplete_clone_with_work_is_preserved(self):
+    def test_interrupted_seed_with_work_is_preserved(self):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td).resolve();services=LocalServices(root);services.interrupt_clone=True
+            root=Path(td).resolve();services=LocalServices(root);services.interrupt_push=True
             with self.assertRaises(setup.SetupError):self.setup_project(services,root)
             practice=root/'projects/.my-workbench-clone-in-progress/my-work.md';practice.write_text('Keep me')
-            with self.assertRaisesRegex(setup.SetupError,'contains files'):self.setup_project(services,root)
+            with self.assertRaisesRegex(setup.SetupError,'preserved'):self.setup_project(services,root)
             self.assertEqual(practice.read_text(),'Keep me')
 
     def test_killed_setup_releases_operation_guard(self):
@@ -136,7 +141,7 @@ class GitSetupIntegrationTests(unittest.TestCase):
 class SetupEvidenceTests(unittest.TestCase):
     def test_failed_clone_records_boundary_and_not_run_stages(self):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td).resolve();services=LocalServices(root);services.interrupt_clone=True
+            root=Path(td).resolve();services=LocalServices(root);services.interrupt_push=True
             with contextlib.redirect_stdout(io.StringIO()),self.assertRaises(setup.SetupError):
                 setup.setup(setup.choose('agent-workforce'),root/'projects','my-workbench',root/'state',services,True)
             attempt=json.loads((root/'state/my-workbench.json').read_text())['attempts'][-1]

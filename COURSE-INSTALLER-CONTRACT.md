@@ -1,23 +1,27 @@
 # Shared course installer contract
 
-One public entry builds the Essentials hub for every student and does not ask
-which program they are in. The registry in course-options.json lists every
-program with the site ledger's ids, its publisher repository, what it requires
-(checked strictly by the installer for the hub), what it includes (checked
+One public entry builds the hub for every student and does not ask which
+program they are in. The hub is seeded from this repository's
+`workbench-starter/` folder (agent notes, `context/`, `library/`, `blueprints/`,
+the starter skills mirrored into `.claude/skills/` and `.agents/skills/`) into an
+empty private repository the installer creates; no template repository and no
+invitation are involved, so the free program needs no team membership. The
+registry in course-options.json lists every program with the site ledger's ids,
+its publisher repository, what it requires (checked strictly only when a program
+is named explicitly, as pinned cohort setups do), what it includes (checked
 softly and reported) and its adoption skill. Programs join the hub later from
 inside the workbench through scripts/enroll.py, which reads that registry, asks
 GitHub what the signed-in account can read, confirms with the student, records
 the decision in .aibl/enroll.json and names the adoption skill to run; selection is not installation and it never
 handles release pins. Adding a program is one line in the registry and no
-installer change. An explicit course argument remains for pinned cohort setups. The earlier Agent Native
-OS workshop is served by aibuild-lab/workshop-installer, which is frozen; nothing
-from that route is installed here.
+installer change. An explicit course argument remains for pinned cohort setups.
 
 Every program route uses Git, GitHub CLI, Python, Node, and the command-line
 twin of the app the student chose (Claude Code or Codex). The desktop app is
 what the student works in; SETUP-PROMPT.md is the guided, app-first entry and
-the shell launchers are the terminal fallback. Only the template creates a new independent Git history; Workforce is
-adopted as verified files later. Account consent remains in browser flows.
+the shell launchers are the terminal fallback. The starter seed is the single
+root of each student's independent Git history; Workforce is adopted as verified
+files later. Account consent remains in browser flows.
 No tokens, student data or private course payloads belong in this repository.
 
 Current tested local baseline: macOS, Python 3.13.12, Claude Code 2.1.228.
@@ -32,9 +36,10 @@ Source merging is not permission to publish private course content, enroll users
 or change device/account permissions. Any existing failed required check must be
 resolved; never present missing runtime proof as passed.
 
-Recovery preserves existing folders and private repositories. An interrupted empty clone can finish fetching its verified private origin
-and default branch. A partial clone containing work pauses for review; no
-student files are deleted. Kernel operation guards release automatically when
+Recovery preserves existing folders and private repositories. An interrupted
+seed resumes in the installer's own staging folder and pushes once; staging that
+contains work the starter did not write pauses for review; a repository with
+history under the chosen name is never emptied. No student files are deleted. Kernel operation guards release automatically when
 the owning process exits. Historical lock files remain held for diagnosis. Reruns recheck live authentication
 and private access instead of trusting prior completion flags.
 

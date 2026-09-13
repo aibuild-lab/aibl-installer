@@ -33,7 +33,7 @@ def resolve(program,reg):
     by_id={p['id']:p for p in reg['programs']}
     for ref in (*program['requires'],*program['includes']):
         if ref not in by_id:raise SetupError(f'Program registry names an unknown program: {ref}. Ask the course team to review the installer.')
-    return {**program,'template':reg['hub']['template'],'access':[by_id[r]['publisher'] for r in program['requires']],'included':[{'id':r,'label':by_id[r]['label'],'publisher':by_id[r]['publisher']} for r in program['includes']]}
+    return {**program,'template':reg['hub'].get('template'),'starter':reg['hub'].get('starter'),'access':[by_id[r]['publisher'] for r in program['requires']],'included':[{'id':r,'label':by_id[r]['label'],'publisher':by_id[r]['publisher']} for r in program['includes']]}
 def choose(course):
     reg=registry();programs=reg['programs']
     if course:
@@ -171,6 +171,61 @@ def resume_clone(folder,temporary,full,default_branch,runner):
     if folder.exists():raise SetupError('Destination appeared during cloning. Both folders are preserved; review before continuing.')
     temporary.rename(folder)
 
+def starter_files(starter):
+    """Every file under the installer's starter folder, plus a Codex copy of the Claude skills, as {relative posix path: bytes}."""
+    root=ROOT/starter
+    if not root.is_dir():raise SetupError('The installer is missing its workbench starter folder. Pull the installer again (git -C ~/GitHub/aibl-installer pull --ff-only) and rerun.')
+    files={}
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():raise SetupError('The workbench starter contains a symlink; the installer files are not trusted. Pull the installer again.')
+        if not path.is_file() or '__pycache__' in path.parts:continue
+        rel=path.relative_to(root).as_posix();files[rel]=path.read_bytes()
+        # Codex registers skills from .agents/skills/, Claude from .claude/skills/. One source in the installer, both folders in the workbench.
+        if rel.startswith('.claude/skills/'):files['.agents/skills/'+rel[len('.claude/skills/'):]]=files[rel]
+    if not files:raise SetupError('The workbench starter folder is empty. Pull the installer again.')
+    return files
+
+def seed_starter(folder,temporary,full,files,user,runner):
+    """Stage the starter in the installer's own folder, commit it as the single root of the student's history, push, then move it into place. Never rewrite a student's project."""
+    folder=Path(folder);temporary=Path(temporary)
+    if folder.exists():raise SetupError('Project destination is occupied. It is preserved; choose another name or review it first.')
+    if temporary.is_symlink():raise SetupError('Interrupted setup path is a symlink. Preserve it and choose a local folder.')
+    temporary.mkdir(parents=True,exist_ok=True)
+    if (temporary/'.git').is_symlink() or ((temporary/'.git').exists() and not (temporary/'.git').is_dir()):raise SetupError('Staging Git metadata is linked or unexpected. It is preserved.')
+    if not (temporary/'.git').exists():
+        if any(temporary.iterdir()):raise SetupError('Interrupted setup contains unrecognized work. It is preserved; ask for a review before resuming.')
+        runner(['git','init','--initial-branch=main'],cwd=temporary)
+        runner(['git','remote','add','origin','https://github.com/'+full+'.git'],cwd=temporary)
+    if not remote_matches(runner(['git','remote','get-url','origin'],cwd=temporary),full):raise SetupError('Staging origin differs from the private destination. It is preserved.')
+    if Path(runner(['git','rev-parse','--show-toplevel'],cwd=temporary)).resolve()!=temporary.resolve():raise SetupError('Staging is not the project root. It is preserved.')
+    for path in temporary.rglob('*'):
+        rel=path.relative_to(temporary).as_posix()
+        if rel=='.git' or rel.startswith('.git/'):continue
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):raise SetupError('Staging contains a linked or nonregular file; no files were changed.')
+        if path.is_file() and (rel not in files or path.read_bytes()!=files[rel]):raise SetupError('Staging contains changed or unrecognized work; it is preserved.')
+    for rel,data in files.items():
+        path=temporary/rel;path.parent.mkdir(parents=True,exist_ok=True)
+        if not path.exists():
+            with path.open('xb') as stream:stream.write(data)
+    runner(['git','config','--local','user.name',user.get('name') or user['login']],cwd=temporary)
+    runner(['git','config','--local','user.email',str(user['id'])+'+'+user['login']+'@users.noreply.github.com'],cwd=temporary)
+    try:head=runner(['git','rev-parse','--verify','HEAD'],cwd=temporary)
+    except SetupError:head=''
+    if not head:
+        runner(['git','add','--force','--',*sorted(files)],cwd=temporary)
+        runner(['git','commit','-m','Your workbench, day one'],cwd=temporary)
+        head=runner(['git','rev-parse','HEAD'],cwd=temporary)
+    if runner(['git','status','--porcelain'],cwd=temporary):raise SetupError('Staging has unfinished changes. Preserve it for review.')
+    if runner(['git','rev-list','--count','HEAD'],cwd=temporary)!='1':raise SetupError('The workbench must begin as a single-root history. Staging is preserved for review.')
+    remote=runner(['git','ls-remote','--heads','origin'],cwd=temporary)
+    if remote:
+        if remote.split()!=[head,'refs/heads/main']:raise SetupError('Private remote changed during setup. Both copies are preserved.')
+    else:
+        runner(['git','push','--set-upstream','origin','HEAD:refs/heads/main'],cwd=temporary)
+        if runner(['git','ls-remote','--heads','origin'],cwd=temporary).split()!=[head,'refs/heads/main']:raise SetupError('Initial private push was not verified. Rerun the same setup.')
+    if folder.exists():raise SetupError('Project destination appeared during setup. Preserve both folders.')
+    temporary.rename(folder)
+
 def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False,harness='claude'):
     started=time.monotonic();workspace=safe_workspace(workspace);name=repo_name(name)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
@@ -274,10 +329,13 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
         elif existing:
             if not existing['private']:raise SetupError('That name belongs to a public repository. Choose a new private workbench name; privacy is not changed automatically.')
             meta=existing;template=(meta.get('template_repository') or {}).get('full_name')
-            if template!=course['template'] and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
+            if course.get('template'):
+                if template!=course['template'] and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
+            # Starter route: resume our own creation, or adopt an empty repository the student made by hand. Anything with history is someone's work.
+            elif state.get('created_repository_id')!=meta.get('id') and meta.get('size',0)!=0:raise SetupError('Repository name collision. That repository already has work in it; choose a different name.')
         else:
-            state['creation_intent']={'repository':full,'template':course['template']};step('repository_creation_planned')
-            runner(['gh','repo','create',full,'--private','--template',course['template']])
+            state['creation_intent']={'repository':full,'template':course.get('template')};step('repository_creation_planned')
+            runner(['gh','repo','create',full,'--private',*(['--template',course['template']] if course.get('template') else [])])
         meta=json.loads(runner(['gh','api','repos/'+full]))
         if not meta.get('private') or meta.get('full_name','').lower()!=full.lower():raise SetupError('Private repository verification failed.')
         state['created_repository_id']=meta.get('id');step('private_repository_verified')
@@ -294,7 +352,8 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
                     with tempfile.TemporaryDirectory(prefix='aibl-pinned-release-') as bundle:
                         manifest,payload=download_bundle(distribution,bundle,runner)
                         seed_project(folder,temp,full,manifest,payload,distribution,distribution_sha256,user,runner)
-            else:resume_clone(folder,temp,full,meta.get('default_branch'),runner)
+            elif course.get('template'):resume_clone(folder,temp,full,meta.get('default_branch'),runner)
+            else:seed_starter(folder,temp,full,starter_files(course['starter']),user,runner)
         verify_existing(folder,full,runner)
         if distribution:
             from pinned_distribution import verify_installed_helper
@@ -312,13 +371,21 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             if not current:runner(['git','config','--local',key,value],cwd=folder)
         step('local_git_identity_verified')
         enter('student_context')
-        runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder);step('student_context_ready')
+        if (folder/'scripts/aibl.py').is_file():runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder)
+        else:
+            for sub in ('context','library','blueprints'):
+                if (folder/sub).is_symlink():raise SetupError('Workbench folders must not be symlinks. Preserve the project for diagnosis.')
+                (folder/sub).mkdir(exist_ok=True)
+        step('student_context_ready')
         onboarding=folder/'.aibl-local/onboarding.json'
         if onboarding.parent.is_symlink() or onboarding.is_symlink():raise SetupError('Private onboarding state must not be a symlink.')
         if not onboarding.exists():write(onboarding,{'started_at':state['attempts'][0]['started_at'],'course':course['id'],'harness':harness,'first_artifact':None,'measurement_scope':('Python setup only; Desktop authentication, session and exercise not observed' if desktop else 'Python setup and Claude exercise; OS bootstrap prompts and duration not captured')})
-        start_request='/aibl-teach' if distribution else '/aibl-setup'
-        prompt=('Use /aibl-teach in this workbench. Read the installed mission map and saved learning state; resume the pending checkpoint, or begin ANW-M0-01 if no learning record exists. Preserve prior attempts and ask for my actual choices and explanations.' if distribution else 'Use /aibl-setup. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.')
-        if harness=='codex':prompt=prompt.replace('Use /aibl-teach in this workbench.','Read .claude/skills/aibl-teach/SKILL.md in this workbench and follow it.').replace('Use /aibl-setup.','Read .claude/skills/aibl-setup/SKILL.md and follow it.')
+        start_skill=course.get('start_skill') or 'aibl-what-do-i-have'
+        start_request='/aibl-teach' if distribution else '/'+start_skill
+        if distribution:prompt='Use /aibl-teach in this workbench. Read the installed mission map and saved learning state; resume the pending checkpoint, or begin ANW-M0-01 if no learning record exists. Preserve prior attempts and ask for my actual choices and explanations.'
+        elif start_skill=='aibl-what-do-i-have':prompt='Use /aibl-what-do-i-have. Tell me what is in this workbench and what it can do, in plain words, then the one thing I should check before I close this session.'
+        else:prompt='Use /'+start_skill+'. Continue my Essentials prerequisite and help me make the first useful artifact. This setup selected '+course['label']+'.'
+        if harness=='codex':prompt=prompt.replace('Use /aibl-teach in this workbench.','Read .claude/skills/aibl-teach/SKILL.md in this workbench and follow it.').replace('Use /'+start_skill+'.','Use the '+start_skill+' skill.')
         if rehearsal_id:prompt=('This is isolated automated_test rehearsal '+rehearsal_id+'. Use /aibl-teach and the real installed missions. Every learning helper call must include --rehearsal '+rehearsal_id+' --actor automated_test. Record explicit automated test responses, never human answers, approval, assessment or credit. Resume the pending test checkpoint, or begin ANW-M0-01. Use the verified local candidate transport for adoption after the rehearsal prerequisites; never download a release or use a channel fallback.')
         if desktop:
             attempt['result']='files_ready_for_desktop';attempt['elapsed_seconds']=round(time.monotonic()-started,2);write(statefile,state)
