@@ -28,6 +28,13 @@ def find_workbench(explicit=None):
 
 def verify_engine(workbench,runner=command):
     """Read only. A pinned workbench must use its independently accepted installer."""
+    family=Path(workbench)/'.aibl'/'family.json'
+    if family.is_symlink():raise SetupError('Family record is linked; preserve it for review.','local_state')
+    if family.exists():
+        value=json.loads(family.read_text());commit=value.get('family',{}).get('installer_revision')
+        if not isinstance(commit,str) or not re.fullmatch('[a-f0-9]{40}',commit):raise SetupError('Family installer identity is damaged.','local_state')
+        if runner(['git','rev-parse','HEAD'],cwd=ROOT)!=commit or runner(['git','status','--porcelain'],cwd=ROOT):raise SetupError('Use the unchanged family installer; explicit family update is separate.','local_state')
+        return {'refreshed':False,'mode':'family','installer_commit':commit}
     record=Path(workbench)/'.aibl'/'distribution.json'
     if record.is_symlink():raise SetupError('Distribution record is linked; preserve it for review.','local_state')
     if not record.exists():return {'refreshed':False,'mode':'unpinned'}
@@ -61,8 +68,21 @@ def installed(workbench,release_product):
 
 def plan(workbench,reg=None,runner=command):
     reg=reg or registry();rows=[]
+    family=Path(workbench)/'.aibl'/'family.json'
+    if family.is_symlink():raise SetupError('Family record is linked.','local_state')
+    installed_family=json.loads(family.read_text()) if family.exists() else None
+    if installed_family:
+        reg=json.loads(json.dumps(reg))
+        for program in reg['programs']:
+            if program['id']=='agent-workforce':
+                program.update(publisher='aibuild-lab/agent-workforce',release_product='agent-workforce',adopt_skill=None)
+
     for p in programs(reg):
         row={'id':p['id'],'label':p['label'].split(' (')[0],'publisher':p['publisher'],'release_product':p['release_product'],'adopt_skill':p.get('adopt_skill'),'access':access(p['publisher'],runner),'installed':installed(workbench,p['release_product']),'included_by':None}
+        if installed_family and p['id']=='agent-workforce':
+            pin=installed_family.get('packages',{}).get('agent-workforce')
+            row['installed']=('agent-workforce-v'+pin['version']) if pin else None
+            row['family_adoption']=True
         rows.append(row)
     # Inclusion is catalog information. Repository readability never proves a pending invitation.
     for p in programs(reg):
@@ -74,6 +94,7 @@ def plan(workbench,reg=None,runner=command):
 
 def next_step(r):
     if r['installed']:return 'installed release recorded ('+r['installed']+')'
+    if r.get('family_adoption') and r['access']=='readable':return 'use scripts/workbench_packages.py apply with the reviewed family lock, digest, bundles and --product agent-workforce; see FAMILY-DELIVERY.md'
     if r['access']=='readable':return ('run '+r['adopt_skill']) if r['adopt_skill'] else 'no verified adoption route yet; ask the course team for supported delivery'
     return 'repository unavailable; check the signed-in account and access with the course team (invitation status unknown)'
 
@@ -87,6 +108,10 @@ def record(workbench,rows,chosen,refresh):
     path=Path(workbench)/'.aibl'/'enroll.json'
     if path.is_symlink():raise SetupError('Enrollment record is linked; preserve it for review.','local_state')
     value={'schema_version':'aibl.enroll/v1','checked_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'programs':rows,'chosen':[r['id'] for r in chosen],'installer':{**source_provenance(),**refresh}}
+    if path.exists():
+        previous=json.loads(path.read_text())
+        if previous.get('schema_version')!='aibl.enroll/v1' or not isinstance(previous.get('chosen'),list):raise SetupError('Invalid prior enrollment; preserve for review.','local_state')
+        value['chosen']=list(dict.fromkeys(previous['chosen']+value['chosen']))
     write(path,value);return path
 
 def enroll(workbench=None,yes=False,check=False,only=None,runner=None,ask=input,reg=None):

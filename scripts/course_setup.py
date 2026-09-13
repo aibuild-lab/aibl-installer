@@ -28,6 +28,11 @@ def command(args,cwd=None,interactive=False):
 
 def registry():return json.loads((ROOT/'course-options.json').read_text(encoding='utf-8'))
 def options():return registry()['programs']
+def workbench_template(reg=None):
+    reg=reg or registry();selected=reg['hub']['candidate_template']
+    matches=[t for t in reg['templates'] if t['id']==selected]
+    if len(matches)!=1 or not matches[0].get('requires_family_lock'):raise SetupError('Template registry contract is incomplete')
+    return matches[0]['repository']
 def resolve(program,reg):
     # The registry names programs; setup needs repositories. Required access is strict, included access is reported.
     by_id={p['id']:p for p in reg['programs']}
@@ -58,7 +63,7 @@ def version_tuple(text):
     m=re.search(r'(\d+)\.(\d+)(?:\.(\d+))?',text)
     return tuple(int(x or 0) for x in m.groups()) if m else (0,0,0)
 
-def check_tools(runner=command,desktop=False,harness='claude'):
+def check_tools(runner=command,desktop=False,harness='claude',family=None,family_bundles=None):
     h=HARNESSES[harness]
     versions={};minimum={'git':(2,28,0),'gh':(2,0,0),'python':(3,11,0),'node':(18,0,0),h['cli']:h['floor']}
     required=[('git','git'),('gh','gh'),('python',sys.executable)]
@@ -145,12 +150,19 @@ def setup_lock(state_root,name):
             if os.name=='nt':msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
             else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
-def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False,harness='claude'):
+def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False,harness='claude',family=None,family_bundles=None):
+    if family:
+        if distribution:raise SetupError('Historical and family distributions cannot be combined')
+        from workbench_packages import verify
+        for product in ['agent-workbench','agent-essentials']:verify(family_bundles,product,family['packages'][product])
+        template=workbench_template()
+        if template!=family['packages']['agent-workbench']['publisher']:raise SetupError('Selected template differs from the reviewed family publisher')
+        course={**course,'template':template,'access':[template,family['packages']['agent-essentials']['publisher']]}
     if desktop and not preview_bundle:raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
     name=repo_name(name);workspace=safe_workspace(workspace)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     with setup_lock(state_root,name):
-        return _setup(course,workspace,name,state_root,runner,no_launch,distribution,distribution_sha256,preview_bundle,distribution_lock,rehearsal_id,desktop,harness)
+        return _setup(course,workspace,name,state_root,runner,no_launch,distribution,distribution_sha256,preview_bundle,distribution_lock,rehearsal_id,desktop,harness,family,family_bundles)
 
 def resume_clone(folder,temporary,full,default_branch,runner):
     if temporary.is_symlink():raise SetupError('Interrupted clone path is a symlink. Preserve it and choose a local folder.')
@@ -171,7 +183,7 @@ def resume_clone(folder,temporary,full,default_branch,runner):
     if folder.exists():raise SetupError('Destination appeared during cloning. Both folders are preserved; review before continuing.')
     temporary.rename(folder)
 
-def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False,harness='claude'):
+def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False,harness='claude',family=None,family_bundles=None):
     started=time.monotonic();workspace=safe_workspace(workspace);name=repo_name(name)
     state_root=Path(state_root) if state_root else Path.home()/'.aibl'/'setup'
     statefile=state_root/(name+'.json')
@@ -196,7 +208,7 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
     try:
         saved_client=state.get('client','claude_code')
         if saved_client not in ('claude_code','claude_desktop','codex_cli'):raise SetupError('Saved setup client is invalid. Preserve this project for diagnosis.')
-        if saved_client!=client and (state.get('client') or state.get('repository') or state.get('distribution_sha256')):
+        if not family and saved_client!=client and (state.get('client') or state.get('repository') or state.get('distribution_sha256')):
             raise SetupError('This saved setup uses another client. Use a fresh project name to change clients; its original route is preserved.')
         if rehearsal_id and (not preview_bundle or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}',rehearsal_id)):
             raise SetupError('Automated rehearsal needs a local candidate bundle and a portable rehearsal ID.')
@@ -218,7 +230,7 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             attempt['provenance']['delivery_mode']='local_candidate'
             if rehearsal_id:attempt.update({'actor':'automated_test','rehearsal_id':rehearsal_id,'course_credit':False})
             step('candidate_inputs_verified')
-        if state.get('distribution_sha256') and not distribution:raise SetupError('This project uses a frozen distribution. Resume with its reviewed pinned launcher; earlier work is preserved.')
+        if state.get('distribution_sha256') and not distribution and not family:raise SetupError('This project uses a frozen distribution. Resume with its reviewed pinned launcher; earlier work is preserved.')
         if distribution:
             from pinned_distribution import validate_lock
             validate_lock(distribution)
@@ -268,16 +280,20 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
         except SetupError as exc:
             if exc.reason!='not_found':raise
             existing=None
+        created_now=False
+        if family:
+            template_head=json.loads(runner(['gh','api','repos/'+course['template']+'/commits/main']))['sha']
+            if template_head!=family['template_revision']:raise SetupError('Template moved from the reviewed family revision; choose a reviewed successor')
         if distribution:
             from pinned_distribution import ensure_private_repository
             ensure_private_repository(full,existing,state,distribution_sha256,runner,lambda:write(statefile,state))
         elif existing:
             if not existing['private']:raise SetupError('That name belongs to a public repository. Choose a new private workbench name; privacy is not changed automatically.')
             meta=existing;template=(meta.get('template_repository') or {}).get('full_name')
-            if template!=course['template'] and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
+            if template!=course['template'] and not (family and template=='aibuild-lab/agent-essentials') and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
         else:
             state['creation_intent']={'repository':full,'template':course['template']};step('repository_creation_planned')
-            runner(['gh','repo','create',full,'--private','--template',course['template']])
+            runner(['gh','repo','create',full,'--private','--template',course['template']]);created_now=True
         meta=json.loads(runner(['gh','api','repos/'+full]))
         if not meta.get('private') or meta.get('full_name','').lower()!=full.lower():raise SetupError('Private repository verification failed.')
         state['created_repository_id']=meta.get('id');step('private_repository_verified')
@@ -312,6 +328,14 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             if not current:runner(['git','config','--local',key,value],cwd=folder)
         step('local_git_identity_verified')
         enter('student_context')
+        if family:
+            from workbench_packages import compose,verify,snapshot
+            if created_now:
+                template_manifest,_=verify(family_bundles,'agent-workbench',family['packages']['agent-workbench'])
+                for entry in template_manifest['files']:
+                    actual=snapshot(folder,entry['path'])
+                    if actual is None or actual['hash']!=entry['sha256']:raise SetupError('Fresh template bytes differ from the reviewed package; preserve for review')
+            compose(folder,family_bundles,family,['agent-workbench','agent-essentials'])
         runner([sys.executable,'scripts/aibl.py','setup','--json'],cwd=folder);step('student_context_ready')
         onboarding=folder/'.aibl-local/onboarding.json'
         if onboarding.parent.is_symlink() or onboarding.is_symlink():raise SetupError('Private onboarding state must not be a symlink.')
@@ -352,9 +376,14 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
         write(statefile,state);raise
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');p.add_argument('--preview-bundle');p.add_argument('--rehearsal-id');p.add_argument('--desktop',action='store_true',help='Prepare a local preview for a separate Claude Desktop session; authentication and runtime remain unobserved.');p.add_argument('--harness',choices=list(HARNESSES),help='The app the student works in: claude or codex. Asked when absent.');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--course');p.add_argument('--family-lock');p.add_argument('--family-sha256');p.add_argument('--family-bundles');p.add_argument('--workspace',default=str(Path.home()/'GitHub'));p.add_argument('--repo-name');p.add_argument('--plan',action='store_true');p.add_argument('--no-launch',action='store_true');p.add_argument('--distribution-lock');p.add_argument('--distribution-sha256');p.add_argument('--preview-bundle');p.add_argument('--rehearsal-id');p.add_argument('--desktop',action='store_true',help='Prepare a local preview for a separate Claude Desktop session; authentication and runtime remain unobserved.');p.add_argument('--harness',choices=list(HARNESSES),help='The app the student works in: claude or codex. Asked when absent.');a=p.parse_args()
     try:
         if a.desktop and not a.preview_bundle:raise SetupError('Desktop handoff requires an explicit local candidate preview for Workforce, which starts with Essentials.')
+        family=None
+        if a.family_lock or a.family_sha256 or a.family_bundles:
+            from workbench_packages import load_lock
+            if not all([a.family_lock,a.family_sha256,a.family_bundles]):raise SetupError('Family setup requires lock, independent digest and verified bundles')
+            family=load_lock(a.family_lock,a.family_sha256,ROOT)
         distribution=None;distribution_sha256=None
         if a.distribution_lock or a.distribution_sha256:
             if not a.distribution_lock or not a.distribution_sha256:raise SetupError('Pinned setup needs both the reviewed lock and its separate digest.')
@@ -369,6 +398,6 @@ def main():
         if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
         harness='claude' if a.desktop else choose_harness(a.harness)
         name=a.repo_name or input('Private project name [my-workbench]: ').strip() or 'my-workbench'
-        setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256,preview_bundle=a.preview_bundle,distribution_lock=a.distribution_lock,rehearsal_id=a.rehearsal_id,desktop=a.desktop,harness=harness);return 0
+        setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256,preview_bundle=a.preview_bundle,distribution_lock=a.distribution_lock,rehearsal_id=a.rehearsal_id,desktop=a.desktop,harness=harness,family=family,family_bundles=a.family_bundles);return 0
     except (OSError,ValueError) as e:print('Setup paused: '+str(e));return 1
 if __name__=='__main__':sys.exit(main())

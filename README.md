@@ -37,3 +37,9 @@ Need help? Ask in your program's Slack channel.
 The ordinary entry is an unpinned setup route. Cohort qualification must use the
 independently reviewed frozen distribution, not a moving default branch.
 Program selection reuses the retained installer without pulling updates.
+
+The [Agent family successor candidate](FAMILY-DELIVERY.md) separates the
+Essentials-only agent-workbench template from course packages. Its explicit
+reviewed-lock route supports existing workbenches, later Workforce adoption,
+updates, rollback and separate local-learning backup. It is not the default
+published route until ordinary-student and platform qualification is complete.

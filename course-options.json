@@ -3,7 +3,8 @@
   "about": "One line per program. Ids are the site ledger's program slugs. The installer builds the hub (Essentials) and never asks which program a student is in; 'menu' is kept for tooling that lists programs but the installer no longer reads it. scripts/enroll.py walks every non-foundation entry later, inside the workbench: 'publisher' is the repository a student must be able to read; 'adopt_skill' is the workbench skill that verifies and applies that program's release (null means no adoption route yet, so the student asks for supported delivery). 'requires' is checked strictly by the installer for the hub; 'includes' is reported softly by enroll (inclusion does not prove invitation state). 'source_repository' is where the release is built and is informational here. 'release_product' is the id the workbench's adoption tool and the publisher's release pins use; where it differs from 'id', the registry is the only place that knows both, so nothing in the release tooling has to rename.",
   "hub": {
     "template": "aibuild-lab/agent-essentials",
-    "default_name": "my-workbench"
+    "default_name": "my-workbench",
+    "candidate_template": "agent-workbench"
   },
   "programs": [
     {
@@ -76,5 +77,28 @@
       ],
       "start_skill": "aibl-setup"
     }
-  ]
+  ],
+  "templates": [
+    {
+      "id": "agent-workbench",
+      "repository": "aibuild-lab/agent-workbench",
+      "initial_version": "0.0.10",
+      "course_package": "agent-essentials",
+      "state": "preparation_candidate",
+      "requires_family_lock": true
+    },
+    {
+      "id": "legacy-essentials-workbench",
+      "repository": "aibuild-lab/agent-essentials",
+      "state": "retained_compatibility"
+    }
+  ],
+  "compatibility": {
+    "agent-native-workforce": {
+      "publisher": "aibuild-lab/agent-native-workforce",
+      "successor_product": "agent-workforce",
+      "successor_publisher": "aibuild-lab/agent-workforce",
+      "historical_pins": "preserved; never rewritten"
+    }
+  }
 }
