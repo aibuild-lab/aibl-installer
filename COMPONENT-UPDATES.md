@@ -8,7 +8,7 @@ enrollment, starter ownership, access, or course commands.
 | Approved package trust | Independent reviewed lock, archive/file hashes | Full SemVer precedence and persistent observed version identity history |
 | Component packing list | Strict family-package/v1 | Strict v2 components, files, exact dependencies, valid dates, cycle rejection; v1 remains readable |
 | Preview | None | Read-only local candidate comparison including prior, actual and incoming files |
-| Student preservation | Supplied conflicts and seed preservation | Retain unchanged upstream customizations and deletions, mode edits, identical unowned collision refusal |
+| Student preservation | Supplied conflicts and seed preservation | Retain unchanged upstream customizations and deletions, mode edits, identical unowned supplied-file collision refusal |
 | Complete updates | All installed packages reverified | Component changes with local edits and missing required dependencies hold the entire operation |
 | Recovery | Kernel lock, journal, verified backups, late-edit refusal | Reused unchanged; verified version history survives rollback |
 | Status | Supplied marker | Supplied identity separate from local edits/deletions; update availability unknown offline |
@@ -16,7 +16,8 @@ enrollment, starter ownership, access, or course commands.
 The CLI adds `preview` and `status` to the existing package engine. Preview uses
 an independently reviewed local lock and bundles, without account discovery or
 writes. Preview is advisory: apply rechecks under the existing operation lock.
-A missing dependency requires separate explicit repair; no automatic restore or
+Existing seed references preserve student files and do not confer overwrite
+authority; starter behavior is unchanged and deferred. A missing dependency requires separate explicit repair; no automatic restore or
 new repair command is introduced. No candidate is published by this change.
 
 The local history ledger records verified package and component identities after
