@@ -11,7 +11,7 @@ import zipfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from workbench_packages import PRODUCTS, MAX_BYTES, ReleaseError, digest, verify
+from workbench_packages import PRODUCTS, MAX_BYTES, ReleaseError, digest, verify, version_key
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -58,6 +58,7 @@ def discover(trust, installer_revision, *, local_simulation=False, now=None):
         pin=index['package']
         if set(pin)!={'version','manifest_sha256','archive_sha256','publisher'} or pin['publisher']!='aibuild-lab/'+index['product']:raise ReleaseError('Package pin contract')
         if any(not re.fullmatch('[0-9a-f]{64}',pin[k]) for k in ('manifest_sha256','archive_sha256')):raise ReleaseError('Package digest contract')
+        version_key(pin['version'])
         if index['withdrawn']:return {'update_availability':'withdrawn','sequence':index['sequence'],'package':pin}
         with tempfile.TemporaryDirectory(prefix='aibl-discovery-') as directory:
             folder=Path(directory)/index['product'];folder.mkdir()
@@ -65,7 +66,7 @@ def discover(trust, installer_revision, *, local_simulation=False, now=None):
                 (folder/name).write_bytes(fetch(index['package_url'].rstrip('/')+'/'+name,trust['allowed_origin'],local_simulation,limit))
             verify(directory,index['product'],pin)
         return {'update_availability':'verified_candidate','sequence':index['sequence'],'package':pin,'package_url':index['package_url'],'active_use':'unverified'}
-    except (ValueError,TypeError,KeyError,OSError,AttributeError,zipfile.BadZipFile) as error:
+    except (ValueError,TypeError,KeyError,OSError,AttributeError,RuntimeError,zipfile.BadZipFile) as error:
         return {'update_availability':'unknown','reason':str(error)}
 
 def main():

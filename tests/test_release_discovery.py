@@ -60,6 +60,25 @@ class DiscoveryTests(unittest.TestCase):
   p.write_text('first');(self.root/'.aibl-local/family-backups'/result['rollback']/name).write_text('tampered')
   with self.assertRaisesRegex(w.ReleaseError,'integrity'):w.recover(self.root,result['rollback'])
 
+ def test_withdrawn_invalid_version_unknown(self):
+  self.fixture();self.index['withdrawn']=True;self.index['package']['version']='invalid';self.assertEqual(self.check()['update_availability'],'unknown')
+ def test_bad_installed_schema_repair_refused(self):
+  self.setup_packages();self.apply()
+  import workbench_packages as w
+  marker=self.root/w.MARKER;data=json.loads(marker.read_text());data['schema_version']='future';marker.write_text(json.dumps(data));name='course/essentials/start.md'
+  with self.assertRaisesRegex(w.ReleaseError,'Invalid installed'):d_repair(self,name,{name:w.snapshot(self.root,name)})
+
+ def test_edit_while_preparing_repair_refused(self):
+  from unittest.mock import patch
+  import workbench_packages as w
+  self.setup_packages();self.apply();name='course/essentials/start.md';path=self.root/name;path.write_text('mine');expected={name:w.snapshot(self.root,name)};original=w.atomic
+  def editing_atomic(target,raw,mode):
+   original(target,raw,mode)
+   if 'family-backups' in str(target):path.write_text('concurrent')
+  with patch.object(w,'atomic',editing_atomic):
+   with self.assertRaisesRegex(w.ReleaseError,'changed'):d_repair(self,name,expected)
+  self.assertEqual(path.read_text(),'concurrent');self.assertFalse((self.root/'.aibl-local/family-transaction.json').exists())
+
 def digest_snapshot(root,name):
  import workbench_packages as w
  return w.snapshot(root,name)

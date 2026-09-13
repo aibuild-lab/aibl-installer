@@ -226,6 +226,7 @@ def repair(root,bundles,product,paths,expected,fail_after=None):
         journal=under(root,'.aibl-local/family-transaction.json')
         if journal.exists():raise ReleaseError('Recover interrupted transaction first')
         prior=read(under(root,MARKER))
+        if prior.get('schema_version')!='aibl.installed-family/v1' or not isinstance(prior.get('packages'),dict) or not isinstance(prior.get('files'),dict):raise ReleaseError('Invalid installed family record')
         if product not in prior['packages']:raise ReleaseError('Product not installed')
         manifest,payload=verify(bundles,product,prior['packages'][product])
         rows={row['path']:row for row in manifest['files']}
