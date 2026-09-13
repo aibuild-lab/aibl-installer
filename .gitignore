@@ -1,6 +1,9 @@
 # Local Claude Code project config (kept out of public repo)
 CLAUDE.md
 .claude/
+# ...except the workbench starter, which ships them to every student
+!workbench-starter/CLAUDE.md
+!workbench-starter/.claude/
 
 # OS-level metadata
 .DS_Store
