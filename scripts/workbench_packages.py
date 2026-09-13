@@ -5,7 +5,8 @@ Internal's MIT-reviewed v3 helper. Historical releases keep their own verifier.
 A trusted lock is supplied independently of packages. No publication or grants.
 """
 from __future__ import annotations
-import argparse, io, json, os, re, shutil, stat, subprocess, sys, time, zipfile
+import argparse, datetime, io, json, os, re, shutil, stat, subprocess, sys, time, zipfile
+from contextlib import nullcontext
 from pathlib import Path
 from release_files import ReleaseError, atomic, digest, encoded, under, lock
 PRODUCTS={'agent-workbench','agent-essentials','agent-workforce'}
@@ -22,7 +23,8 @@ def load_lock(path,expected,engine=None):
     if not re.fullmatch('[0-9a-f]{40}',d['installer_revision']):raise ReleaseError('Missing exact installer revision')
     if set(d['packages'])!=PRODUCTS:raise ReleaseError('Family must bind template, Essentials and Workforce independently')
     for product,pin in d['packages'].items():
-        if set(pin)!={'version','manifest_sha256','archive_sha256','publisher'} or not re.fullmatch(r'0\.[0-9]+\.[0-9]+(?:-[a-z0-9.-]+)?',pin['version']):raise ReleaseError('Package pin contract')
+        if set(pin)!={'version','manifest_sha256','archive_sha256','publisher'} :raise ReleaseError('Package pin contract')
+        version_key(pin['version'])
         if pin['publisher']!='aibuild-lab/'+product or any(not re.fullmatch('[0-9a-f]{64}',pin[k]) for k in ['manifest_sha256','archive_sha256']):raise ReleaseError('Package publisher or hash contract')
     if d['compatibility']!={'legacy_template':'aibuild-lab/agent-essentials','legacy_workforce_product':'agent-native-workforce','legacy_workforce_publisher':'aibuild-lab/agent-native-workforce'}:raise ReleaseError('Historical identity mapping required')
     if engine:
@@ -36,7 +38,7 @@ def verify(bundle,product,pin):
     root=Path(bundle)/product;mb=(root/'manifest.json').read_bytes();ab=(root/'payload.zip').read_bytes()
     if len(mb)>2*1024*1024 or len(ab)>MAX_BYTES or digest(mb)!=pin['manifest_sha256'] or digest(ab)!=pin['archive_sha256']:raise ReleaseError('Package integrity mismatch: '+product)
     m=json.loads(mb)
-    if set(m)!={'schema_version','product','version','source_repository','source_revision','files'} or m['schema_version']!='aibl.family-package/v1' or m['product']!=product or m['version']!=pin['version'] or m['source_repository']!='aibuild-lab/agent-native-workforce-internal' or not re.fullmatch('[0-9a-f]{40}',m['source_revision']):raise ReleaseError('Package manifest contract')
+    if set(m)!=({'schema_version','product','version','source_repository','source_revision','files'} | ({'components'} if m.get('schema_version')=='aibl.family-package/v2' else set())) or m['schema_version'] not in ('aibl.family-package/v1','aibl.family-package/v2') or m['product']!=product or m['version']!=pin['version'] or m['source_repository']!='aibuild-lab/agent-native-workforce-internal' or not re.fullmatch('[0-9a-f]{40}',m['source_revision']):raise ReleaseError('Package manifest contract')
     rows={};fold=set()
     for row in m['files']:
         if set(row)!={'path','sha256','mode','policy'} or row['policy'] not in ['supplied','seed'] or row['mode'] not in [420,493] or not re.fullmatch('[0-9a-f]{64}',row['sha256']):raise ReleaseError('Invalid file policy')
@@ -46,6 +48,8 @@ def verify(bundle,product,pin):
         if 'done-for-the-day' in name or 'done-for-day' in name:raise ReleaseError('Habit skill must be student authored')
         fold.add(name.casefold());rows[name]=row
     if not rows:raise ReleaseError('Empty package')
+    version_key(m['version'])
+    validate_components(m,rows)
     payload={}
     with zipfile.ZipFile(io.BytesIO(ab)) as z:
         infos=z.infolist()
@@ -57,6 +61,33 @@ def verify(bundle,product,pin):
             payload[i.filename]=raw
     return m,payload
 
+def validate_components(manifest,rows):
+    components=manifest.get('components',[])
+    if not isinstance(components,list):raise ReleaseError('Invalid components')
+    if any(not isinstance(c,dict) or set(c)!={'id','kind','version','content_date','files','requires'} or not all(isinstance(c[k],str) for k in ('id','kind','version','content_date')) or not isinstance(c['files'],list) or not all(isinstance(n,str) for n in c['files']) or not isinstance(c['requires'],list) for c in components):raise ReleaseError('Component contract')
+    ids=[c['id'] for c in components]
+    if ids!=sorted(set(ids)):raise ReleaseError('Component IDs must be sorted and unique')
+    by_id={c['id']:c for c in components}
+    for c in components:
+        if set(c)!={'id','kind','version','content_date','files','requires'} or not re.fullmatch(r'[a-z0-9]+(?:[._-][a-z0-9]+)*',c['id']) or c['kind'] not in ('agent','skill'):raise ReleaseError('Component contract')
+        version_key(c['version'])
+        if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}',c['content_date']):raise ReleaseError('Component date contract')
+        try:datetime.date.fromisoformat(c['content_date'])
+        except ValueError as e:raise ReleaseError('Component date contract') from e
+        if not c['files'] or c['files']!=sorted(set(c['files'])) or not set(c['files'])<=set(rows):raise ReleaseError('Component file closure')
+        if any(not isinstance(d,dict) or set(d)!={'id','version'} or not all(isinstance(v,str) for v in d.values()) for d in c['requires']):raise ReleaseError('Component dependency contract')
+        deps=[d['id'] for d in c['requires']]
+        if deps!=sorted(set(deps)):raise ReleaseError('Component dependencies must be sorted and unique')
+        for d in c['requires']:
+            if set(d)!={'id','version'} or d['id'] not in by_id or by_id[d['id']]['version']!=d['version']:raise ReleaseError('Component dependency contract')
+    def visit(key,trail):
+        if key in trail:raise ReleaseError('Component dependency cycle')
+        for dep in by_id[key]['requires']:visit(dep['id'],trail|{key})
+    for key in by_id:visit(key,set())
+
+def component_signature(c,rows):
+    return {**c,'files':[{k:rows[n][k] for k in ('path','sha256','mode','policy')} for n in c['files']]}
+
 def filesystem_mode(mode):
     # Windows chmod exposes the read-only bit, not POSIX executable/owner bits.
     return (0o666 if mode & stat.S_IWRITE else 0o444) if os.name=='nt' else mode
@@ -66,12 +97,34 @@ def snapshot(root,name):
     if p.exists() and not p.is_file():raise ReleaseError('File collision: '+name)
     return {'hash':digest(p.read_bytes()),'mode':stat.S_IMODE(p.stat().st_mode)} if p.exists() else None
 
-def compose(root,bundles,family,products,fail_after=None):
+def version_key(value):
+    match=re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?',value)
+    if not match:raise ReleaseError('Invalid semantic version')
+    pre=match[4]
+    if pre and any(x.isdigit() and len(x)>1 and x.startswith('0') for x in pre.split('.')):raise ReleaseError('Invalid semantic version')
+    return tuple(int(match[i]) for i in (1,2,3))+(pre is None,tuple((0,int(x)) if x.isdigit() else (1,x) for x in pre.split('.')) if pre else ())
+
+def status(root):
+    root=Path(root).resolve();marker=under(root,MARKER)
+    if under(root,'.aibl-local/family-transaction.json').exists():return {'status':'recovery_required','update_availability':'unknown'}
+    if not marker.exists():return {'status':'not_installed','update_availability':'unknown'}
+    prior=read(marker)
+    if prior.get('schema_version')!='aibl.installed-family/v1':raise ReleaseError('Invalid installed family record')
+    customized=[];missing=[]
+    for name,row in prior['files'].items():
+        current=snapshot(root,name)
+        if current is None:missing.append(name)
+        elif current!={'hash':row['sha256'],'mode':filesystem_mode(row['mode'])}:customized.append(name)
+    return {'status':'installed','supplied_packages':prior['packages'],'customized':sorted(customized),'missing':sorted(missing),'update_availability':'unknown'}
+
+def compose(root,bundles,family,products,fail_after=None,preview=False):
     root=Path(root).resolve()
     if not set(products)<=PRODUCTS:raise ReleaseError('Unknown product')
-    with lock(root) as local:
+    with (nullcontext() if preview else lock(root)) as local:
         journal=under(root,'.aibl-local/family-transaction.json')
         if journal.exists():raise ReleaseError('Interrupted update: run family recover first')
+        history_path=under(root,'.aibl-local/family-history.json')
+        history=read(history_path) if history_path.exists() else {'packages':{},'components':{}}
         marker=under(root,MARKER);prior=read(marker) if marker.exists() else {'schema_version':'aibl.installed-family/v1','packages':{},'files':{}}
         if prior.get('schema_version')!='aibl.installed-family/v1' or not isinstance(prior.get('files'),dict) or not isinstance(prior.get('packages'),dict):raise ReleaseError('Invalid installed family record')
         # A legacy manifest supplies previous managed hashes, never ownership of personal roots.
@@ -87,15 +140,40 @@ def compose(root,bundles,family,products,fail_after=None):
         # Updating a family re-verifies every installed package, never silently binds old bytes to new versions.
         selected=set(products)|set(prior['packages'])
         if 'agent-workforce' in selected and 'agent-essentials' not in selected:raise ReleaseError('Install Essentials before Workforce')
-        after=json.loads(json.dumps(prior));changes={};conflicts=[];legacy_transition=not prior['packages']
+        after=json.loads(json.dumps(prior));changes={};conflicts=[];comparisons=[];legacy_transition=not prior['packages']
         for product in sorted(selected):
             m,payload=verify(bundles,product,family['packages'][product]);previous_pin=prior['packages'].get(product)
             if previous_pin and previous_pin['version']==m['version'] and previous_pin!=family['packages'][product]:raise ReleaseError('Immutable version changed; use a new package version')
-            if previous_pin and tuple(map(int,m['version'].split('-')[0].split('.')))<tuple(map(int,previous_pin['version'].split('-')[0].split('.'))):raise ReleaseError('Use recorded rollback for version downgrade')
+            if previous_pin and version_key(m['version'])<version_key(previous_pin['version']):raise ReleaseError('Use recorded rollback for version downgrade')
+            package_key=product+'@'+m['version']
+            if package_key in history['packages'] and history['packages'][package_key]!=family['packages'][product]:raise ReleaseError('Immutable historical package version changed')
+            history['packages'][package_key]=family['packages'][product]
             rows={r['path']:r for r in m['files']}
+            for c in m.get('components',[]):
+                component_key=product+'/'+c['id']+'@'+c['version'];signature=component_signature(c,rows)
+                if component_key in history['components'] and history['components'][component_key]!=signature:raise ReleaseError('Immutable component version changed in history')
+                history['components'][component_key]=signature
+            old_components=prior.get('components',{}).get(product,[])
+            if (old_components or any(k.startswith(product+'/') for k in history['components'])) and m['schema_version']=='aibl.family-package/v1':raise ReleaseError('Component history cannot downgrade to v1')
+            old_by_id={c['id']:c for c in old_components}
+            for c in m.get('components',[]):
+                old_c=old_by_id.get(c['id'])
+                if old_c and version_key(c['version'])<version_key(old_c['version']):raise ReleaseError('Component version downgrade')
+                if old_c and c['version']==old_c['version'] and component_signature(c,rows)!=component_signature(old_c,prior['files']):raise ReleaseError('Immutable component version changed')
+            component_holds=set()
+            for old_c in old_components:
+                incoming=next((c for c in m.get('components',[]) if c['id']==old_c['id']),None)
+                changed=incoming is None or component_signature(old_c,prior['files'])!=component_signature(incoming,rows)
+                if changed and any(snapshot(root,n)!={'hash':prior['files'][n]['sha256'],'mode':filesystem_mode(prior['files'][n]['mode'])} for n in old_c['files']):component_holds.update(old_c['files'])
+            required={n for c in m.get('components',[]) for d in c['requires'] for target in m['components'] if target['id']==d['id'] for n in target['files']}
+            for name in required:
+                if name in prior['files'] and snapshot(root,name) is None:component_holds.add(name)
+            conflicts.extend(sorted(component_holds))
+            if m['schema_version']=='aibl.family-package/v2':after.setdefault('components',{})[product]=m['components']
             owned={n:r for n,r in prior['files'].items() if r['product']==product}
             for name in sorted(set(owned)|set(rows)):
                 old=owned.get(name);new=rows.get(name);current=snapshot(root,name)
+                comparisons.append({'path':name,'prior':old,'actual':current,'incoming':new})
                 if legacy_transition and old and not new:
                     after['files'].pop(name,None);continue
                 other=prior['files'].get(name)
@@ -104,14 +182,20 @@ def compose(root,bundles,family,products,fail_after=None):
                     if current is None and not old:changes[name]=(payload[name],new['mode'])
                     after['files'][name]={**new,'product':product};continue
                 if old and old['policy']=='seed':raise ReleaseError('Student-owned seed cannot become supplied: '+name)
-                if old and (current is None or current['hash']!=old['sha256']):conflicts.append(name);continue
-                if not old and current and (not new or current['hash']!=new['sha256']):conflicts.append(name);continue
+                if old and current!={'hash':old['sha256'],'mode':filesystem_mode(old['mode'])}:
+                    # A retained local edit/deletion is not permission to restore supplied bytes.
+                    if new and all(old[k]==new[k] for k in ('sha256','mode','policy')):
+                        after['files'][name]={**new,'product':product};continue
+                    conflicts.append(name);continue
+                if not old and current:conflicts.append(name);continue
                 if new:
                     if current is None or current['hash']!=new['sha256'] or current['mode']!=filesystem_mode(new['mode']):changes[name]=(payload[name],new['mode'])
                     after['files'][name]={**new,'product':product}
                 else:changes[name]=(None,None);after['files'].pop(name,None)
             after['packages'][product]=family['packages'][product]
+        if preview:return {'status':'needs_review' if conflicts else 'ready','conflicts':sorted(set(conflicts)),'comparison':comparisons,'changes':[{'path':n,'action':'remove' if raw is None else 'write','prior':prior['files'].get(n),'actual':snapshot(root,n),'incoming':after['files'].get(n)} for n,(raw,mode) in sorted(changes.items())],'supplied_packages':after['packages'],'update_availability':'reviewed_local_candidate'}
         if conflicts:raise ReleaseError('Changed supplied files preserved; review diffs and save a copy before restoring supplied bytes and retrying: '+', '.join(conflicts))
+        atomic(history_path,encoded(history),384)
         after['family']=family
         newraw=encoded(after)
         if marker.exists() and marker.read_bytes()==newraw and not changes:return {'status':'already_installed'}
@@ -163,11 +247,14 @@ def verify_student_access(root,products):
     return user['login']
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['apply','recover','rollback']);p.add_argument('--root',required=True);p.add_argument('--lock');p.add_argument('--sha256');p.add_argument('--bundles');p.add_argument('--product',action='append',choices=sorted(PRODUCTS));p.add_argument('--backup');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['apply','preview','status','recover','rollback']);p.add_argument('--root',required=True);p.add_argument('--lock');p.add_argument('--sha256');p.add_argument('--bundles');p.add_argument('--product',action='append',choices=sorted(PRODUCTS));p.add_argument('--backup');a=p.parse_args()
     try:
-        if a.command=='apply':
+        if a.command in ('apply','preview'):
             if not a.lock or not a.bundles or not a.product:raise ReleaseError('Reviewed lock, digest, bundles and products required')
-            family=load_lock(a.lock,a.sha256,Path(__file__).resolve().parents[1]);verify_student_access(a.root,a.product);result=compose(a.root,a.bundles,family,a.product)
+            family=load_lock(a.lock,a.sha256,Path(__file__).resolve().parents[1]);
+            if a.command=='apply':verify_student_access(a.root,a.product)
+            result=compose(a.root,a.bundles,family,a.product,preview=a.command=='preview')
+        elif a.command=='status':result=status(a.root)
         else:result=recover(a.root,a.backup if a.command=='rollback' else None)
         print(json.dumps(result));return 0
     except (ValueError,OSError,KeyError,zipfile.BadZipFile,subprocess.SubprocessError) as e:print(json.dumps({'status':'blocked','recovery':str(e)}));return 1
