@@ -57,6 +57,10 @@ def verify(bundle,product,pin):
             payload[i.filename]=raw
     return m,payload
 
+def filesystem_mode(mode):
+    # Windows chmod exposes the read-only bit, not POSIX executable/owner bits.
+    return (0o666 if mode & stat.S_IWRITE else 0o444) if os.name=='nt' else mode
+
 def snapshot(root,name):
     p=under(root,name)
     if p.exists() and not p.is_file():raise ReleaseError('File collision: '+name)
@@ -103,7 +107,7 @@ def compose(root,bundles,family,products,fail_after=None):
                 if old and (current is None or current['hash']!=old['sha256']):conflicts.append(name);continue
                 if not old and current and (not new or current['hash']!=new['sha256']):conflicts.append(name);continue
                 if new:
-                    if current is None or current['hash']!=new['sha256'] or current['mode']!=new['mode']:changes[name]=(payload[name],new['mode'])
+                    if current is None or current['hash']!=new['sha256'] or current['mode']!=filesystem_mode(new['mode']):changes[name]=(payload[name],new['mode'])
                     after['files'][name]={**new,'product':product}
                 else:changes[name]=(None,None);after['files'].pop(name,None)
             after['packages'][product]=family['packages'][product]
@@ -115,7 +119,7 @@ def compose(root,bundles,family,products,fail_after=None):
         tx=under(root,'.aibl-local/family-backups/'+str(time.time_ns()));tx.mkdir(parents=True)
         plan={'backup':tx.name,'before':{},'after':{},'complete':False}
         for name,(raw,mode) in changes.items():
-            before=snapshot(root,name);plan['before'][name]=before;plan['after'][name]={'hash':digest(raw),'mode':mode} if raw is not None else None
+            before=snapshot(root,name);plan['before'][name]=before;plan['after'][name]={'hash':digest(raw),'mode':filesystem_mode(mode)} if raw is not None else None
             if before:atomic(under(tx,name),under(root,name).read_bytes(),before['mode'])
         atomic(journal,encoded(plan),384)
         for i,(name,(raw,mode)) in enumerate(changes.items()):

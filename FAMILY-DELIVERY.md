@@ -87,3 +87,14 @@ It uses local bare Git remotes, a pushed checkpoint plus an unpushed commit,
 uncommitted files and separate local state. It invokes the actual composed
 setup/learning/capability helpers, then adds and rolls back Workforce. It never
 creates GitHub repositories or substitutes for an ordinary student walkthrough.
+
+Windows privacy qualification must inspect the chosen directory's ACL. POSIX
+mode 0600 checks do not establish Windows account isolation. File-update recovery
+normalizes the Windows read-only semantics; native Windows observation remains open.
+
+Concurrent proposal: Wade PR7 at aade4944f07ceb573de419928948d023eee7bb02
+proposes installer-owned starter content and no template or invitation requirement.
+This successor follows Hunter's explicit separate private-template/course-package
+sprint instruction. PR7 is preserved, not imported or represented as accepted.
+Its no-invitation onboarding goal and new teaching entry must be reconciled before
+choosing the published default. PR1-6 history is integrated unchanged.
