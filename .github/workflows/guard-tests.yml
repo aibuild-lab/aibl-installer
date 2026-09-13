@@ -27,3 +27,9 @@ jobs:
         run: node hooks/secrets-tripwire.test.mjs
       - name: installer isolation suite
         run: node hooks/install.test.mjs
+      - name: trust manifest matches the files
+        run: node hooks/manifest.test.mjs
+      - name: Codex adapter suite
+        run: node hooks/codex-secrets-guard.test.mjs
+      - name: both-apps installer suite
+        run: node hooks/refresh-guard.test.mjs

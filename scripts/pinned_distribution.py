@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib, io, json, os, re, stat, tempfile, uuid, zipfile
 from pathlib import Path, PurePosixPath
 
-INSTALLER_FILES = ('start.sh', 'start.ps1', 'course-options.json', 'scripts/course_setup.py', 'scripts/pinned_distribution.py')
+INSTALLER_FILES = ('start.sh', 'start.ps1', 'course-options.json', 'scripts/course_setup.py', 'scripts/pinned_distribution.py', 'SETUP-PROMPT.md', 'scripts/enroll.py')
 PRODUCTS = ('agent-essentials', 'agent-native-workforce')
 MAX_BYTES = 16 * 1024 * 1024
 
@@ -27,9 +27,10 @@ def validate_pin(pin, product):
 
 def validate_lock(value):
     exact(value, ('schema_version', 'course_id', 'installer', 'source_release_pins'), 'Distribution lock')
-    require(value['schema_version'] == 'aibl.course-distribution/v1' and value['course_id'] == 'agent-native-workforce', 'Unsupported pinned course.')
+    # course_id is the registry program id; the source_release_pins keys below stay the release tool's product ids.
+    require(value['schema_version'] == 'aibl.course-distribution/v1' and value['course_id'] == 'agent-workforce', 'Unsupported pinned course.')
     exact(value['installer'], ('repository', 'commit', 'files'), 'Installer pin')
-    require(value['installer']['repository'] == 'aibuild-lab/workshop-installer' and re.fullmatch('[a-f0-9]{40}', value['installer']['commit'] or ''), 'Wrong installer identity.')
+    require(value['installer']['repository'] == 'aibuild-lab/aibl-installer' and re.fullmatch('[a-f0-9]{40}', value['installer']['commit'] or ''), 'Wrong installer identity.')
     exact(value['installer']['files'], INSTALLER_FILES, 'Installer file inventory')
     require(all(re.fullmatch('[a-f0-9]{64}', sha or '') for sha in value['installer']['files'].values()), 'Invalid installer file hash.')
     exact(value['source_release_pins'], PRODUCTS, 'Course product pins')

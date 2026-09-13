@@ -1,25 +1,13 @@
-param([string]$Course = "", [string]$DistributionLock = "", [string]$DistributionSHA256 = "", [string]$InstallerCommit = "", [string]$LauncherSHA256 = "")
+param([string]$Course = "", [string]$DistributionLock = "", [string]$DistributionSHA256 = "", [string]$InstallerCommit = "", [string]$LauncherSHA256 = "", [ValidateSet('claude','codex')][string]$Harness = 'claude')
 $ErrorActionPreference = 'Stop'
 $env:AIBL_BOOTSTRAP_PATH = $PSCommandPath
 if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $LauncherSHA256) {
-  if ($Course -ne 'agent-native-workforce' -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
+  if ($Course -ne 'agent-workforce' -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
   if ((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $LauncherSHA256 -or (Get-FileHash -LiteralPath $DistributionLock -Algorithm SHA256).Hash.ToLowerInvariant() -ne $DistributionSHA256) { throw 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.' }
   $DistributionLock = (Resolve-Path -LiteralPath $DistributionLock).Path
 }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
-if (-not $Course) {
-  Write-Host 'Which class are you joining?'
-  Write-Host '1. Agent Essentials'
-  Write-Host '2. Agent Native Workforce (includes Essentials)'
-  Write-Host '3. Existing Agent Native OS workshop'
-  switch (Read-Host 'Choose 1, 2 or 3') {
-    '1' { $Course = 'agent-essentials' }
-    '2' { $Course = 'agent-native-workforce' }
-    '3' { $Course = 'legacy-workshop' }
-    default { throw 'Rerun and choose a listed course.' }
-  }
-}
-if ($Course -notin @('agent-essentials','agent-native-workforce','legacy-workshop')) { throw 'Unknown course.' }
+# The installer builds the Essentials hub for everyone; programs join the workbench later through scripts\enroll.py. An explicit -Course is kept for pinned cohort setups.
 function Refresh-ProcessPath {
   $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
 }
@@ -47,6 +35,7 @@ function Install-Missing([string]$Command, [string]$Package) {
 Refresh-ProcessPath
 Install-Missing 'git' 'Git.Git'
 Install-Missing 'gh' 'GitHub.cli'
+Install-Missing 'node' 'OpenJS.NodeJS.LTS'
 $Python = Find-CompatiblePython
 if (-not $Python) {
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Install Microsoft App Installer, then rerun.' }
@@ -56,35 +45,57 @@ if (-not $Python) {
   $Python = Find-CompatiblePython
   if (-not $Python) { throw 'Open a fresh PowerShell window and rerun so the installed Python is visible.' }
 }
-if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+if ($Harness -eq 'claude' -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
   $ClaudeInstaller = Join-Path ([IO.Path]::GetTempPath()) 'aibl-claude-install.ps1'
   Invoke-WebRequest 'https://claude.ai/install.ps1' -OutFile $ClaudeInstaller
   & $ClaudeInstaller
   Refresh-ProcessPath
 }
-$InstallerDir = $PSScriptRoot
-if ($InstallerCommit) {
-  $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-pinned-installer-' + [guid]::NewGuid().ToString('N'))
-  New-Item -ItemType Directory -Path $InstallerDir | Out-Null
-  git -C $InstallerDir init --quiet
-  if ($LASTEXITCODE -ne 0) { throw 'Pinned installer directory could not be initialized.' }
-  git -C $InstallerDir remote add origin https://github.com/aibuild-lab/workshop-installer.git
-  if ($LASTEXITCODE -ne 0) { throw 'Pinned installer origin could not be set.' }
-  git -C $InstallerDir fetch --depth 1 origin $InstallerCommit
-  if ($LASTEXITCODE -ne 0) { throw 'Frozen installer download failed. Rerun when GitHub is reachable.' }
-  git -C $InstallerDir checkout --detach --quiet FETCH_HEAD
-  if ($LASTEXITCODE -ne 0) { throw 'Frozen installer checkout failed.' }
-  $ObservedInstallerCommit = git -C $InstallerDir rev-parse HEAD
-  if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision was not fetched.' }
-} elseif (-not (Test-Path (Join-Path $InstallerDir 'course-options.json'))) {
-  $InstallerDir = Join-Path ([IO.Path]::GetTempPath()) ('aibl-course-installer-' + [guid]::NewGuid().ToString('N'))
-  git clone --depth 1 https://github.com/aibuild-lab/workshop-installer.git $InstallerDir
-  if ($LASTEXITCODE -ne 0) { throw 'Download failed. Rerun when GitHub is reachable.' }
+if ($Harness -eq 'codex' -and -not (Get-Command codex -ErrorAction SilentlyContinue)) {
+  $CodexInstaller = Join-Path ([IO.Path]::GetTempPath()) 'aibl-codex-install.ps1'
+  Invoke-WebRequest 'https://chatgpt.com/codex/install.ps1' -OutFile $CodexInstaller
+  & $CodexInstaller
+  $env:Path = $env:Path + ';' + (Join-Path $HOME '.codex\bin')
+  Refresh-ProcessPath
 }
-if ($Course -eq 'legacy-workshop') { & (Join-Path $InstallerDir 'install.ps1'); exit $LASTEXITCODE }
+# Retain the engine. Do not reset, pull or replace an existing checkout.
+$InstallerDir = Join-Path $HOME 'GitHub/aibl-installer'
+if ($InstallerCommit) { $InstallerDir = Join-Path $HOME ('.aibl/installers/' + $InstallerCommit) }
+if (Test-Path -LiteralPath $InstallerDir) {
+  if ((Get-Item -LiteralPath $InstallerDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer directory is linked. Preserve it for review.' }
+} else {
+  New-Item -ItemType Directory -Force -Path (Split-Path $InstallerDir) | Out-Null
+  if ($InstallerCommit) {
+    New-Item -ItemType Directory -Path $InstallerDir | Out-Null
+    git -C $InstallerDir init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Installer initialization failed.' }
+    git -C $InstallerDir remote add origin https://github.com/aibuild-lab/aibl-installer.git
+    if ($LASTEXITCODE -ne 0) { throw 'Installer origin could not be set.' }
+    git -C $InstallerDir fetch --depth 1 origin $InstallerCommit
+    if ($LASTEXITCODE -ne 0) { throw 'Frozen installer download failed. Preserve this interrupted directory for recovery.' }
+    git -C $InstallerDir checkout --detach --quiet FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Frozen installer checkout failed.' }
+  } else {
+    git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git $InstallerDir
+    if ($LASTEXITCODE -ne 0) { throw 'Download failed. Preserve this interrupted directory for recovery.' }
+  }
+}
+$GitDir = Join-Path $InstallerDir '.git'
+if (-not (Test-Path -LiteralPath $GitDir -PathType Container)) { throw 'Installer path is occupied by another project. Preserve it for review.' }
+if ((Get-Item -LiteralPath $GitDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer Git metadata is linked. Preserve it for review.' }
+$InstallerOrigin = git -C $InstallerDir remote get-url origin
+if ($LASTEXITCODE -ne 0 -or $InstallerOrigin -ne 'https://github.com/aibuild-lab/aibl-installer.git') { throw 'Installer origin differs. Preserve it for review.' }
+$InstallerChanges = git -C $InstallerDir status --porcelain
+if ($LASTEXITCODE -ne 0 -or $InstallerChanges) { throw 'Installer has local work. Preserve it for review; no update was applied.' }
 if ($InstallerCommit) {
-  & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
+  $ObservedInstallerCommit = git -C $InstallerDir rev-parse HEAD
+  if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision differs. Preserve it for review.' }
+}
+if (-not (Test-Path (Join-Path $InstallerDir 'scripts/enroll.py') -PathType Leaf)) { throw 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.' }
+if ($InstallerCommit) {
+  & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE
 }
-& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course
+if ($Course) { & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness; exit $LASTEXITCODE }
+& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course agent-essentials --harness $Harness
 exit $LASTEXITCODE

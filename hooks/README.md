@@ -1,8 +1,28 @@
-# Secrets guard (Claude Code hooks)
+# Secrets guard (Claude Code and Codex hooks)
 
-Harness-level protection that stops Claude Code from printing a student's secrets to the
-terminal. Installed by `SETUP-PROMPT.md` Step 5.3.5 into the student's user-level settings
-(`~/.claude/settings.json`), so it applies in **every** project, not just the workshop repo.
+Harness-level protection that stops Claude Code or Codex from printing a student's secrets to
+the terminal. Installed by the AIBL installer at the **user level** (`~/.claude/settings.json`
+and `~/.codex/hooks.json`), so it applies in **every** project on the machine, in both apps.
+
+This directory is the canonical home of the guard as of 09-11-2026. It was ported from
+`aibuild-lab/agent-native-os` (`scripts/refresh-guard.mjs` and the Codex and AWS adapters, plus
+the pending Stripe rule from workshop-installer #17 and the trust-step documentation from
+agent-native-os #89), so new students receive the current guard from one place.
+
+**One command per app:** `node hooks/refresh-guard.mjs --claude` or `--codex` installs that app's
+guard and touches nothing of the other's; with neither flag it installs both. `--check` inspects the
+on-disk installation without changing anything (an app not selected reports "not selected"). The
+app must then be fully quit and reopened, and Codex trusted once (below), before its guard is
+actually running. The installer prompt passes the student's app and offers the other; a student
+who chose one app never gets the other app's files unless they ask.
+
+The installer never touches a student's own global instruction files (`~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md`) or any settings key it does not own; `refresh-guard.test.mjs` proves it with
+pre-existing files that must be byte-identical afterward.
+
+In one line for students: it only takes one time. One key printed to the screen, pasted into a chat,
+or written into a file that gets pushed, and it is exposed; then you are rotating keys, checking what
+had access, and telling people. The guard is the seatbelt, installed before anyone needs it.
 
 Why a hook and not a CLAUDE.md rule: a written rule only works if the model chooses to obey
 it every time. A `PreToolUse` hook inspects the literal command and refuses the dangerous
@@ -37,24 +57,77 @@ class deterministically, whether or not the model "remembers." (Anthropic issue 
   preserving the output's shape; on failure (which cannot be rewritten) it emits names-only
   context telling the model not to echo the value. Either way it logs a dated near-miss to a
   `0600` file - names only, never the value.
-- **`install.mjs`** - idempotent installer. Merges the hooks + `permissions.deny` block into
+- **`install.mjs`** - idempotent Claude installer. Merges the hooks + `permissions.deny` block into
   `~/.claude/settings.json` without clobbering existing keys; backs the file up first. Each managed
   hook gets its own dedicated matcher group, so repairing our matcher never widens or narrows an
   unrelated sibling hook's matcher; only whole-token copies of our own script are removed. Settings
   are written atomically (temp + rename) at mode `0600`, and the hook scripts are set to `0700`.
+- **`refresh-guard.mjs`** - the installer for **both** apps. Reads the canonical files beside it,
+  verifies every one against `secrets-guard.manifest.json` (LF-normalized sha256), stages and
+  atomically swaps only what changed with backup and rollback, wires `~/.claude/settings.json`
+  through `install.mjs`, and writes `~/.codex/hooks.json` (user level, strict schema: it strips a
+  stray `description` key that would make Codex load no hooks) plus per-platform launchers.
+  `--check` reports on-disk health; `--session-check` prints a one-line warning for a session
+  hook. Neither can observe runtime activation.
+- **`codex-secrets-guard.mjs`** - Codex `PreToolUse` adapter. Runs the canonical guard beside it
+  and relays only reviewed, names-free denials, closing the `apply_patch` input-shape gap. Matches
+  every locally hookable tool (`*`).
+- **`codex-secrets-tripwire.mjs`** - Codex `PostToolUse` adapter. Codex cannot rewrite tool output,
+  so this returns a names-only warning and stops the turn; it does not claim redaction.
+- **`aws-credential-patterns.mjs`, `aws-credential-guard.mjs`, `aws-credential-tripwire.mjs`** -
+  supplements for temporary `ASIA...` access-key ids and named secret-key or session-token
+  assignments. Claude's post-use supplement redacts; Codex's warns.
+- **`secrets-guard.manifest.json`** - the trust anchor: sha256 of every file above. A hash changes
+  only in the same reviewed pull request as its file; `manifest.test.mjs` fails CI when they
+  disagree, and `manifest-regen.mjs <ref>` rewrites the hashes for that reviewed change.
+
+## Codex requires a one-time trust, or it silently runs no hooks
+
+Installing the guard is not the same as it running. **Codex will not execute a hook until the
+student has trusted it**, and an untrusted hook is skipped in silence: no warning, no error, and
+every on-disk check still reports healthy. Trust is the difference between installed and working.
+
+Grant it once, per machine:
+
+1. Launch plain `codex` in a terminal, from the workbench folder.
+2. Accept "Do you trust the contents of this directory?" if it appears.
+3. On the **Hooks need review** screen, choose **Trust all and continue**. "Review hooks" shows
+   exactly what is being approved.
+
+Codex stores the decision in `~/.codex/config.toml` under `[hooks.state]` as a `trusted_hash` per
+hook. Two consequences follow from it being a hash:
+
+- **A guard update prompts again** ("1 hook is new or changed"). Expected, not a fault. Re-approve.
+- **Headless Codex can never be trusted this way.** `codex exec`, schedulers, and CI have no
+  screen, so they take the "Continue without trusting (hooks won't run)" branch every time. Hooks
+  are not a secret boundary for automation; keep secrets out of the environment there instead.
+
+**Prove it by behavior, never by installer output.** In the same interactive `codex` session, ask it
+to run `cat .env`. A `hook: PreToolUse Blocked` line is proof. On-disk hashes are not. The Claude
+side is proven the same way with a fresh headless process, because Claude Code's hooks do run
+headless: `claude -p "Run the command: cat .env"` must show the guard's own refusal.
 
 ## Validation
 
-`secrets-guard.js` is validated by a runnable allow/block table - `node hooks/secrets-guard.test.mjs`
-(feeds PreToolUse JSON into the hook; no secret command is executed). It covers Bash and PowerShell,
-the retired repo-level guard's parity checks, and pins the real `$(op read ...)` injection shapes so a
-future edit can't silently start blocking them. See `Secrets-Guard-Hook-Plan.md` in Wade's workbench
+Run all of these before a pull request; CI runs them on Ubuntu, Windows and macOS:
+
+- `node hooks/manifest.test.mjs` - every pinned hash matches its file.
+- `node hooks/secrets-guard.test.mjs` - the allow/block table for the canonical guard (Bash and
+  PowerShell, the `$(op read ...)` injection shapes, vendor key shapes including Stripe live keys).
+- `node hooks/secrets-tripwire.test.mjs` - redaction and names-only failure context.
+- `node hooks/install.test.mjs` - the Claude settings installer against a throwaway HOME.
+- `node hooks/codex-secrets-guard.test.mjs` - the Codex adapter relays reviewed denials only.
+- `node hooks/refresh-guard.test.mjs` - the both-apps installer against a throwaway HOME: pinned
+  hash verification, no partial write on a bad file, CRLF checkout acceptance, bare-CR tamper
+  refusal, rollback, idempotence.
+
+No secret command is executed by any test. See `Secrets-Guard-Hook-Plan.md` in Wade's workbench
 for the full plan.
 
 ## Reviewer notes
 
-- **Pin the source.** Step 5.3.5 `curl`s these from `main`. Consider pinning to a tag or commit
-  SHA so a later edit can't silently change what students install.
+- **The manifest is the pin.** The bytes are read from this directory, never downloaded, and
+  refused if they do not match the manifest. Change a file and its hash in one reviewed change.
 - **Conservative on language-eval.** The guard blocks any `node -e` / `python3 -c` that touches
   `process.env` / `.env`, including benign one-variable reads. Safe default; workaround is
   `printenv NAME`.

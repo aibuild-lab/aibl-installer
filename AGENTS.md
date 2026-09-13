@@ -1,9 +1,13 @@
-<!-- OPENWIKI:START -->
+# AIBL installer
 
-## OpenWiki
+Public student setup for every AI Build Lab program. Read `START-HERE.md` for
+what a student sees, `COURSE-INSTALLER-CONTRACT.md` for what this repository
+promises each program, and `E2E-TESTING.md` before claiming anything works.
 
-This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+Run `scripts/validate-course-setup` before opening a pull request. Never commit
+tokens, student data, or private program payloads. Browser sign-ins and OS
+consent stay with the student; nothing here changes device policy or global Git
+identity.
 
-OpenWiki pages are regenerated on demand through a reviewed, gated pipeline; no GitHub Actions workflow runs in this repository. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
-
-<!-- OPENWIKI:END -->
+The earlier Agent Native OS workshop route lives in
+`aibuild-lab/workshop-installer`, frozen. Do not port it back.

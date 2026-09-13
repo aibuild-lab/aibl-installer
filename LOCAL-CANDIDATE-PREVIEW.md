@@ -26,7 +26,7 @@ also requires matching installed candidate provenance before writing a locator.
 Use an actual supported Python 3.11+ executable. From the pinned clean installer:
 
 ```sh
-python3 scripts/course_setup.py --course agent-native-workforce \
+python3 scripts/course_setup.py --course agent-workforce \
   --preview-bundle /absolute/path/candidate \
   --distribution-lock /absolute/path/independent-distribution.json \
   --distribution-sha256 REVIEWED_SHA256 \

@@ -1,0 +1,5 @@
+# The guard files are hash-pinned in hooks/secrets-guard.manifest.json (LF-normalized). Keep them LF
+# on every platform so a Windows checkout installs and verifies the exact reviewed bytes.
+hooks/*.js text eol=lf
+hooks/*.mjs text eol=lf
+hooks/*.json text eol=lf

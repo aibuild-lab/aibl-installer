@@ -1,78 +1,131 @@
-# Start your AI Build Lab course
+# Start your AI Build Lab program
 
-**One installer, only the requirements for your class.** Choose Essentials,
-Agent Native Workforce (which includes Essentials), or the existing Agent Native
-OS workshop. Your course repositories remain private and separate.
+**One installer, every program, your own workbench.** You will end with one
+private repository on your GitHub account, open in the app you chose. The
+installer does not ask which program you are in. Supported programs can be added to that workbench later through verified adoption.
+Program selection does not itself install course files; The Lab has no adoption route yet.
 
-Have a GitHub account, accepted course invitations and supported Claude Code
-access ready. You sign into accounts in the browser. Do not paste tokens in chat.
-The installer checks tools, creates or resumes your private workbench and opens
-Claude in that folder. Claude guides the first useful artifact and Git checkpoint.
+You need: a GitHub account, access to the private Essentials repository established, and an
+account for the app you want to work in (Claude, or Codex). Sign-ins happen in
+your browser. Nothing here asks you to paste a token or a password into chat.
 
-## Mac
+## Step 0: get Git
 
-Open Terminal, paste this launch command and follow the course choice:
+The apps cannot start a local session without Git. Do this first.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/aibuild-lab/workshop-installer/main/start.sh -o /tmp/aibl-start.sh
-bash /tmp/aibl-start.sh
+- **Mac:** open Terminal (Cmd + Space, type Terminal, Enter), type `git --version`,
+  press Enter. If a dialog offers to install the command line developer tools,
+  click Install and wait for it to finish (10 to 15 minutes, no password).
+- **Windows:** install [Git for Windows](https://git-scm.com/downloads/win)
+  with the default choices. If the app was already open, close it and reopen it.
+
+## Step 0b: accept your GitHub invitation
+
+Make sure the GitHub account you will use can read `aibuild-lab/agent-essentials`.
+If the course team sent an invitation, accept it. If access is unavailable,
+check the account with the team before setup. Free Essentials still uses a
+private repository. Later paid-program access is a separate step; the installer
+does not grant access or determine whether an invitation is pending.
+
+## Step 1: download the app you chose, and sign in
+
+- **Claude:** [claude.ai/download](https://claude.ai/download). Sign in, then
+  open the Code tab.
+- **Codex:** [the Codex app](https://learn.chatgpt.com/codex/app). Sign in
+  with your ChatGPT account.
+
+Pick one. The course is the same in both; you can switch later.
+
+## Step 2: open your home folder in the app
+
+When the app asks for a folder, choose the one named after you (your home
+folder), not Desktop or Documents.
+
+- **Mac:** in the picker, press Cmd + Shift + H, then choose.
+- **Windows:** This PC, Local Disk (C:), Users, then the folder with your name.
+
+If the app asks whether you trust the folder, click Trust. It is your own folder.
+
+## Step 3: paste this, and follow along
+
+```text
+You are the AI Build Lab installer assistant. I am a student setting up for my program.
+
+Fetch the full setup procedure from this URL and follow it from the beginning, step by step, without summarizing:
+
+https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/SETUP-PROMPT.md
+
+Start by greeting me and detecting my operating system and which app you are, as the procedure says. Do not skip steps. Do not ask me what I want to do; the procedure tells you.
+
+If you cannot fetch the URL, say so and I will paste the procedure into chat.
 ```
 
-macOS 13 or later is required for the course path. Missing Git, GitHub CLI and
-Python use Homebrew when needed; its official installer may ask for macOS
-consent. Claude uses Anthropic's native installer. Already compatible tools stay
-in place. No course Node or Infisical setup is required for Essentials/Workforce.
+The app checks what is already on your machine, tells you what it found and
+what it will do, and asks once before it starts. It installs only what is
+missing, explains every system prompt before it appears, sends you to your
+browser for the two sign-ins, creates your private workbench, and tells you how
+to open it in the app. Expect 30 to 60 minutes, longer on a brand-new Mac.
 
-## Native Windows
-
-Open PowerShell, paste this launch command and follow the course choice:
-
-```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/aibuild-lab/workshop-installer/main/start.ps1 -OutFile "$env:TEMP\aibl-start.ps1"
-& "$env:TEMP\aibl-start.ps1"
-```
-
-Use Windows 10/11 with Microsoft App Installer (WinGet). Git for Windows,
-GitHub CLI and Python install through WinGet with visible OS/package consent;
-Claude uses its native installer. No WSL is required. If your device policy
-blocks scripts or installations, ask your IT administrator or facilitator for
-an approved route. The installer does not change execution policy or device
-management settings. Open a fresh PowerShell window if a newly installed tool
-is not visible, then rerun this same entry point.
+If the app says it cannot open the link: open the URL above in your browser,
+select all (Cmd + A or Ctrl + A), copy, and paste the whole procedure into the
+chat instead. Same setup, delivered by hand.
 
 ## When setup pauses
 
-- Missing invitation: accept the GitHub invitation for the signed-in account.
-  If it is absent, ask the course team to check access, then rerun.
-- Expired authentication: finish the named browser sign-in and rerun.
-- Existing folder or repository name: use another name or ask Claude to review
-  the existing project. Setup does not delete or replace it.
-- Interrupted setup: rerun the same course, folder and repository name. Verified
-  work resumes; compatible tools and completed repositories are reused. An empty
-  interrupted clone is resumed; a partial folder containing work pauses for review.
-- Restricted device: bring the exact nonsecret error to the course team. Do not
-  disable safeguards or install an unrelated runtime to get around the policy.
+- **"Accept the course invitation":** step 0b was skipped. Accept it, then
+  tell the app to try again. Nothing is lost between attempts.
+- **A popup you did not expect:** ask the app what it is. It will tell you what
+  to click and why.
+- **Existing folder or repository name:** the app reuses it if it is yours; it
+  never deletes or replaces anything.
+- **Restricted device:** bring the exact error to your program's Slack channel.
+  Do not disable safeguards to get around a policy.
 
-Default project parent is `~/GitHub`, outside cloud-synced folders. Git identity
-is set only in the workbench using the account name and GitHub no-reply address
-when no local identity exists. Claude can help review that choice later.
+Your workbench lives at `~/GitHub/my-workbench`, outside cloud-synced folders,
+with a Git identity set only inside it.
 
-Once Claude opens: **Use /aibl-setup and help me make my first useful artifact.**
-After Essentials Gate 0, **/aibl-adopt-workforce** brings in the reviewed course
-files. That adoption never merges unrelated repository histories.
+## Fallback: the terminal route
 
-## Verification status and measurements
+If the app cannot run commands on your machine, the same setup runs from a
+terminal. It installs the tools and creates the same workbench.
 
-The Python state machine has local automated coverage for reruns, missing tools,
-authentication, access, name/folder collisions and private-repository checks.
-Actual native Mac and Windows setup and first-time student observations are
-separate acceptance checks. Do not infer beginner-tested from unit tests.
-Local records track Python setup steps, failures, browser interventions and
-elapsed time; the first artifact records a later timestamp. OS bootstrap prompts
-and time before Python begins are explicitly unmeasured. No automatic telemetry
-or timing promise is included.
+**Mac.** Open Terminal and paste:
 
-[Legacy workshop instructions](README.md) remain available.
-[Claude supported installation and access](https://code.claude.com/docs/en/setup).
+```bash
+curl -fsSL https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/start.sh -o /tmp/aibl-start.sh
+bash /tmp/aibl-start.sh
+```
+
+macOS 13 or later. Missing Git, GitHub CLI, Node and Python use Homebrew,
+whose installer may ask for your Mac password in your own Terminal. The
+command-line twin of your app uses its native installer. Put `AIBL_HARNESS=codex`
+in front of the second line if you chose Codex.
+
+**Native Windows.** Open PowerShell and paste:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/start.ps1 -OutFile "$env:TEMP\aibl-start.ps1"
+& "$env:TEMP\aibl-start.ps1"
+```
+
+Windows 10 or 11 with WinGet. Git for Windows, GitHub CLI, Node and Python
+install through WinGet with visible consent; no WSL. If your device policy
+blocks running a downloaded script, ask your program's channel for the approved
+route; the installer never changes execution policy. Add `-Harness codex` after
+the script path if you chose Codex.
+
+## Verification status
+
+The Python setup has automated coverage for reruns, missing tools, sign-in,
+access, name and folder collisions, and private-repository checks. Real native
+Mac and Windows runs, and first-time student observations, are separate checks.
+Do not read "unit tests pass" as "beginner tested." Local records track setup
+steps, failures, browser interventions and elapsed time; no telemetry leaves
+the machine.
+
+The earlier Agent Native OS workshop keeps its own installer at
+[aibuild-lab/workshop-installer](https://github.com/aibuild-lab/workshop-installer).
+[Claude supported installation](https://code.claude.com/docs/en/setup).
+[Codex supported installation](https://learn.chatgpt.com/codex/cli).
 
 Facilitators: [end-to-end testing and real-device walkthrough](E2E-TESTING.md).
