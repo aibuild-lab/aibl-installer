@@ -214,6 +214,42 @@ def compose(root,bundles,family,products,fail_after=None,preview=False):
         plan['complete']=True;atomic(tx/'transaction.json',encoded(plan),384);journal.unlink()
         return {'status':'installed','products':sorted(selected),'rollback':tx.name}
 
+def repair(root,bundles,product,paths,expected,fail_after=None):
+    """Explicitly restore selected installed supplied bytes, retaining local copies.
+
+    expected is the caller-reviewed path -> snapshot map; changes since that
+    review refuse the operation. This does not advance the installed package.
+    """
+    root=Path(root).resolve()
+    if not paths or len(paths)!=len(set(paths)) or set(expected)!=set(paths):raise ReleaseError('Explicit unique paths and reviewed snapshots required')
+    with lock(root):
+        journal=under(root,'.aibl-local/family-transaction.json')
+        if journal.exists():raise ReleaseError('Recover interrupted transaction first')
+        prior=read(under(root,MARKER))
+        if prior.get('schema_version')!='aibl.installed-family/v1' or not isinstance(prior.get('packages'),dict) or not isinstance(prior.get('files'),dict):raise ReleaseError('Invalid installed family record')
+        if product not in prior['packages']:raise ReleaseError('Product not installed')
+        manifest,payload=verify(bundles,product,prior['packages'][product])
+        rows={row['path']:row for row in manifest['files']}
+        for name in paths:
+            old=prior['files'].get(name);row=rows.get(name)
+            if not old or old.get('product')!=product or old.get('policy')!='supplied' or not row or any(old[k]!=row[k] for k in ('sha256','mode','policy')):raise ReleaseError('Only installed supplied files can be repaired')
+            if snapshot(root,name)!=expected[name]:raise ReleaseError('Work changed since repair review: '+name)
+        tx=under(root,'.aibl-local/family-backups/'+str(time.time_ns()));tx.mkdir(parents=True)
+        plan={'backup':tx.name,'before':{},'after':{},'complete':False}
+        for name in paths:
+            before=snapshot(root,name);plan['before'][name]=before
+            plan['after'][name]={'hash':rows[name]['sha256'],'mode':filesystem_mode(rows[name]['mode'])}
+            if before:atomic(under(tx,name),under(root,name).read_bytes(),before['mode'])
+        # Recheck after backup and before journaling any destructive writes.
+        if any(snapshot(root,n)!=expected[n] for n in paths):raise ReleaseError('Work changed while preparing repair')
+        atomic(journal,encoded(plan),384)
+        for i,name in enumerate(paths):
+            if snapshot(root,name)!=expected[name]:raise ReleaseError('Work changed during repair; recover transaction')
+            atomic(under(root,name),payload[name],rows[name]['mode'])
+            if fail_after and i+1>=fail_after:raise ReleaseError('Synthetic interruption; run recover')
+        plan['complete']=True;atomic(tx/'transaction.json',encoded(plan),384);journal.unlink()
+        return {'status':'repaired','paths':sorted(paths),'rollback':tx.name}
+
 def recover(root,backup=None):
     root=Path(root).resolve()
     with lock(root) as local:
@@ -247,13 +283,18 @@ def verify_student_access(root,products):
     return user['login']
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['apply','preview','status','recover','rollback']);p.add_argument('--root',required=True);p.add_argument('--lock');p.add_argument('--sha256');p.add_argument('--bundles');p.add_argument('--product',action='append',choices=sorted(PRODUCTS));p.add_argument('--backup');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['apply','preview','status','repair','recover','rollback']);p.add_argument('--root',required=True);p.add_argument('--lock');p.add_argument('--sha256');p.add_argument('--bundles');p.add_argument('--product',action='append',choices=sorted(PRODUCTS));p.add_argument('--backup');p.add_argument('--reviewed-repair',help='JSON path to explicitly reviewed path/snapshot map');a=p.parse_args()
     try:
         if a.command in ('apply','preview'):
             if not a.lock or not a.bundles or not a.product:raise ReleaseError('Reviewed lock, digest, bundles and products required')
             family=load_lock(a.lock,a.sha256,Path(__file__).resolve().parents[1]);
             if a.command=='apply':verify_student_access(a.root,a.product)
             result=compose(a.root,a.bundles,family,a.product,preview=a.command=='preview')
+        elif a.command=='repair':
+            if not a.bundles or not a.product or len(a.product)!=1 or not a.reviewed_repair:raise ReleaseError('One installed product, bundles and reviewed repair snapshots required')
+            verify_student_access(a.root,a.product)
+            expected=read(a.reviewed_repair)
+            result=repair(a.root,a.bundles,a.product[0],list(expected),expected)
         elif a.command=='status':result=status(a.root)
         else:result=recover(a.root,a.backup if a.command=='rollback' else None)
         print(json.dumps(result));return 0
