@@ -47,6 +47,71 @@ class FamilyTests(unittest.TestCase):
  def test_legacy_hash_transition_preserves_root_and_unused_tools(self):
   self.setup_packages();(self.root/'.aibl').mkdir();(self.root/'course/essentials').mkdir(parents=True);(self.root/'course/essentials/start.md').write_text('old');(self.root/'AGENTS.md').write_text('my old rules');(self.root/'scripts').mkdir();(self.root/'scripts/old.py').write_text('retained')
   old={'schema_version':'aibl.course-release/v3','product':'agent-essentials','files':[{'path':n,'sha256':w.digest(t.encode()),'mode':420} for n,t in [('course/essentials/start.md','old'),('scripts/old.py','retained')]]};(self.root/'.aibl/installed-agent-essentials.json').write_bytes(w.encoded(old));self.apply();self.assertEqual((self.root/'AGENTS.md').read_text(),'my old rules');self.assertEqual((self.root/'scripts/old.py').read_text(),'retained');self.assertEqual((self.root/'course/essentials/start.md').read_text(),'first')
+ def test_preserve_unchanged_customization_and_deletion(self):
+  self.setup_packages();self.apply();path=self.root/'course/essentials/start.md';path.write_text('personal')
+  self.assertEqual(self.apply()['status'],'already_installed');self.assertEqual(path.read_text(),'personal')
+  path.unlink();self.apply();self.assertFalse(path.exists());self.assertEqual(w.status(self.root)['update_availability'],'unknown')
+ def test_identical_unowned_collision(self):
+  self.setup_packages();path=self.root/'course/essentials/start.md';path.parent.mkdir(parents=True);path.write_text('first')
+  with self.assertRaisesRegex(w.ReleaseError,'Changed supplied'):self.apply()
+ def test_preview_writes_nothing(self):
+  self.setup_packages();before=list(self.root.rglob('*'));result=self.apply(preview=True)
+  self.assertEqual(result['status'],'ready');self.assertEqual(list(self.root.rglob('*')),before)
+ def test_mode_only_customization_holds_changed_package(self):
+  self.setup_packages();self.apply();path=self.root/'course/essentials/start.md';path.chmod(0o600);self.package('agent-essentials',{'course/essentials/start.md':'next'},'0.0.11')
+  with self.assertRaisesRegex(w.ReleaseError,'Changed supplied'):self.apply()
+ def test_semver_prerelease_order(self):
+  versions=['0.0.11-alpha','0.0.11-alpha.1','0.0.11-alpha.beta','0.0.11-beta','0.0.11-beta.2','0.0.11-beta.11','0.0.11-rc.1','0.0.11']
+  self.assertEqual(sorted(reversed(versions),key=w.version_key),versions)
+  self.setup_packages();self.apply();self.package('agent-essentials',{'course/essentials/start.md':'next'},'0.0.10-rc.1')
+  with self.assertRaisesRegex(w.ReleaseError,'downgrade'):self.apply()
+ def component_package(self,version='0.0.10',component_version='0.0.10',text='first'):
+  self.package('agent-essentials',{'course/essentials/start.md':text},version)
+  path=self.bundles/'agent-essentials/manifest.json';m=json.loads(path.read_text());m['schema_version']='aibl.family-package/v2';m['components']=[dict(id='test-skill',kind='skill',version=component_version,content_date='2026-09-13',files=['course/essentials/start.md'],requires=[])]
+  path.write_bytes(w.encoded(m));self.family['packages']['agent-essentials']['manifest_sha256']=w.digest(path.read_bytes())
+ def test_component_immutable_and_history(self):
+  self.component_package();self.apply(['agent-essentials']);self.component_package('0.0.11',text='changed')
+  with self.assertRaisesRegex(w.ReleaseError,'Immutable component'):self.apply(['agent-essentials'])
+  self.package('agent-essentials',{'course/essentials/start.md':'first'},'0.0.11')
+  with self.assertRaisesRegex(w.ReleaseError,'history'):self.apply(['agent-essentials'])
+ def test_component_update_and_customization(self):
+  self.component_package();self.apply(['agent-essentials']);self.component_package('0.0.11','0.0.11','next');self.apply(['agent-essentials'])
+  self.assertEqual((self.root/'course/essentials/start.md').read_text(),'next')
+ def test_backup_tamper_prevents_restore(self):
+  self.setup_packages();self.apply();self.package('agent-essentials',{'course/essentials/start.md':'next'},'0.0.11');result=self.apply()
+  (self.root/'.aibl-local/family-backups'/result['rollback']/'course/essentials/start.md').write_text('tampered')
+  with self.assertRaisesRegex(w.ReleaseError,'Backup integrity'):w.recover(self.root,result['rollback'])
+ def test_required_deleted_dependency_holds(self):
+  self.component_package();path=self.bundles/'agent-essentials/manifest.json';m=json.loads(path.read_text());m['components'].append(dict(id='using-agent',kind='agent',version='0.0.10',content_date='2026-09-13',files=['course/essentials/start.md'],requires=[dict(id='test-skill',version='0.0.10')]))
+  path.write_bytes(w.encoded(m));self.family['packages']['agent-essentials']['manifest_sha256']=w.digest(path.read_bytes());self.apply(['agent-essentials']);(self.root/'course/essentials/start.md').unlink()
+  self.assertEqual(self.apply(['agent-essentials'],preview=True)['status'],'needs_review')
+  with self.assertRaises(w.ReleaseError):self.apply(['agent-essentials'])
+  self.assertFalse((self.root/'course/essentials/start.md').exists())
+ def test_customized_retirement_holds(self):
+  self.component_package();self.apply(['agent-essentials']);(self.root/'course/essentials/start.md').write_text('mine');self.component_package('0.0.11')
+  path=self.bundles/'agent-essentials/manifest.json';m=json.loads(path.read_text());m['components']=[];path.write_bytes(w.encoded(m));self.family['packages']['agent-essentials']['manifest_sha256']=w.digest(path.read_bytes())
+  self.assertEqual(self.apply(['agent-essentials'],preview=True)['status'],'needs_review')
+ def test_unknown_schema_rejected(self):
+  self.component_package();path=self.bundles/'agent-essentials/manifest.json';m=json.loads(path.read_text());m['schema_version']='aibl.family-package/v3';path.write_bytes(w.encoded(m));self.family['packages']['agent-essentials']['manifest_sha256']=w.digest(path.read_bytes())
+  with self.assertRaisesRegex(w.ReleaseError,'manifest contract'):self.apply(['agent-essentials'])
+ def test_retired_component_version_cannot_be_reused(self):
+  self.component_package();self.apply(['agent-essentials']);self.component_package('0.0.11')
+  path=self.bundles/'agent-essentials/manifest.json';m=json.loads(path.read_text());m['components']=[];path.write_bytes(w.encoded(m));self.family['packages']['agent-essentials']['manifest_sha256']=w.digest(path.read_bytes());self.apply(['agent-essentials'])
+  self.component_package('0.0.12',text='changed')
+  with self.assertRaisesRegex(w.ReleaseError,'Immutable component'):self.apply(['agent-essentials'])
+ def test_every_write_boundary_recovers(self):
+  self.setup_packages()
+  for boundary in range(1,5):
+   with self.subTest(boundary=boundary):
+    with self.assertRaisesRegex(w.ReleaseError,'Synthetic'):self.apply(fail_after=boundary)
+    self.assertEqual(w.status(self.root)['status'],'recovery_required');w.recover(self.root)
+    self.assertFalse((self.root/w.MARKER).exists());self.assertFalse((self.root/'AGENTS.md').exists())
+  self.apply()
+ def test_concurrent_operation_refused(self):
+  self.setup_packages()
+  with w.lock(self.root):
+   with self.assertRaises(w.ReleaseError):self.apply()
+  self.assertFalse((self.root/w.MARKER).exists())
 if __name__=='__main__':unittest.main()
 
 class FamilyAccessTests(unittest.TestCase):
