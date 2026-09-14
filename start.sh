@@ -62,7 +62,7 @@ INSTALLER_CHANGES="$(git -C "$INSTALLER_DIR" status --porcelain)"
 if [[ -n "$INSTALLER_CHANGES" ]]; then echo 'Installer has local work. Preserve it for review; no update was applied.'; exit 1; fi
 if [[ -n "$INSTALLER_COMMIT" && "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision differs. Preserve it for review.'; exit 1; fi
 if [[ ! -f "$INSTALLER_DIR/scripts/enroll.py" ]]; then echo 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.'; exit 1; fi
-if [[ "$COURSE" == my-workbench ]]; then
+if [[ "${COURSE:-}" == my-workbench ]]; then
   if [[ -z "$INSTALLER_COMMIT" ]]; then echo 'My Workbench requires the independently approved exact distribution handoff.'; exit 1; fi
   exec "$PYTHON" "$INSTALLER_DIR/scripts/family_setup_handoff.py" --harness "$HARNESS" --distribution "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"
 fi

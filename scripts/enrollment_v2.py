@@ -43,6 +43,8 @@ def available(root, runner=command, reg=None):
         if p.get('kind') == 'foundation':
             continue
         product = p['id']
+        if product not in current['family']['packages']:
+            continue
         publisher = 'aibuild-lab/agent-workforce' if product == 'agent-workforce' else p['publisher']
         if access(publisher, runner) != 'readable':
             continue

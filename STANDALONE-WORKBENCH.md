@@ -11,6 +11,22 @@ app locations. Students use the app they selected.
 
 ## Setup
 
+The successor official handoff supplies a downloaded native launcher, its
+independent SHA-256, an exact installer commit, and a frozen family distribution
+with its independent SHA-256. On macOS the argument order is
+`bash start.sh my-workbench DISTRIBUTION_FILE DISTRIBUTION_SHA256 INSTALLER_COMMIT LAUNCHER_SHA256`;
+select Codex with `AIBL_HARNESS=codex`. On native Windows use
+`start.ps1 -Course my-workbench -DistributionLock DISTRIBUTION_FILE
+-DistributionSHA256 DISTRIBUTION_SHA256 -InstallerCommit INSTALLER_COMMIT
+-LauncherSHA256 LAUNCHER_SHA256 -Harness codex` (or `claude`). These are argument
+templates, not approved release identities. Do not replace the placeholders
+with mutable branches or hashes from an untrusted download.
+
+Both launchers retain the exact engine at `.aibl/installers/INSTALLER_COMMIT`
+before `family_setup_handoff.py` verifies and acquires public template/core.
+Sign-ins remain visible. No successor is advertised through the existing public
+entry until the exact distribution and native student gates are complete.
+
 From the clean retained installer named by an independently admitted family,
 run `scripts/course_setup.py` with `--family-lock`, `--family-sha256` and
 `--family-bundles`, plus `--harness claude` or `--harness codex`. The bootstrap
