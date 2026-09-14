@@ -73,7 +73,8 @@ def setup_standalone(workspace, name, family, bundles, *, state_root=None,
     name = repo_name(name)
     folder = workspace / name
     state_root = Path(state_root) if state_root else Path.home() / '.aibl' / 'setup'
-    runner(['gh', 'auth', 'status'])
+    # The selected account API is authoritative; inactive saved accounts must
+    # not block an otherwise usable student sign-in.
     user = json.loads(runner(['gh', 'api', 'user']))
     if not isinstance(user.get('login'), str) or not user.get('id'):
         raise SetupError('GitHub account identity is unavailable.', 'authentication_missing')

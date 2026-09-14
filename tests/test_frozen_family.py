@@ -119,9 +119,15 @@ class FrozenFamily(unittest.TestCase):
             manifest = dict(schema_version='aibl.family-package/v2', product=product, version='0.0.12',
                             source_repository='aibuild-lab/agent-native-workforce-internal', source_revision='c'*40,
                             files=[dict(path=path, sha256=digest(content), mode=420, policy=policy)], components=[])
+            contents={path:content}
+            if product=='workbench-core':
+                from test_family_v2 import core_components
+                contents={client+'/skills/'+skill+'/SKILL.md':content for client in ('.agents','.claude') for skill in w.CORE_SKILLS}
+                manifest['files']=[dict(path=name,sha256=digest(raw),mode=420,policy=policy) for name,raw in contents.items()]
+                manifest['components']=core_components(contents,'0.0.12')
             stream = io.BytesIO()
             with zipfile.ZipFile(stream, 'w') as archive:
-                archive.writestr(path, content)
+                for name,raw in contents.items():archive.writestr(name,raw)
             mb, ab = encoded(manifest), stream.getvalue()
             pin = dict(version='0.0.12', manifest_sha256=digest(mb), archive_sha256=digest(ab),
                        publisher=w.V2_PUBLISHERS[product], release_tag=w.release_tag(product, '0.0.12'), release_target='b'*40)

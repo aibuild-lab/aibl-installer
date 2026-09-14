@@ -12,7 +12,7 @@ import zipfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from workbench_packages import PRODUCTS, MAX_BYTES, ReleaseError, digest, verify, version_key, validate_pin
+from workbench_packages import PRODUCTS, LEGACY_PRODUCTS, MAX_BYTES, ReleaseError, digest, verify, version_key, validate_pin
 from release_files import encoded
 from github_assets import GitHubAssets, validate_locator, INSTALLER
 
@@ -93,7 +93,7 @@ def discover(trust, installer_revision, *, local_simulation=False, now=None, des
                 result.pop('bundle',None)
                 return result
         if set(trust)!={'schema_version','product','index_url','index_sha256','allowed_origin','minimum_sequence'} or trust['schema_version']!='aibl.release-trust/v1':raise ReleaseError('Trust contract')
-        if trust['product'] not in PRODUCTS or type(trust['minimum_sequence']) is not int or trust['minimum_sequence']<1:raise ReleaseError('Trust identity')
+        if trust['product'] not in LEGACY_PRODUCTS or type(trust['minimum_sequence']) is not int or trust['minimum_sequence']<1:raise ReleaseError('Trust identity')
         if not re.fullmatch('[0-9a-f]{64}',trust['index_sha256']):raise ReleaseError('Trust digest')
         raw=fetch(trust['index_url'],trust['allowed_origin'],local_simulation,65536)
         if digest(raw)!=trust['index_sha256']:raise ReleaseError('Index integrity mismatch')

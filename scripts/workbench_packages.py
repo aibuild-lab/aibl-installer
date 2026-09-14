@@ -69,17 +69,27 @@ def verify(bundle,product,pin):
         name=row['path'];under(root,name)
         allowed=(product=='agent-workbench' and row['policy']=='seed' and (name in ['README.md','AGENTS.md','CLAUDE.md','.gitignore','.aibl/template.json'] or name.startswith(('context/','library/','work/')))) or (product=='agent-essentials' and row['policy']=='supplied' and name.startswith(('course/essentials/','blueprints/','.agents/skills/','.claude/skills/','scripts/','starter/','.aibl/capabilities-'))) or (product=='agent-workforce' and name.startswith(('course/workforce/','workforce/')))
         if successor:
-            if product=='agent-workbench':allowed=row['policy']=='seed' and (allowed or name in ('LICENSE','blueprints/.gitkeep'))
+            if product=='agent-workbench':allowed=row['policy']=='seed' and (allowed or name in ('LICENSE','blueprints/.gitkeep','blueprints/README.md'))
             elif product=='agent-essentials':allowed=row['policy']=='supplied' and name in ('course/essentials/START-HERE.md','blueprints/youtube-transcripts.md')
             elif product=='workbench-core':
                 allowed=row['policy']=='supplied' and (name=='.aibl/licenses/workbench-core-MIT.txt' or any(name.startswith(client+'/skills/'+skill+'/') for client in ('.agents','.claude') for skill in CORE_SKILLS))
                 if m['schema_version']!='aibl.family-package/v2':raise ReleaseError('Core requires component-aware manifest')
+            elif product=='agent-workforce':
+                allowed=allowed or (row['policy']=='supplied' and name in ('.aibl/workforce-student-edition.json','.claude/skills/aibl-workforce/SKILL.md','.agents/skills/aibl-workforce/SKILL.md'))
         if not allowed or name.casefold() in fold:raise ReleaseError('File ownership boundary: '+name)
         if 'done-for-the-day' in name or 'done-for-day' in name:raise ReleaseError('Habit skill must be student authored')
         fold.add(name.casefold());rows[name]=row
     if not rows:raise ReleaseError('Empty package')
     version_key(m['version'])
     validate_components(m,rows)
+    if product=='workbench-core':
+        expected_ids={'workbench.method.'+name for name in CORE_SKILLS}
+        if {c['id'] for c in m.get('components',[])}!=expected_ids:raise ReleaseError('Core requires exactly three versioned skill components')
+        for name in CORE_SKILLS:
+            entries={client+'/skills/'+name+'/SKILL.md' for client in ('.agents','.claude')}
+            component=next(c for c in m['components'] if c['id']=='workbench.method.'+name)
+            if component['kind']!='skill' or component['requires'] or not entries<=set(component['files']) or not entries<=set(rows):raise ReleaseError('Core requires paired native skill exposures without course dependencies')
+            if len({rows[path]['sha256'] for path in entries})!=1:raise ReleaseError('Core native exposures differ')
     payload={}
     with zipfile.ZipFile(io.BytesIO(ab)) as z:
         infos=z.infolist()

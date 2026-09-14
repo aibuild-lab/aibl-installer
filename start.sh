@@ -10,7 +10,7 @@ DISTRIBUTION_SHA256="${3:-}"
 INSTALLER_COMMIT="${4:-}"
 LAUNCHER_SHA256="${5:-}"
 if [[ -n "$DISTRIBUTION_LOCK$DISTRIBUTION_SHA256$INSTALLER_COMMIT$LAUNCHER_SHA256" ]]; then
-  if [[ "$COURSE" != agent-workforce || ! -f "$DISTRIBUTION_LOCK" || ! "$DISTRIBUTION_SHA256" =~ ^[a-f0-9]{64}$ || ! "$INSTALLER_COMMIT" =~ ^[a-f0-9]{40}$ || ! "$LAUNCHER_SHA256" =~ ^[a-f0-9]{64}$ ]]; then echo 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.'; exit 1; fi
+  if [[ ( "$COURSE" != agent-workforce && "$COURSE" != my-workbench ) || ! -f "$DISTRIBUTION_LOCK" || ! "$DISTRIBUTION_SHA256" =~ ^[a-f0-9]{64}$ || ! "$INSTALLER_COMMIT" =~ ^[a-f0-9]{40}$ || ! "$LAUNCHER_SHA256" =~ ^[a-f0-9]{64}$ ]]; then echo 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.'; exit 1; fi
   if [[ "$(shasum -a 256 "$AIBL_BOOTSTRAP_PATH" | cut -d' ' -f1)" != "$LAUNCHER_SHA256" || "$(shasum -a 256 "$DISTRIBUTION_LOCK" | cut -d' ' -f1)" != "$DISTRIBUTION_SHA256" ]]; then echo 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.'; exit 1; fi
   DISTRIBUTION_LOCK="$(cd "$(dirname "$DISTRIBUTION_LOCK")" && pwd)/$(basename "$DISTRIBUTION_LOCK")"
 fi
@@ -62,6 +62,10 @@ INSTALLER_CHANGES="$(git -C "$INSTALLER_DIR" status --porcelain)"
 if [[ -n "$INSTALLER_CHANGES" ]]; then echo 'Installer has local work. Preserve it for review; no update was applied.'; exit 1; fi
 if [[ -n "$INSTALLER_COMMIT" && "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision differs. Preserve it for review.'; exit 1; fi
 if [[ ! -f "$INSTALLER_DIR/scripts/enroll.py" ]]; then echo 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.'; exit 1; fi
+if [[ "$COURSE" == my-workbench ]]; then
+  if [[ -z "$INSTALLER_COMMIT" ]]; then echo 'My Workbench requires the independently approved exact distribution handoff.'; exit 1; fi
+  exec "$PYTHON" "$INSTALLER_DIR/scripts/family_setup_handoff.py" --harness "$HARNESS" --distribution "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"
+fi
 if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
 if [[ -n "$COURSE" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS"; fi
 exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course agent-essentials --harness "$HARNESS"

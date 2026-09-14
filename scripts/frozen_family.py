@@ -15,6 +15,9 @@ REQUIRED_ENGINE_FILES = {
     'scripts/course_setup.py', 'scripts/enroll.py', 'scripts/release_files.py',
     'scripts/workbench_packages.py', 'scripts/github_assets.py',
     'scripts/release_discovery.py', 'scripts/frozen_family.py',
+    'scripts/standalone_setup.py', 'scripts/enrollment_v2.py',
+    'scripts/student_updates.py', 'scripts/family_setup_handoff.py',
+    'scripts/local_learning_backup.py',
 }
 
 

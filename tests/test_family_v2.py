@@ -6,17 +6,28 @@ import test_workbench_packages as fixtures
 import workbench_packages as w
 
 
+def core_components(files,version='0.0.10'):
+    return [{'id':'workbench.method.'+name,'kind':'skill','version':version,'content_date':'2026-09-14','files':sorted(path for path in files if '/skills/'+name+'/' in path),'requires':[]} for name in sorted(w.CORE_SKILLS)]
+
+
+def package_core(case,files,version='0.0.10'):
+    files=dict(files)
+    for name in w.CORE_SKILLS:
+        content=files.get('.agents/skills/'+name+'/SKILL.md',name)
+        for client in ('.agents','.claude'):files[client+'/skills/'+name+'/SKILL.md']=content
+    fixtures.FamilyTests.package(case,'workbench-core',files,version)
+    path=case.bundles/'workbench-core/manifest.json';manifest=w.read(path)
+    manifest.update(schema_version='aibl.family-package/v2',components=core_components(files,version))
+    path.write_bytes(w.encoded(manifest));case.family['packages']['workbench-core']['manifest_sha256']=w.digest(path.read_bytes())
+
+
 class FamilyV2(unittest.TestCase):
     setUp=fixtures.FamilyTests.setUp
     package=fixtures.FamilyTests.package
     apply=fixtures.FamilyTests.apply
     def v2(self):
         self.package('agent-workbench', {'AGENTS.md': 'generic', 'blueprints/.gitkeep': ''},seed=True)
-        self.package('workbench-core', {'.agents/skills/aibl-enroll/SKILL.md': 'enroll'})
-        path=self.bundles/'workbench-core/manifest.json'
-        manifest=json.loads(path.read_text());manifest.update(schema_version='aibl.family-package/v2',components=[])
-        path.write_bytes(w.encoded(manifest))
-        self.family['packages']['workbench-core']['manifest_sha256']=w.digest(path.read_bytes())
+        package_core(self, {'.agents/skills/aibl-enroll/SKILL.md': 'enroll'})
         self.package('agent-essentials', {'blueprints/youtube-transcripts.md':'lesson8'})
         self.package('agent-workforce', {'workforce/start.md':'first action'})
         self.family.update(schema_version='aibl.family-lock/v2',installer_revision='a'*40,template_revision='b'*40,
