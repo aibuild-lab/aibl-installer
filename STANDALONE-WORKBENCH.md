@@ -1,0 +1,72 @@
+# Standalone My Workbench route
+
+State: successor source implementation. Publication readback, native app use
+and ordinary-student qualification require their own exact-version evidence.
+
+The verified v2 family contains `agent-workbench` and `workbench-core`. Setup
+creates an independent private `my-workbench` from those public packages. It
+does not require private Essentials or Workforce access. The generic core
+supplies `aibl-personalize`, `aibl-checkpoint` and `aibl-enroll` in both supported
+app locations. Students use the app they selected.
+
+## Setup
+
+From the clean retained installer named by an independently admitted family,
+run `scripts/course_setup.py` with `--family-lock`, `--family-sha256` and
+`--family-bundles`, plus `--harness claude` or `--harness codex`. The bootstrap
+owns acquiring those independently admitted inputs. Do not treat an installed
+marker, a downloaded package or a moving branch as a new trust admission.
+
+The selected app and GitHub must be signed in. Setup uses a verified empty
+private repository and a local staging folder, makes one initial commit,
+pushes it, and verifies the remote identity before showing the workbench.
+Progress lives outside the repository in `~/.aibl/setup/`.
+
+If creation or the first push loses its response, rerun with the same inputs.
+Setup reads the provider and local state before deciding whether an operation
+is still needed. It never overwrites a nonempty foreign repository or folder.
+Interrupted seed writes reuse package recovery. Additional work or changed
+seed files stop for review and remain in place.
+
+An established v2 workbench exits before composition, context creation, Git
+configuration, or any student-repository write. It preserves edited and deleted
+files, uncommitted work, unpushed commits, the index and local learning state.
+The result is `already_initialized`, not a new claim of native verification.
+
+## Enrollment
+
+The workbench's `aibl-enroll` wrapper invokes the unchanged exact retained
+installer. It does not clone or pull a newer engine.
+
+1. Inspect with `scripts/enroll.py --workbench PATH --check --json`. Only
+   readable programs appear, as `Ready to add` or `Already connected`. Missing
+   program help names the signed-in username without guessing access status.
+2. Select if useful with `--program agent-workforce --yes`. This records only
+   the choice. It does not install files or grant access.
+3. Preview with `--preview --program agent-workforce`, the explicit family
+   input trio, and `--workbench PATH --json`. The result includes `plan_id`,
+   file changes and the verified first action. Plans live privately outside the
+   workbench in `~/.aibl/enrollment/`.
+4. Explain the preview and obtain the student's confirmation. Apply that exact
+   ID with `--apply-plan ID --workbench PATH --json`. The stored plan binds
+   account, repository, Git state, local changes, candidate hashes and connection
+   metadata. Changed inputs require a fresh preview and confirmation.
+5. Refresh the selected app and perform the first action. The file installer
+   returns `installed` with `native_verification: pending`. It does not convert
+   file presence or a simulated exercise into native or student evidence.
+
+The optional free lesson-8 support uses `--program agent-essentials` with its
+publicly admitted package. It is absent from day-one setup and supplies only
+its declared support files. The Lab has no installation route in this release.
+
+A confirmed apply can be retried with the same plan. If a package transaction
+was interrupted, run the retained package engine's `recover --root PATH`, then
+retry. Completed writes with a lost response are reconciled against the exact
+completed backup transaction. Later edits are preserved. Keep the returned
+rollback identity; local learning backup is separate from Git and package
+recovery.
+
+Enrollment refuses to change an already installed package pin. Later updates
+require one student-owned PR, explicit student approval, merge readback, safe
+local synchronization, selected-app refresh and verification. Faculty have no
+routine role in approving or merging that PR.

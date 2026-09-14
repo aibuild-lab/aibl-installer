@@ -1,5 +1,21 @@
 # Shared course installer contract
 
+The explicit [standalone workbench route](STANDALONE-WORKBENCH.md) uses an
+independently admitted `aibl.family-lock/v2`: public template plus core, private
+student repository, no course invitation at setup. Established-workbench setup
+reruns only verify account/ownership and read state, with no student file or Git
+state changes. The historical routes described below retain their original
+contracts. Source support for the successor does not qualify or activate a new
+published default.
+
+For that successor, `enroll.py --check` shows accessible programs only.
+`--yes` remains selection only. `--preview --program ID` binds verified inputs
+and local Git/file state to a plan; `--apply-plan ID` consumes that exact preview
+after student confirmation. Initial installation and interrupted retry reuse
+the existing package engine. An installed result reports native verification
+pending, with the first action and discovery paths. A later update to existing
+package pins requires the student-owned PR flow; enrollment never performs it.
+
 One public entry builds the Essentials hub for every student and does not ask
 which program they are in. The registry in course-options.json lists every
 program with the site ledger's ids, its publisher repository, what it requires
