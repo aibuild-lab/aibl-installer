@@ -15,6 +15,13 @@ Initial enrollment can still be local and uncommitted. The remote may contain
 an older subset of installed packages only when its corresponding pins match
 the local installed pins exactly. The grouped PR includes those first-enrolled
 package files as well as the reviewed update; no extra checkpoint is required.
+Student-owned seed paths already recorded locally but absent from the remote
+base remain outside the package PR. `local_only_seeds` lists those omissions;
+their local bytes, customization or intentional deletion are preserved. The
+tool never uploads personal seed contents, normalizes them, or deletes them
+to make Git merge succeed. Their Git backup remains the student's optional
+selective checkpoint. New seed paths first introduced by the requested update
+still use the existing review and collision checks.
 
 Inspect the returned exact package set and complete candidate diff. Then run
 `propose --workbench WORKBENCH --operation ID` with the same script. It reconciles

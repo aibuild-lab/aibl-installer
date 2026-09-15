@@ -26,6 +26,11 @@ class EnrollmentUpdateSync(unittest.TestCase):
 
     def setUp(self):
         enrollment_fixture.StandaloneEnrollment.setUp(self)
+        if getattr(self,'seed_fixture',False):
+            self.seed_path='course/workforce/student-authoring/lesson-notes.md'
+            self.add_seed_package(self.seed_path,'Your own lesson notes')
+            self.lockfile.write_bytes(packages.encoded(self.family))
+            self.lockhash=packages.digest(self.lockfile.read_bytes())
         self.init()
         self.apply(self.preview())
         self.remote = self.services.server
@@ -44,6 +49,19 @@ class EnrollmentUpdateSync(unittest.TestCase):
         package_core(self, {'.agents/skills/aibl-enroll/SKILL.md': 'updated'}, version='0.0.11')
         self.family['packages']['workbench-core'].update(publisher=packages.PUBLIC_TEMPLATE,
             release_tag='workbench-core-v0.0.11', release_target='b' * 40)
+
+    def add_seed_package(self,name,content,version='0.0.10'):
+        _,payload=packages.verify(self.bundles,'agent-workforce',self.family['packages']['agent-workforce'])
+        files={path:raw.decode('utf-8') for path,raw in payload.items()}
+        files[name]=content
+        self.package('agent-workforce',files,version=version)
+        path=self.bundles/'agent-workforce/manifest.json'
+        manifest=packages.read(path)
+        for row in manifest['files']:
+            if row['path']==name:row['policy']='seed'
+        path.write_bytes(packages.encoded(manifest))
+        self.family['packages']['agent-workforce'].update(manifest_sha256=packages.digest(path.read_bytes()),
+            publisher=packages.V2_PUBLISHERS['agent-workforce'],release_tag='v'+version,release_target='b'*40)
 
     def prepare(self):
         return u.prepare(self.root, self.bundles, self.family, 'one', self.base / 'preparations', self.backend)
@@ -242,6 +260,51 @@ class EnrollmentUpdateSync(unittest.TestCase):
         self.synchronized()
         self.assertFalse((self.root / packages.SYNC_PENDING).exists())
         self.assertEqual((self.root / packages.MARKER).stat().st_mtime_ns, before)
+
+    def test_local_student_seed_omitted_from_pr_preserves_customization_and_deletion(self):
+        for choice in ('unchanged','customized','deleted'):
+            with self.subTest(choice=choice):
+                case=EnrollmentUpdateSync()
+                case.seed_fixture=True
+                case.setUp()
+                try:
+                    path=case.root/case.seed_path
+                    if choice=='customized':path.write_text('Private student response, never copy this into the package PR')
+                    if choice=='deleted':path.unlink()
+                    before=path.read_bytes() if path.exists() else None
+                    state=case.merge()
+                    self.assertIn(case.seed_path,state['local_only_seeds'])
+                    self.assertNotIn(case.seed_path,{row['path'] for row in state['intended_changes']})
+                    self.assertEqual(u.git(state['candidate'],'ls-tree','--name-only','-z',state['head_revision'],'--',case.seed_path),'')
+                    result=u.synchronize(case.root,'one')
+                    self.assertEqual(result['stage'],'local_synchronized')
+                    self.assertEqual(path.read_bytes() if path.exists() else None,before)
+                    self.assertEqual(u.git(case.root,'ls-tree','--name-only','-z','HEAD','--',case.seed_path),'')
+                    self.assertEqual(packages.read(case.root/packages.MARKER)['files'][case.seed_path]['policy'],'seed')
+                    case.student_work_unchanged()
+                finally:case.doCleanups()
+
+    def test_newly_introduced_seed_still_enters_reviewed_pr(self):
+        name='course/workforce/student-authoring/new-update-notes.md'
+        self.add_seed_package(name,'New optional notes starter',version='0.0.11')
+        state=self.merge()
+        self.assertNotIn(name,state['local_only_seeds'])
+        self.assertIn(name,{row['path'] for row in state['intended_changes']})
+        self.assertEqual(u.git(state['candidate'],'show',state['head_revision']+':'+name),'New optional notes starter')
+        self.assertEqual(u.synchronize(self.root,'one')['stage'],'local_synchronized')
+        self.assertEqual((self.root/name).read_text(),'New optional notes starter')
+        self.student_work_unchanged()
+
+    def test_new_seed_collision_does_not_normalize_or_discard_student_file(self):
+        name='course/workforce/student-authoring/new-update-notes.md'
+        self.add_seed_package(name,'New optional notes starter',version='0.0.11')
+        (self.root/name).parent.mkdir(parents=True,exist_ok=True)
+        (self.root/name).write_text('Pre-existing private student answer')
+        self.merge()
+        with self.assertRaises(packages.ReleaseError):u.synchronize(self.root,'one')
+        self.assertEqual((self.root/name).read_text(),'Pre-existing private student answer')
+        self.assertEqual((self.root/packages.MARKER).read_bytes(),self.old_marker)
+        self.student_work_unchanged()
 
 
 if __name__ == '__main__': unittest.main()

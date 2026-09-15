@@ -81,6 +81,13 @@ def managed_snapshot(root):
 def transition_snapshot(root,names):return {name:packages.snapshot(root,name) for name in sorted(names)}
 
 
+def local_seed_omissions(root,installed,base_revision):
+    # A first enrollment transfers seed ownership locally, not into Git. Never
+    # upload those student-owned files as a side effect of a later package PR.
+    return sorted(name for name,row in installed['files'].items()
+                  if row['policy']=='seed' and not git(root,'ls-tree','--name-only','-z',base_revision,'--',name))
+
+
 def fence_origin(root,state):
     if repository(root)!=state['repository']:raise ReleaseError('Repository origin changed; no external update write is allowed')
 
@@ -118,6 +125,7 @@ def prepare(root,bundles,family,operation,preparation_root=None,backend=None):
             candidate=directory/(digest(str(root).encode())[:12]+'-'+operation)
             if candidate.exists():raise ReleaseError('Unowned preparation path exists; preserve it')
             state={'schema_version':'aibl.student-update/v1','operation':operation,'workbench':str(root),'repository':full,'base_branch':base,'base_revision':base_sha,'local_revision':git(root,'rev-parse','HEAD'),'local_branch':git(root,'symbolic-ref','--short','HEAD'),'family':family,'family_sha256':identity,'products':products,'candidate':str(candidate),'branch':'aibl-update/'+operation,'stage':'preparing','managed_before':managed_snapshot(root),'pr':None,'approval':None,'native_verification':'pending'}
+            state['local_only_seeds']=local_seed_omissions(root,installed,base_sha)
             state['transition_before']=transition_snapshot(root,set(state['managed_before'])|{row['path'] for row in preview['changes']})
             save(path,state)
         candidate=Path(state['candidate'])
@@ -143,10 +151,10 @@ def prepare(root,bundles,family,operation,preparation_root=None,backend=None):
         if not matching_subset and not completed_apply:raise ReleaseError('Local and remote installed records differ; synchronize their history first')
         preview=packages.compose(candidate,bundles,family,products,preview=True)
         if preview['conflicts']:raise ReleaseError('Remote supplied files need review; no PR created')
-        state['changes']=preview['changes']
+        state['changes']=[row for row in preview['changes'] if row['path'] not in state.get('local_only_seeds',[])]
         # Persist the intended diff before applying, so interrupted application
         # can restore its transaction and resume without losing removed paths.
-        if not state.get('intended_changes'):state['intended_changes']=preview['changes'];save(path,state)
+        if not state.get('intended_changes'):state['intended_changes']=state['changes'];save(path,state)
         packages.compose(candidate,bundles,family,products)
         git(candidate,'add','--',packages.MARKER,*[row['path'] for row in state['intended_changes']])
         staged=set(git(candidate,'diff','--cached','--name-only','-z').split('\0'))-{''}
