@@ -11,6 +11,10 @@ run `scripts/student_updates.py prepare --workbench WORKBENCH --operation ID
 Before preparation, offer an optional selective `aibl-checkpoint`. Do not stage
 all work or require unfinished work to be committed. The preparation worktree
 lives outside the active workbench, so unaccepted skills are not discoverable.
+Initial enrollment can still be local and uncommitted. The remote may contain
+an older subset of installed packages only when its corresponding pins match
+the local installed pins exactly. The grouped PR includes those first-enrolled
+package files as well as the reviewed update; no extra checkpoint is required.
 
 Inspect the returned exact package set and complete candidate diff. Then run
 `propose --workbench WORKBENCH --operation ID` with the same script. It reconciles
@@ -24,6 +28,24 @@ by reading the same PR, not issuing a replacement. Then run
 `synchronize --workbench WORKBENCH --operation ID`.
 
 Synchronization verifies the actual merge graph and tree before fast-forwarding.
+Close active agent sessions first. Any staged work, changed local HEAD, pending
+package/learning recovery or another package writer pauses synchronization.
+The tool saves exact current supplied bytes and modes, including the family
+marker, under `.aibl-local/update-sync/ID/` before temporarily normalizing only
+those reviewed supplied paths to their tracked HEAD state. This lets the
+approved fast-forward include previously uncommitted enrollment without
+staging student work. An immutable journal precedes any normalization. Seed
+files, personal context, custom skills and local learning are never normalized.
+The bound `.aibl-local/student-update-sync.json` marker blocks package
+enrollment, repair, rollback and other update preparation across process
+restarts until this same synchronization completes. Its removal follows the
+durable `local_synchronized` record, and a retry reconciles an interrupted
+removal without repeating the file transition. Do not delete this marker.
+Retries reconcile before/tracked states during normalization and the exact
+merged state after a lost Git response. An ordinary failed merge restores the
+saved enrollment bytes when no later edit or partial Git transition prevents
+that safe restoration. A partial Git index transition or lock remains held
+for diagnosis, never reset or deleted by this tool.
 Changed supplied files, new ignored collisions, unpushed divergence or a later
 remote revision stop with all work retained. No reset, stash, force push or
 automatic conflict resolution is used. After a remote merge or local-sync

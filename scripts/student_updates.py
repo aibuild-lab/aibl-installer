@@ -11,7 +11,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 import workbench_packages as packages
-from release_files import ReleaseError, atomic, digest, encoded, process_guard, under
+from release_files import ReleaseError, atomic, digest, encoded, process_guard, under, lock
 
 
 def git(root,*args):
@@ -94,6 +94,7 @@ def fence_candidate(state):
 
 def prepare(root,bundles,family,operation,preparation_root=None,backend=None):
     root=Path(root).resolve();backend=backend or GitHub();packages.validate_family(family)
+    packages.require_no_pending_sync(root)
     if family['schema_version']!='aibl.family-lock/v2':raise ReleaseError('Use the successor family distribution for student update PRs')
     path=state_path(root,operation);path.parent.mkdir(parents=True,exist_ok=True)
     with process_guard(path.parent/'operation.lock'):
@@ -136,7 +137,10 @@ def prepare(root,bundles,family,operation,preparation_root=None,backend=None):
         # The remote base must describe the same currently installed packages.
         prior=packages.read(under(candidate,packages.MARKER))
         completed_apply=state.get('intended_changes') is not None and prior['packages']=={p:family['packages'][p] for p in products}
-        if prior['packages']!=installed['packages'] and not completed_apply:raise ReleaseError('Local and remote installed records differ; synchronize their history first')
+        # Initial confirmed enrollment need not have been checkpointed or pushed.
+        # A remote subset may join the single PR only with the exact local pins.
+        matching_subset={'agent-workbench','workbench-core'}<=set(prior['packages'])<=set(installed['packages']) and all(installed['packages'][p]==pin for p,pin in prior['packages'].items())
+        if not matching_subset and not completed_apply:raise ReleaseError('Local and remote installed records differ; synchronize their history first')
         preview=packages.compose(candidate,bundles,family,products,preview=True)
         if preview['conflicts']:raise ReleaseError('Remote supplied files need review; no PR created')
         state['changes']=preview['changes']
@@ -212,13 +216,15 @@ def approve_and_merge(root,operation,approved_head,backend=None):
 
 def synchronize(root,operation):
     root=Path(root).resolve();path=state_path(root,operation)
-    with process_guard(path.parent/'operation.lock'):
+    with process_guard(path.parent/'operation.lock'), lock(root):
         state=read_state(root,operation)
-        if state['stage'] in ('local_synchronized','observation_recorded','verified'):return state
-        if state['stage']!='remote_merged':raise ReleaseError('Confirm the exact remote merge before synchronization')
+        if state['stage'] in ('local_synchronized','observation_recorded','verified'):
+            from student_update_sync import finish
+            finish(root,state,git)
+            return state
+        if state['stage'] not in ('remote_merged','local_sync_pending'):raise ReleaseError('Confirm the exact remote merge before synchronization')
+        if under(root,'.aibl-local/family-transaction.json').exists() or under(root,'.aibl-local/learning-restore.json').exists():raise ReleaseError('Complete existing package or learning recovery before synchronization')
         if repository(root)!=state['repository'] or git(root,'symbolic-ref','--short','HEAD')!=state['local_branch']:raise ReleaseError('Local repository or branch changed; preserve it and review')
-        actual=transition_snapshot(root,state['transition_before'])
-        if actual not in (state['transition_before'],state['transition_after']):raise ReleaseError('Local supplied files or incoming destinations changed; preserve them and review before synchronization')
         git(root,'fetch','origin',state['base_branch'])
         remote=git(root,'rev-parse','refs/remotes/origin/'+state['base_branch'])
         git(root,'merge-base','--is-ancestor',state['merge_revision'],remote)
@@ -227,7 +233,8 @@ def synchronize(root,operation):
         parents=git(root,'show','-s','--format=%P',remote).split()
         if remote!=state['head_revision'] and parents!=[state['base_revision'],state['head_revision']]:raise ReleaseError('Provider merge graph differs from approved base and head')
         if git(root,'rev-parse',remote+'^{tree}')!=git(root,'rev-parse',state['head_revision']+'^{tree}'):raise ReleaseError('Provider merge content differs from the reviewed update')
-        git(root,'merge','--ff-only','--no-overwrite-ignore',state['merge_revision'])
+        from student_update_sync import materialize
+        materialize(root,state,lambda current:save(path,current),git)
         if managed_snapshot(root)!=state['managed_after']:raise ReleaseError('Local package bytes differ after merge; preserve for recovery')
         history_path=under(root,'.aibl-local/family-history.json')
         history=packages.read(history_path) if history_path.exists() else {'packages':{},'components':{}}
@@ -237,7 +244,10 @@ def synchronize(root,operation):
                 history[kind][key]=value
         atomic(history_path,encoded(history),0o600)
         state.update(stage='local_synchronized',local_synchronized_revision=git(root,'rev-parse','HEAD'),native_verification='pending fresh selected-app session and first action')
-        save(path,state);return state
+        save(path,state)
+        from student_update_sync import finish
+        finish(root,state,git)
+        return state
 
 
 def observation_bytes(path,sha256,limit):

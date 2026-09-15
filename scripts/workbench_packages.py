@@ -17,6 +17,10 @@ V2_PUBLISHERS['agent-workforce']='aibuild-lab/agent-workforce'
 CORE_SKILLS={'aibl-enroll','aibl-personalize','aibl-checkpoint'}
 MAX_BYTES=32*1024*1024
 MARKER='.aibl/family.json'
+SYNC_PENDING='.aibl-local/student-update-sync.json'
+
+def require_no_pending_sync(root):
+    if under(root,SYNC_PENDING).exists():raise ReleaseError('Resume the existing student update synchronization before package changes; preserve its journal')
 
 def read(path):return json.loads(Path(path).read_text())
 def release_tag(product,version):
@@ -146,6 +150,7 @@ def version_key(value):
 
 def status(root):
     root=Path(root).resolve();marker=under(root,MARKER)
+    if under(root,SYNC_PENDING).exists():return {'status':'recovery_required','update_availability':'unknown','recovery':'Resume the existing student update synchronization'}
     if under(root,'.aibl-local/family-transaction.json').exists():return {'status':'recovery_required','update_availability':'unknown'}
     if not marker.exists():return {'status':'not_installed','update_availability':'unknown'}
     prior=read(marker)
@@ -161,6 +166,7 @@ def compose(root,bundles,family,products,fail_after=None,preview=False):
     root=Path(root).resolve()
     if not set(products)<=PRODUCTS:raise ReleaseError('Unknown product')
     with (nullcontext() if preview else lock(root)) as local:
+        require_no_pending_sync(root)
         journal=under(root,'.aibl-local/family-transaction.json')
         if journal.exists():raise ReleaseError('Interrupted update: run family recover first')
         history_path=under(root,'.aibl-local/family-history.json')
@@ -269,6 +275,7 @@ def repair(root,bundles,product,paths,expected,fail_after=None):
     root=Path(root).resolve()
     if not paths or len(paths)!=len(set(paths)) or set(expected)!=set(paths):raise ReleaseError('Explicit unique paths and reviewed snapshots required')
     with lock(root):
+        require_no_pending_sync(root)
         journal=under(root,'.aibl-local/family-transaction.json')
         if journal.exists():raise ReleaseError('Recover interrupted transaction first')
         prior=read(under(root,MARKER))
@@ -299,6 +306,7 @@ def repair(root,bundles,product,paths,expected,fail_after=None):
 def recover(root,backup=None):
     root=Path(root).resolve()
     with lock(root) as local:
+        require_no_pending_sync(root)
         journal=under(root,'.aibl-local/family-transaction.json')
         if backup and journal.exists():raise ReleaseError('Recover interrupted transaction before rollback')
         if backup and not re.fullmatch('[0-9]+',backup):raise ReleaseError('Invalid backup identity')

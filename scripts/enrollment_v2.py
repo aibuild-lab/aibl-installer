@@ -12,7 +12,7 @@ from pathlib import Path
 from course_setup import ROOT, SetupError, command, registry, setup_lock, write
 from release_files import under
 from standalone_setup import private_owner
-from workbench_packages import compose, filesystem_mode, load_lock, snapshot, verify
+from workbench_packages import compose, filesystem_mode, load_lock, snapshot, verify, require_no_pending_sync
 
 
 def installed_record(root):
@@ -118,6 +118,7 @@ def inputs(lock_path, lock_sha256, bundles, root):
 
 
 def preview(root, product, lock_path, lock_sha256, bundles, *, runner=command, state_root=None):
+    require_no_pending_sync(root)
     if product not in ('agent-workforce', 'agent-essentials'):
         raise SetupError('This release supports Workforce and optional lesson-8 Essentials support only.')
     root = Path(root).resolve()
@@ -188,6 +189,7 @@ def completed_backup(root, plan):
 
 
 def apply_plan(root, plan_id, *, runner=command, state_root=None, family_lock=None, family_sha256=None, family_bundles=None):
+    require_no_pending_sync(root)
     if not re.fullmatch('[0-9a-f]{32}', plan_id or ''):
         raise SetupError('Use the exact enrollment plan ID returned by preview.')
     root = Path(root).resolve()
