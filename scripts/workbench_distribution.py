@@ -11,7 +11,7 @@ import tempfile
 from course_setup import SetupError, command
 from frozen_family import acquire, load_distribution
 from release_files import atomic, digest, encoded, process_guard, under
-from workbench_packages import verify
+from workbench_packages import verify, require_no_pending_sync
 
 
 def directory(workbench, state_root=None):
@@ -100,6 +100,7 @@ def enrollment_inputs(workbench,product,engine,*,state_root=None,runner=command,
     from enrollment_v2 import identity,installed_record
     if product not in ('agent-workforce','agent-essentials'):raise SetupError('Choose Workforce or the optional lesson-8 support.')
     root=Path(workbench).resolve()
+    require_no_pending_sync(root)
     _,repository=identity(root,runner)
     folder,row,value=read_association(root,engine,repository,state_root=state_root,runner=engine_runner)
     current=installed_record(root)

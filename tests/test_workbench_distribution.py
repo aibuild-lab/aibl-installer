@@ -78,6 +78,19 @@ class RetainedDistribution(unittest.TestCase):
             with self.assertRaisesRegex(d.SetupError,'association differs'):self.selected()
         self.assertEqual(self.github.calls,[])
 
+    def test_pending_sync_stops_before_identity_or_cache_acquisition(self):
+        folder,_,_=self.base()
+        pending=self.workbench/packages.SYNC_PENDING
+        pending.write_text('{}')
+        before={p.relative_to(folder).as_posix():p.read_bytes() for p in folder.rglob('*') if p.is_file()}
+        self.github.calls.clear()
+        with patch.object(enrollment_v2,'identity') as identity:
+            with self.assertRaisesRegex(packages.ReleaseError,'existing student update'):
+                self.selected()
+            identity.assert_not_called()
+        self.assertEqual(self.github.calls,[])
+        self.assertEqual(before,{p.relative_to(folder).as_posix():p.read_bytes() for p in folder.rglob('*') if p.is_file()})
+
     def test_tampered_distribution_and_installed_cache_stop_before_network(self):
         folder,row,value=self.base();self.github.calls.clear()
         cache=folder/'bundles/workbench-core/payload.zip';old=cache.read_bytes();cache.write_bytes(b'changed')
