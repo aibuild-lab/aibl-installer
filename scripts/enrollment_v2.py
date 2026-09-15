@@ -45,7 +45,7 @@ def available(root, runner=command, reg=None):
         product = p['id']
         if product not in current['family']['packages']:
             continue
-        publisher = 'aibuild-lab/agent-workforce' if product == 'agent-workforce' else p['publisher']
+        publisher = current['family']['packages'][product]['publisher']
         if access(publisher, runner) != 'readable':
             continue
         pin = current['packages'].get(product)

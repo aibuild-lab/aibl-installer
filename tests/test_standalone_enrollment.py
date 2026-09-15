@@ -237,6 +237,15 @@ class StandaloneEnrollment(unittest.TestCase):
         self.assertEqual(self.tree(), after)
         self.assertEqual(self.preview()['status'], 'already_connected')
 
+    def test_successor_discovery_uses_admitted_publisher_not_legacy_registry(self):
+        self.init()
+        reg = {'programs': [{'id': 'agent-essentials', 'label': 'Lesson 8 support',
+                            'kind': 'optional', 'publisher': 'legacy/private-course'}]}
+        result = enrollment.available(self.root, self.services, reg)
+        self.assertEqual(result['programs'][0]['publisher'], packages.PUBLIC_TEMPLATE)
+        self.assertIn(['gh', 'api', 'repos/' + packages.PUBLIC_TEMPLATE], self.services.calls)
+        self.assertNotIn(['gh', 'api', 'repos/legacy/private-course'], self.services.calls)
+
     def test_changed_work_or_identity_after_preview_refuses(self):
         self.init()
         (self.root / 'work.txt').write_text('First')
