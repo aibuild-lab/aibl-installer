@@ -19,6 +19,7 @@ REQUIRED_ENGINE_FILES = {
     'scripts/student_updates.py', 'scripts/family_setup_handoff.py',
     'scripts/local_learning_backup.py',
     'scripts/workbench_distribution.py',
+    'scripts/student_update_sync.py',
 }
 
 
