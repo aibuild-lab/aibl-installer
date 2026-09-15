@@ -61,7 +61,8 @@ class SelectedAppLoginStatus(unittest.TestCase):
                      patch.object(Path,'home',return_value=home), \
                      patch.object(handoff,'load_distribution',return_value=distribution), \
                      patch.object(setup.subprocess,'run',side_effect=process), \
-                     patch.object(handoff,'acquire',return_value={'family_bundles':'synthetic bundles'}), \
+                     patch.object(handoff,'retain',return_value=(home/'custody',{},distribution)), \
+                     patch.object(handoff,'cached_inputs',return_value={'family_bundles':'synthetic bundles'}), \
                      patch.object(handoff,'setup_standalone',return_value={'status':'synthetic_files_ready'}):
                     result=handoff.setup('synthetic distribution','b'*64,harness,no_launch=True)
                 self.assertEqual(result['status'],'synthetic_files_ready')

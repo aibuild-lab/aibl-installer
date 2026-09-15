@@ -167,7 +167,11 @@ def main():
             workbench=find_workbench(a.workbench);verify_engine(workbench)
             from enrollment_v2 import preview,apply_plan
             if a.preview:
-                if not all(supplied) or not a.program or len(a.program)!=1:raise SetupError('Preview requires one program and the independently reviewed family inputs.')
+                if not a.program or len(a.program)!=1:raise SetupError('Preview requires exactly one program.')
+                if not all(supplied):
+                    from workbench_distribution import enrollment_inputs
+                    inputs=enrollment_inputs(workbench,a.program[0],Path(__file__).resolve().parents[1])
+                    supplied=(inputs['family_lock'],inputs['family_sha256'],inputs['family_bundles'])
                 result=preview(workbench,a.program[0],*supplied)
             else:
                 if a.program:raise SetupError('An approved plan already binds its program; do not override it.')

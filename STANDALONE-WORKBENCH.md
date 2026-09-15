@@ -38,6 +38,14 @@ private repository and a local staging folder, makes one initial commit,
 pushes it, and verifies the remote identity before showing the workbench.
 Progress lives outside the repository in `~/.aibl/setup/`.
 
+The official handoff also reserves a private immutable association in
+`~/.aibl/workbench-distributions/`, keyed to the resolved workbench path. It
+retains the originally supplied independent distribution digest, distribution
+bytes, student repository and exact installer, before any repository creation.
+Interrupted setup reuses that same association. Changed distribution or account
+identity stops rather than replacing it. Keep this custody directory and its
+verified package cache; it is not part of the student's Git repository.
+
 If creation or the first push loses its response, rerun with the same inputs.
 Setup reads the provider and local state before deciding whether an operation
 is still needed. It never overwrites a nonempty foreign repository or folder.
@@ -59,8 +67,12 @@ installer. It does not clone or pull a newer engine.
    program help names the signed-in username without guessing access status.
 2. Select if useful with `--program agent-workforce --yes`. This records only
    the choice. It does not install files or grant access.
-3. Preview with `--preview --program agent-workforce`, the explicit family
-   input trio, and `--workbench PATH --json`. The result includes `plan_id`,
+3. Preview with `--preview --program agent-workforce --workbench PATH --json`.
+   The official setup association supplies the independently retained admission.
+   Only the selected optional package is acquired; installed template/core and
+   any earlier program bundles are reverified from the retained cache. Each
+   explicit acquisition checks the admitted index's expiry and withdrawal state.
+   The result includes `plan_id`,
    file changes and the verified first action. Plans live privately outside the
    workbench in `~/.aibl/enrollment/`.
 4. Explain the preview and obtain the student's confirmation. Apply that exact
@@ -70,6 +82,21 @@ installer. It does not clone or pull a newer engine.
 5. Refresh the selected app and perform the first action. The file installer
    returns `installed` with `native_verification: pending`. It does not convert
    file presence or a simulated exercise into native or student evidence.
+
+The explicit `--family-lock`, `--family-sha256`, `--family-bundles` trio remains
+available for independently reviewed candidate inputs. A workbench without a
+retained official association must obtain those official independent inputs;
+the helper never creates trust from its installed marker. Changed origin,
+engine, association, distribution, installed pins or cached bytes stop for
+review. Established official setup reruns read their existing association and
+make no workbench file or Git writes, downloads or replacement admissions.
+Enrollment does not refresh the engine or silently advance a distribution.
+After a package or installer update, the original setup association is not
+silently replaced. If that original binding differs from the current workbench,
+acquire the newly approved distribution with `scripts/frozen_family.py`, including
+all installed products and the selected optional product, and pass its explicit
+family-lock/digest/bundles trio to enrollment preview. This is a new independent
+admission, not a digest inferred from an installed marker.
 
 The optional free lesson-8 support uses `--program agent-essentials` with its
 publicly admitted package. It is absent from day-one setup and supplies only
