@@ -8,6 +8,7 @@ import argparse
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 import workbench_packages as packages
 from release_files import ReleaseError, atomic, digest, encoded, process_guard, under
@@ -213,7 +214,7 @@ def synchronize(root,operation):
     root=Path(root).resolve();path=state_path(root,operation)
     with process_guard(path.parent/'operation.lock'):
         state=read_state(root,operation)
-        if state['stage'] in ('local_synchronized','verified'):return state
+        if state['stage'] in ('local_synchronized','observation_recorded','verified'):return state
         if state['stage']!='remote_merged':raise ReleaseError('Confirm the exact remote merge before synchronization')
         if repository(root)!=state['repository'] or git(root,'symbolic-ref','--short','HEAD')!=state['local_branch']:raise ReleaseError('Local repository or branch changed; preserve it and review')
         actual=transition_snapshot(root,state['transition_before'])
@@ -239,11 +240,74 @@ def synchronize(root,operation):
         save(path,state);return state
 
 
+def observation_bytes(path,sha256,limit):
+    """Read a caller-designated private artifact without following symlinks."""
+    if not isinstance(sha256,str) or not re.fullmatch('[0-9a-f]{64}',sha256):raise ReleaseError('Independent observation/evidence SHA-256 required')
+    path=Path(path).absolute()
+    if any(part.is_symlink() for part in (path,*path.parents)) or not path.is_file():raise ReleaseError('Observation/evidence must be a regular nonsymlink file')
+    with path.open('rb') as stream:raw=stream.read(limit+1)
+    if not raw or len(raw)>limit or digest(raw)!=sha256:raise ReleaseError('Observation/evidence size or digest differs')
+    return raw
+
+
+def fence_synchronized(root,state):
+    fence_origin(root,state)
+    if git(root,'rev-parse','HEAD')!=state['local_synchronized_revision'] or git(root,'symbolic-ref','--short','HEAD')!=state['local_branch']:
+        raise ReleaseError('Current local revision or branch differs from the synchronized update')
+    if managed_snapshot(root)!=state['managed_after']:raise ReleaseError('Current managed bytes differ from the synchronized update')
+    record=packages.read(under(root,packages.MARKER))
+    if digest(encoded(record['family']))!=state['family_sha256']:raise ReleaseError('Installed family differs from the synchronized update')
+    return record
+
+
+def record_verification(root,operation,observation_path,observation_sha256):
+    """Record a supplied observation, never execute or certify a native app."""
+    root=Path(root).resolve();path=state_path(root,operation)
+    if not observation_path:raise ReleaseError('Independent observation file and SHA-256 required')
+    with process_guard(path.parent/'operation.lock'):
+        state=read_state(root,operation)
+        if state['stage'] not in ('local_synchronized','observation_recorded','verified'):raise ReleaseError('Synchronize the exact update before recording an observation')
+        record=fence_synchronized(root,state)
+        raw=observation_bytes(observation_path,observation_sha256,1024*1024)
+        value=json.loads(raw)
+        required={'schema_version','operation','repository','local_revision','family_sha256','observer','observed_at','app','os','fresh_session','discovered_skills','first_action'}
+        if not isinstance(value,dict) or set(value)!=required or value['schema_version']!='aibl.native-update-observation/v1':raise ReleaseError('Invalid native observation schema')
+        for key,expected in (('operation',operation),('repository',state['repository']),('local_revision',state['local_synchronized_revision']),('family_sha256',state['family_sha256'])):
+            if value[key]!=expected:raise ReleaseError('Observation identity differs: '+key)
+        def text(value):return isinstance(value,str) and bool(value.strip()) and len(value)<=4096
+        if not text(value['observer']) or not isinstance(value['observed_at'],str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z',value['observed_at']):raise ReleaseError('Observer and UTC observation time required')
+        observed=datetime.fromisoformat(value['observed_at'].replace('Z','+00:00'))
+        if observed>datetime.now(timezone.utc):raise ReleaseError('Observation time is in the future')
+        app=value['app'];os=value['os']
+        if not isinstance(app,dict) or set(app)!={'id','version'} or app['id'] not in ('claude','codex') or not text(app['version']):raise ReleaseError('Selected app and exact observed version required')
+        if not isinstance(os,dict) or set(os)!={'name','version'} or not all(text(v) for v in os.values()):raise ReleaseError('Observed OS name and version required')
+        prefix=('.agents' if app['id']=='codex' else '.claude')+'/skills/'
+        expected=sorted({name[len(prefix):-len('/SKILL.md')] for name,row in record['files'].items() if row['policy']=='supplied' and name.startswith(prefix) and name.endswith('/SKILL.md')})
+        skills=value['discovered_skills']
+        if not expected or not isinstance(skills,list) or not all(text(v) for v in skills) or len(skills)!=len(set(skills)) or not set(expected)<=set(skills):raise ReleaseError('Observation must report discovery of every installed selected-app skill')
+        action=value['first_action']
+        if value['fresh_session'] is not True or not isinstance(action,dict) or set(action)!={'status','description','evidence'} or action['status']!='passed' or not text(action['description']):raise ReleaseError('A fresh session and passing first-action observation are still pending')
+        evidence=action['evidence']
+        if not isinstance(evidence,dict) or set(evidence)!={'path','sha256'} or not text(evidence['path']) or not Path(evidence['path']).is_absolute():raise ReleaseError('Private first-action evidence path and SHA-256 required')
+        observation_bytes(evidence['path'],evidence['sha256'],32*1024*1024)
+        existing=state.get('verification_observation')
+        if existing:
+            if existing['sha256']!=observation_sha256:raise ReleaseError('Operation already has a different observation; preserve it for review')
+            return state
+        # Recheck bindings before recording, with no native execution or provider write.
+        fence_synchronized(root,state)
+        observation_bytes(observation_path,observation_sha256,1024*1024)
+        observation_bytes(evidence['path'],evidence['sha256'],32*1024*1024)
+        state.update(stage='observation_recorded',native_verification='caller_observation_recorded',automated_native_proof=False,human_acceptance='not_recorded',verification_observation={'path':str(Path(observation_path).absolute()),'sha256':observation_sha256,'provenance':'independently supplied by caller; assertions not independently observed by this command','recorded_at':datetime.now(timezone.utc).isoformat(),'required_skills':expected,'observation':value})
+        save(path,state);return state
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['prepare','propose','approve-and-merge','synchronize','status'])
+    parser.add_argument('action',choices=['prepare','propose','approve-and-merge','synchronize','record-verification','status'])
     parser.add_argument('--workbench',required=True);parser.add_argument('--operation',required=True)
     parser.add_argument('--family-lock');parser.add_argument('--family-sha256');parser.add_argument('--family-bundles');parser.add_argument('--approved-head')
+    parser.add_argument('--observation');parser.add_argument('--observation-sha256')
     args=parser.parse_args()
     try:
         if args.action=='prepare':
@@ -253,8 +317,12 @@ def main():
         elif args.action=='propose':result=propose(args.workbench,args.operation)
         elif args.action=='approve-and-merge':result=approve_and_merge(args.workbench,args.operation,args.approved_head)
         elif args.action=='synchronize':result=synchronize(args.workbench,args.operation)
+        elif args.action=='record-verification':result=record_verification(args.workbench,args.operation,args.observation,args.observation_sha256)
         else:result=read_state(args.workbench,args.operation)
-        print(json.dumps({k:v for k,v in result.items() if k not in ('managed_before','managed_after','history','family')},indent=2));return 0
+        output={k:v for k,v in result.items() if k not in ('managed_before','managed_after','history','family')}
+        if 'verification_observation' in output:
+            output['verification_observation']={k:v for k,v in output['verification_observation'].items() if k!='observation'}
+        print(json.dumps(output,indent=2));return 0
     except (OSError,ValueError,subprocess.CalledProcessError) as error:
         print('Update paused: '+str(error));return 1
 

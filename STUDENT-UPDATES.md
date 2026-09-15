@@ -31,6 +31,54 @@ interruption, resume the same operation. Once synchronized, open a fresh session
 in the selected app, discover the capabilities and perform the first action.
 `local_synchronized` is not native verification or student acceptance.
 
+After that actual walkthrough, an observer may explicitly record its result:
+
+```text
+python scripts/student_updates.py record-verification --workbench WORKBENCH --operation ID \
+  --observation PRIVATE_OBSERVATION_JSON --observation-sha256 INDEPENDENT_SHA256
+```
+
+The observation must use this exact shape (values below are illustrative, not
+usable evidence):
+
+```json
+{
+  "schema_version": "aibl.native-update-observation/v1",
+  "operation": "example-operation",
+  "repository": "student/my-workbench",
+  "local_revision": "EXACT_LOCAL_SYNCHRONIZED_COMMIT",
+  "family_sha256": "EXACT_OPERATION_FAMILY_SHA256",
+  "observer": "The person or external observer supplying this report",
+  "observed_at": "2026-09-14T00:00:00Z",
+  "app": {"id": "codex", "version": "EXACT_OBSERVED_VERSION"},
+  "os": {"name": "OBSERVED_OS", "version": "EXACT_OBSERVED_VERSION"},
+  "fresh_session": true,
+  "discovered_skills": ["aibl-enroll", "aibl-personalize", "aibl-checkpoint"],
+  "first_action": {
+    "status": "passed",
+    "description": "A short sanitized account of the actual first action",
+    "evidence": {"path": "/absolute/private/evidence-file", "sha256": "EVIDENCE_SHA256"}
+  }
+}
+```
+
+Use `claude` or `codex` for the selected app. Report every installed supplied
+skill for that app, including program skills when present. The fresh-session
+assertion, observer identity, app/OS versions and action outcome come from the
+caller, not automated native inspection. Keep evidence private, free of secrets,
+outside Git; retain the nonsymlink evidence file and observation JSON. The JSON
+is limited to 1 MiB, and evidence to 32 MiB. Supply its independently checked
+digest explicitly. This command checks hashes, exact operation/family/revision,
+current origin, branch and managed bytes. Missing or failed observations leave
+the operation pending. Repeating the same observation is idempotent; replacing
+a recorded observation with another is a conflict requiring review.
+
+The resulting `observation_recorded` stage means only `caller_observation_recorded`, with
+provenance retained in the local receipt. It explicitly sets
+`automated_native_proof: false` and `human_acceptance: not_recorded`. It does not
+execute the app, independently establish that the reported session occurred,
+grant student acceptance, or qualify another app, OS, revision or workbench.
+
 Local learning data is outside Git. Use `scripts/local_learning_backup.py` for
 an explicitly private backup/restore; neither a PR nor Git rollback restores
 that state. Never copy local learning data into an update PR.
