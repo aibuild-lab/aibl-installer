@@ -16,14 +16,28 @@ def write(path,value):
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
 
+def selected_app_signed_out(args,result):
+    """Recognize only the selected CLI's explicit signed-out status response."""
+    if result.returncode!=1:return False
+    if args==['codex','login','status']:
+        response='\n'.join(text.strip() for text in (result.stdout,result.stderr) if text and text.strip()).lower()
+        return response in ('not logged in','not logged in.','not signed in','not signed in.')
+    if args==['claude','auth','status','--json'] and not (result.stderr or '').strip():
+        try:value=json.loads(result.stdout)
+        except (TypeError,ValueError):return False
+        return isinstance(value,dict) and value.get('loggedIn') is False and not value.get('error') and not value.get('errors')
+    return False
+
 def command(args,cwd=None,interactive=False):
     child_env={**os.environ,'GH_HOST':'github.com'} if args[0]=='gh' else None
     result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
     if result.returncode:
         detail=(result.stderr or '').lower()
-        reason='authentication_missing' if args[0]=='gh' and result.returncode==4 else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
+        reason='authentication_missing' if (args[0]=='gh' and result.returncode==4) or selected_app_signed_out(args,result) else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
         recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
         raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
+    if not interactive and args==['codex','login','status']:
+        return (result.stdout or result.stderr).strip()
     return '' if interactive else result.stdout.strip()
 
 def registry():return json.loads((ROOT/'course-options.json').read_text(encoding='utf-8'))
@@ -151,6 +165,11 @@ def setup_lock(state_root,name):
             else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
 def setup(course,workspace,name,state_root=None,runner=command,no_launch=False,distribution=None,distribution_sha256=None,preview_bundle=None,distribution_lock=None,rehearsal_id=None,desktop=False,harness='claude',family=None,family_bundles=None):
+    if family and family.get('schema_version')=='aibl.family-lock/v2':
+        if distribution or preview_bundle or rehearsal_id:
+            raise SetupError('Standalone setup cannot combine historical distribution or rehearsal inputs.')
+        from standalone_setup import setup_standalone
+        return setup_standalone(workspace,name,family,family_bundles,state_root=state_root,runner=runner,harness=harness,no_launch=no_launch)
     if family:
         if distribution:raise SetupError('Historical and family distributions cannot be combined')
         from workbench_packages import verify
@@ -394,10 +413,12 @@ def main():
             from pinned_distribution import preview_bundle
             preview_bundle(a.preview_bundle,distribution)
         if a.rehearsal_id and not a.preview_bundle:raise SetupError('Rehearsal setup requires an explicit local candidate bundle.')
-        course=choose(a.course or (distribution['course_id'] if distribution else None))
+        course=({'id':'my-workbench','label':'My Workbench'} if family and family.get('schema_version')=='aibl.family-lock/v2' else choose(a.course or (distribution['course_id'] if distribution else None)))
         if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
         harness='claude' if a.desktop else choose_harness(a.harness)
         name=a.repo_name or input('Private project name [my-workbench]: ').strip() or 'my-workbench'
-        setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256,preview_bundle=a.preview_bundle,distribution_lock=a.distribution_lock,rehearsal_id=a.rehearsal_id,desktop=a.desktop,harness=harness,family=family,family_bundles=a.family_bundles);return 0
+        result=setup(course,a.workspace,name,no_launch=a.no_launch,distribution=distribution,distribution_sha256=distribution_sha256,preview_bundle=a.preview_bundle,distribution_lock=a.distribution_lock,rehearsal_id=a.rehearsal_id,desktop=a.desktop,harness=harness,family=family,family_bundles=a.family_bundles)
+        if family and family.get('schema_version')=='aibl.family-lock/v2':print(json.dumps(result,indent=2))
+        return 0
     except (OSError,ValueError) as e:print('Setup paused: '+str(e));return 1
 if __name__=='__main__':sys.exit(main())

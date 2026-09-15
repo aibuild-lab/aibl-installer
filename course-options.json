@@ -4,7 +4,8 @@
   "hub": {
     "template": "aibuild-lab/agent-essentials",
     "default_name": "my-workbench",
-    "candidate_template": "agent-workbench"
+    "candidate_template": "agent-workbench",
+    "successor_template": "my-workbench-template"
   },
   "programs": [
     {
@@ -79,6 +80,17 @@
     }
   ],
   "templates": [
+    {
+      "id": "my-workbench-template",
+      "package_id": "agent-workbench",
+      "repository": "aibuild-lab/my-workbench-template",
+      "version": "0.0.12",
+      "required_packages": ["agent-workbench", "workbench-core"],
+      "optional_packages": ["agent-essentials", "agent-workforce"],
+      "family_lock_schema": "aibl.family-lock/v2",
+      "state": "source_candidate_native_qualification_required",
+      "requires_family_lock": true
+    },
     {
       "id": "agent-workbench",
       "repository": "aibuild-lab/agent-workbench",

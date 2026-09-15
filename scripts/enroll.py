@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Connect the programs a student is already enrolled in to their workbench. Standard library only.
 
+Standalone family-lock v2 workbenches support accessible-program inspection,
+selection, an independently verified preview and explicit application of that
+confirmed plan. Selection alone never installs. Native use remains separately
+observed. Historical workbenches retain the selection-only behavior below.
+
 The installer builds the hub and never asks which program a student is in. This
 command runs inside the workbench later: it reads the program registry, asks
 GitHub which program repositories this account can read, shows the list, and on
 confirmation records the decision and names the adoption step for each program.
-Adoption itself stays with each program's own skill (the registry's adopt_skill),
-which verifies the reviewed release pin; this file never touches release pins.
+Historical adoption stays with each program's own skill (the registry's adopt_skill),
+which verifies the reviewed release pin.
 
 Re-runnable. A program already in the workbench reports its release and is left
 alone. A program joined later is the same command again.
@@ -102,7 +107,10 @@ def enrollable(rows):return [r for r in rows if r['access']=='readable' and not 
 
 def show(rows):
     print('Programs this GitHub account can read:')
-    for r in rows:print(f"  {r['label']}: {r['access']}"+(f" (included with {r['included_by']})" if r['included_by'] else '')+f" -> {r['next']}")
+    for r in rows:
+        if 'state' in r:
+            print(f"  {r['label']}: {r['state']}"+(' (supported delivery is not available yet)' if not r.get('supported') else ''))
+        else:print(f"  {r['label']}: {r['access']}"+(f" (included with {r['included_by']})" if r['included_by'] else '')+f" -> {r['next']}")
 
 def record(workbench,rows,chosen,refresh):
     path=Path(workbench)/'.aibl'/'enroll.json'
@@ -116,7 +124,22 @@ def record(workbench,rows,chosen,refresh):
 
 def enroll(workbench=None,yes=False,check=False,only=None,runner=None,ask=input,reg=None):
     runner=runner or command  # resolved at call time so a test can replace the module's command
-    workbench=find_workbench(workbench);refresh=verify_engine(workbench,runner);rows=plan(workbench,reg,runner)
+    workbench=find_workbench(workbench);refresh=verify_engine(workbench,runner)
+    marker=workbench/'.aibl/family.json'
+    if marker.exists() and json.loads(marker.read_text()).get('family',{}).get('schema_version')=='aibl.family-lock/v2':
+        from enrollment_v2 import available
+        result=available(workbench,runner,reg);result['installer']=refresh
+        if check:return result
+        if only and not set(only)<={r['id'] for r in result['programs']}:
+            raise SetupError('Selected program is not available to this signed-in account. Use Missing a program? help.')
+        chosen=[r for r in result['programs'] if r['supported'] and not r['installed'] and (not only or r['id'] in only)]
+        if not chosen:result['status']='nothing to select';return result
+        if not yes and ask('Select '+', '.join(r['label'] for r in chosen)+' for a separate installation preview? [y/N] ').strip().lower() not in ('y','yes'):
+            result['status']='declined';return result
+        result.update(status='selected',chosen=[r['id'] for r in chosen],next=[{'id':r['id'],'do':'Preview the independently admitted package, then confirm its exact plan before installation.'} for r in chosen])
+        result['record']=str(record(workbench,result['programs'],chosen,refresh))
+        return result
+    rows=plan(workbench,reg,runner)
     if only:
         unknown=[o for o in only if o not in {r['id'] for r in rows}]
         if unknown:raise SetupError('Unknown program: '+', '.join(unknown)+'. Use a listed program id.')
@@ -132,12 +155,35 @@ def enroll(workbench=None,yes=False,check=False,only=None,runner=None,ask=input,
     return result
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter);p.add_argument('--workbench',help='The workbench folder. Default: this folder, then ~/GitHub/my-workbench.');p.add_argument('--check',action='store_true',help='Show what this account can read and change nothing.');p.add_argument('--yes',action='store_true',help='Skip the confirmation (for a coordinating session that already asked).');p.add_argument('--program',action='append',help='Select only this program id; repeatable.');p.add_argument('--json',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter);p.add_argument('--workbench',help='The workbench folder. Default: this folder, then ~/GitHub/my-workbench.');p.add_argument('--check',action='store_true',help='Show what this account can read and change nothing.');p.add_argument('--yes',action='store_true',help='Confirm selection only, never installation.');p.add_argument('--program',action='append',help='Select only this program id; repeatable.');p.add_argument('--json',action='store_true')
+    p.add_argument('--preview',action='store_true',help='Prepare one verified enrollment preview; changes no workbench files.')
+    p.add_argument('--apply-plan',help='Apply the exact preview ID after the student confirms its changes.')
+    p.add_argument('--family-lock');p.add_argument('--family-sha256');p.add_argument('--family-bundles');a=p.parse_args()
     try:
-        result=enroll(a.workbench,a.yes,a.check,a.program)
+        supplied=(a.family_lock,a.family_sha256,a.family_bundles)
+        if any(supplied) and not all(supplied):raise SetupError('Supply the independently reviewed family lock, digest and bundles together.')
+        if a.preview or a.apply_plan:
+            if a.check or a.yes or (a.preview and a.apply_plan):raise SetupError('Use exactly one of check, selection, preview or apply-plan.')
+            workbench=find_workbench(a.workbench);verify_engine(workbench)
+            from enrollment_v2 import preview,apply_plan
+            if a.preview:
+                if not a.program or len(a.program)!=1:raise SetupError('Preview requires exactly one program.')
+                if not all(supplied):
+                    from workbench_distribution import enrollment_inputs
+                    inputs=enrollment_inputs(workbench,a.program[0],Path(__file__).resolve().parents[1])
+                    supplied=(inputs['family_lock'],inputs['family_sha256'],inputs['family_bundles'])
+                result=preview(workbench,a.program[0],*supplied)
+            else:
+                if a.program:raise SetupError('An approved plan already binds its program; do not override it.')
+                result=apply_plan(workbench,a.apply_plan,family_lock=a.family_lock,family_sha256=a.family_sha256,family_bundles=a.family_bundles)
+        else:
+            if any(supplied):raise SetupError('Family inputs are used only by explicit preview or apply-plan.')
+            result=enroll(a.workbench,a.yes,a.check,a.program)
         if a.json:print(json.dumps(result,indent=2))
+        elif a.preview or a.apply_plan:print(json.dumps(result,indent=2))
         else:
             show(result['programs'])
+            if result.get('help'):print(result['help'])
             if result['status']=='selected':
                 print('Recorded. Next, in this order:')
                 for n in result['next']:print(f"  {n['id']}: {n['do']}")

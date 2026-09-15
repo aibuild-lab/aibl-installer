@@ -2,7 +2,7 @@ param([string]$Course = "", [string]$DistributionLock = "", [string]$Distributio
 $ErrorActionPreference = 'Stop'
 $env:AIBL_BOOTSTRAP_PATH = $PSCommandPath
 if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $LauncherSHA256) {
-  if ($Course -ne 'agent-workforce' -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
+  if (($Course -ne 'agent-workforce' -and $Course -ne 'my-workbench') -or -not (Test-Path -LiteralPath $DistributionLock -PathType Leaf) -or $DistributionSHA256 -cnotmatch '^[a-f0-9]{64}$' -or $InstallerCommit -cnotmatch '^[a-f0-9]{40}$' -or $LauncherSHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Pinned setup needs the course, reviewed lock file, lock digest, installer commit and launcher digest.' }
   if ((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $LauncherSHA256 -or (Get-FileHash -LiteralPath $DistributionLock -Algorithm SHA256).Hash.ToLowerInvariant() -ne $DistributionSHA256) { throw 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.' }
   $DistributionLock = (Resolve-Path -LiteralPath $DistributionLock).Path
 }
@@ -92,6 +92,11 @@ if ($InstallerCommit) {
   if ($LASTEXITCODE -ne 0 -or $ObservedInstallerCommit -ne $InstallerCommit) { throw 'Frozen installer revision differs. Preserve it for review.' }
 }
 if (-not (Test-Path (Join-Path $InstallerDir 'scripts/enroll.py') -PathType Leaf)) { throw 'Retained installer predates enrollment. Ask for the reviewed installer update; no files were replaced.' }
+if ($Course -eq 'my-workbench') {
+  if (-not $InstallerCommit) { throw 'My Workbench requires the independently approved exact distribution handoff.' }
+  & $Python (Join-Path $InstallerDir 'scripts/family_setup_handoff.py') --harness $Harness --distribution $DistributionLock --distribution-sha256 $DistributionSHA256
+  exit $LASTEXITCODE
+}
 if ($InstallerCommit) {
   & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE

@@ -9,24 +9,50 @@ import argparse, datetime, io, json, os, re, shutil, stat, subprocess, sys, time
 from contextlib import nullcontext
 from pathlib import Path
 from release_files import ReleaseError, atomic, digest, encoded, under, lock
-PRODUCTS={'agent-workbench','agent-essentials','agent-workforce'}
+LEGACY_PRODUCTS={'agent-workbench','agent-essentials','agent-workforce'}
+PRODUCTS=LEGACY_PRODUCTS|{'workbench-core'}
+PUBLIC_TEMPLATE='aibuild-lab/my-workbench-template'
+V2_PUBLISHERS={p:PUBLIC_TEMPLATE for p in ('agent-workbench','workbench-core','agent-essentials')}
+V2_PUBLISHERS['agent-workforce']='aibuild-lab/agent-workforce'
+CORE_SKILLS={'aibl-enroll','aibl-personalize','aibl-checkpoint'}
 MAX_BYTES=32*1024*1024
 MARKER='.aibl/family.json'
+SYNC_PENDING='.aibl-local/student-update-sync.json'
+
+def require_no_pending_sync(root):
+    if under(root,SYNC_PENDING).exists():raise ReleaseError('Resume the existing student update synchronization before package changes; preserve its journal')
 
 def read(path):return json.loads(Path(path).read_text())
+def release_tag(product,version):
+    return (product+'-v' if product in ('workbench-core','agent-essentials') else 'v')+version
+
+def validate_pin(product,pin,successor=False):
+    fields={'version','manifest_sha256','archive_sha256','publisher'}
+    if successor:fields|={'release_tag','release_target'}
+    if not isinstance(pin,dict) or set(pin)!=fields:raise ReleaseError('Package pin contract')
+    version_key(pin['version'])
+    publisher=V2_PUBLISHERS.get(product) if successor else 'aibuild-lab/'+product
+    if pin['publisher']!=publisher or any(not re.fullmatch('[0-9a-f]{64}',pin[k]) for k in ('manifest_sha256','archive_sha256')):raise ReleaseError('Package publisher or hash contract')
+    if successor and (pin['release_tag']!=release_tag(product,pin['version']) or not re.fullmatch('[0-9a-f]{40}',pin['release_target'])):raise ReleaseError('Exact release identity required')
+
+def validate_family(d):
+    if not isinstance(d,dict) or set(d)!={'schema_version','installer_revision','template_revision','packages','compatibility'} or d['schema_version'] not in ('aibl.family-lock/v1','aibl.family-lock/v2'):raise ReleaseError('Family lock contract')
+    successor=d['schema_version']=='aibl.family-lock/v2'
+    if not re.fullmatch('[0-9a-f]{40}',d.get('template_revision','')):raise ReleaseError('Missing exact template revision')
+    if not re.fullmatch('[0-9a-f]{40}',d['installer_revision']):raise ReleaseError('Missing exact installer revision')
+    if not isinstance(d['packages'],dict):raise ReleaseError('Family package contract')
+    if successor:
+        if not {'agent-workbench','workbench-core'}<=set(d['packages'])<=PRODUCTS:raise ReleaseError('Family requires template and core, with only supported optional programs')
+    elif set(d['packages'])!=LEGACY_PRODUCTS:raise ReleaseError('Family must bind template, Essentials and Workforce independently')
+    for product,pin in d['packages'].items():validate_pin(product,pin,successor)
+    if successor and d['packages']['agent-workbench']['release_target']!=d['template_revision']:raise ReleaseError('Template release target differs from template revision')
+    if d['compatibility']!={'legacy_template':'aibuild-lab/agent-essentials','legacy_workforce_product':'agent-native-workforce','legacy_workforce_publisher':'aibuild-lab/agent-native-workforce'}:raise ReleaseError('Historical identity mapping required')
+    return d
+
 def load_lock(path,expected,engine=None):
     raw=Path(path).read_bytes()
     if len(raw)>65536 or not re.fullmatch('[0-9a-f]{64}',expected or '') or digest(raw)!=expected:raise ReleaseError('Family lock integrity mismatch')
-    d=json.loads(raw)
-    if set(d)!={'schema_version','installer_revision','template_revision','packages','compatibility'} or d['schema_version']!='aibl.family-lock/v1':raise ReleaseError('Family lock contract')
-    if not re.fullmatch('[0-9a-f]{40}',d.get('template_revision','')):raise ReleaseError('Missing exact template revision')
-    if not re.fullmatch('[0-9a-f]{40}',d['installer_revision']):raise ReleaseError('Missing exact installer revision')
-    if set(d['packages'])!=PRODUCTS:raise ReleaseError('Family must bind template, Essentials and Workforce independently')
-    for product,pin in d['packages'].items():
-        if set(pin)!={'version','manifest_sha256','archive_sha256','publisher'} :raise ReleaseError('Package pin contract')
-        version_key(pin['version'])
-        if pin['publisher']!='aibuild-lab/'+product or any(not re.fullmatch('[0-9a-f]{64}',pin[k]) for k in ['manifest_sha256','archive_sha256']):raise ReleaseError('Package publisher or hash contract')
-    if d['compatibility']!={'legacy_template':'aibuild-lab/agent-essentials','legacy_workforce_product':'agent-native-workforce','legacy_workforce_publisher':'aibuild-lab/agent-native-workforce'}:raise ReleaseError('Historical identity mapping required')
+    d=validate_family(json.loads(raw))
     if engine:
         root=Path(engine)
         head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
@@ -35,6 +61,8 @@ def load_lock(path,expected,engine=None):
     return d
 
 def verify(bundle,product,pin):
+    successor='release_tag' in pin
+    validate_pin(product,pin,successor)
     root=Path(bundle)/product;mb=(root/'manifest.json').read_bytes();ab=(root/'payload.zip').read_bytes()
     if len(mb)>2*1024*1024 or len(ab)>MAX_BYTES or digest(mb)!=pin['manifest_sha256'] or digest(ab)!=pin['archive_sha256']:raise ReleaseError('Package integrity mismatch: '+product)
     m=json.loads(mb)
@@ -44,12 +72,28 @@ def verify(bundle,product,pin):
         if set(row)!={'path','sha256','mode','policy'} or row['policy'] not in ['supplied','seed'] or row['mode'] not in [420,493] or not re.fullmatch('[0-9a-f]{64}',row['sha256']):raise ReleaseError('Invalid file policy')
         name=row['path'];under(root,name)
         allowed=(product=='agent-workbench' and row['policy']=='seed' and (name in ['README.md','AGENTS.md','CLAUDE.md','.gitignore','.aibl/template.json'] or name.startswith(('context/','library/','work/')))) or (product=='agent-essentials' and row['policy']=='supplied' and name.startswith(('course/essentials/','blueprints/','.agents/skills/','.claude/skills/','scripts/','starter/','.aibl/capabilities-'))) or (product=='agent-workforce' and name.startswith(('course/workforce/','workforce/')))
+        if successor:
+            if product=='agent-workbench':allowed=row['policy']=='seed' and (allowed or name in ('LICENSE','blueprints/.gitkeep','blueprints/README.md'))
+            elif product=='agent-essentials':allowed=row['policy']=='supplied' and name in ('course/essentials/START-HERE.md','blueprints/youtube-transcripts.md')
+            elif product=='workbench-core':
+                allowed=row['policy']=='supplied' and (name=='.aibl/licenses/workbench-core-MIT.txt' or any(name.startswith(client+'/skills/'+skill+'/') for client in ('.agents','.claude') for skill in CORE_SKILLS))
+                if m['schema_version']!='aibl.family-package/v2':raise ReleaseError('Core requires component-aware manifest')
+            elif product=='agent-workforce':
+                allowed=allowed or (row['policy']=='supplied' and name in ('.aibl/workforce-student-edition.json','.claude/skills/aibl-workforce/SKILL.md','.agents/skills/aibl-workforce/SKILL.md'))
         if not allowed or name.casefold() in fold:raise ReleaseError('File ownership boundary: '+name)
         if 'done-for-the-day' in name or 'done-for-day' in name:raise ReleaseError('Habit skill must be student authored')
         fold.add(name.casefold());rows[name]=row
     if not rows:raise ReleaseError('Empty package')
     version_key(m['version'])
     validate_components(m,rows)
+    if product=='workbench-core':
+        expected_ids={'workbench.method.'+name for name in CORE_SKILLS}
+        if {c['id'] for c in m.get('components',[])}!=expected_ids:raise ReleaseError('Core requires exactly three versioned skill components')
+        for name in CORE_SKILLS:
+            entries={client+'/skills/'+name+'/SKILL.md' for client in ('.agents','.claude')}
+            component=next(c for c in m['components'] if c['id']=='workbench.method.'+name)
+            if component['kind']!='skill' or component['requires'] or not entries<=set(component['files']) or not entries<=set(rows):raise ReleaseError('Core requires paired native skill exposures without course dependencies')
+            if len({rows[path]['sha256'] for path in entries})!=1:raise ReleaseError('Core native exposures differ')
     payload={}
     with zipfile.ZipFile(io.BytesIO(ab)) as z:
         infos=z.infolist()
@@ -106,6 +150,7 @@ def version_key(value):
 
 def status(root):
     root=Path(root).resolve();marker=under(root,MARKER)
+    if under(root,SYNC_PENDING).exists():return {'status':'recovery_required','update_availability':'unknown','recovery':'Resume the existing student update synchronization'}
     if under(root,'.aibl-local/family-transaction.json').exists():return {'status':'recovery_required','update_availability':'unknown'}
     if not marker.exists():return {'status':'not_installed','update_availability':'unknown'}
     prior=read(marker)
@@ -121,6 +166,7 @@ def compose(root,bundles,family,products,fail_after=None,preview=False):
     root=Path(root).resolve()
     if not set(products)<=PRODUCTS:raise ReleaseError('Unknown product')
     with (nullcontext() if preview else lock(root)) as local:
+        require_no_pending_sync(root)
         journal=under(root,'.aibl-local/family-transaction.json')
         if journal.exists():raise ReleaseError('Interrupted update: run family recover first')
         history_path=under(root,'.aibl-local/family-history.json')
@@ -139,7 +185,13 @@ def compose(root,bundles,family,products,fail_after=None,preview=False):
                         prior['files'][name]={**row,'product':'agent-essentials','policy':'supplied'}
         # Updating a family re-verifies every installed package, never silently binds old bytes to new versions.
         selected=set(products)|set(prior['packages'])
-        if 'agent-workforce' in selected and 'agent-essentials' not in selected:raise ReleaseError('Install Essentials before Workforce')
+        successor=family.get('schema_version')=='aibl.family-lock/v2'
+        if successor:
+            validate_family(family)
+            if not {'agent-workbench','workbench-core'}<=selected:raise ReleaseError('Install template and core before optional packages')
+            if not selected<=set(family['packages']):raise ReleaseError('Installed combination is not admitted by this family')
+        elif 'workbench-core' in selected:raise ReleaseError('Core requires family-lock v2')
+        elif 'agent-workforce' in selected and 'agent-essentials' not in selected:raise ReleaseError('Install Essentials before Workforce')
         after=json.loads(json.dumps(prior));changes={};conflicts=[];comparisons=[];legacy_transition=not prior['packages']
         for product in sorted(selected):
             m,payload=verify(bundles,product,family['packages'][product]);previous_pin=prior['packages'].get(product)
@@ -176,7 +228,7 @@ def compose(root,bundles,family,products,fail_after=None,preview=False):
                 comparisons.append({'path':name,'prior':old,'actual':current,'incoming':new})
                 if legacy_transition and old and not new:
                     after['files'].pop(name,None);continue
-                other=prior['files'].get(name)
+                other=after['files'].get(name)
                 if other and other['product']!=product:raise ReleaseError('Cross-package ownership collision: '+name)
                 if new and new['policy']=='seed':
                     if current is None and not old:changes[name]=(payload[name],new['mode'])
@@ -223,6 +275,7 @@ def repair(root,bundles,product,paths,expected,fail_after=None):
     root=Path(root).resolve()
     if not paths or len(paths)!=len(set(paths)) or set(expected)!=set(paths):raise ReleaseError('Explicit unique paths and reviewed snapshots required')
     with lock(root):
+        require_no_pending_sync(root)
         journal=under(root,'.aibl-local/family-transaction.json')
         if journal.exists():raise ReleaseError('Recover interrupted transaction first')
         prior=read(under(root,MARKER))
@@ -253,6 +306,7 @@ def repair(root,bundles,product,paths,expected,fail_after=None):
 def recover(root,backup=None):
     root=Path(root).resolve()
     with lock(root) as local:
+        require_no_pending_sync(root)
         journal=under(root,'.aibl-local/family-transaction.json')
         if backup and journal.exists():raise ReleaseError('Recover interrupted transaction before rollback')
         if backup and not re.fullmatch('[0-9]+',backup):raise ReleaseError('Invalid backup identity')
