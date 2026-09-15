@@ -16,12 +16,24 @@ def write(path,value):
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
 
+def selected_app_signed_out(args,result):
+    """Recognize only the selected CLI's explicit signed-out status response."""
+    if result.returncode!=1:return False
+    if args==['codex','login','status']:
+        response='\n'.join(text.strip() for text in (result.stdout,result.stderr) if text and text.strip()).lower()
+        return response in ('not logged in','not logged in.','not signed in','not signed in.')
+    if args==['claude','auth','status','--json'] and not (result.stderr or '').strip():
+        try:value=json.loads(result.stdout)
+        except (TypeError,ValueError):return False
+        return isinstance(value,dict) and value.get('loggedIn') is False and not value.get('error') and not value.get('errors')
+    return False
+
 def command(args,cwd=None,interactive=False):
     child_env={**os.environ,'GH_HOST':'github.com'} if args[0]=='gh' else None
     result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
     if result.returncode:
         detail=(result.stderr or '').lower()
-        reason='authentication_missing' if args[0]=='gh' and result.returncode==4 else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
+        reason='authentication_missing' if (args[0]=='gh' and result.returncode==4) or selected_app_signed_out(args,result) else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
         recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
         raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
     if not interactive and args==['codex','login','status']:
