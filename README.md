@@ -51,10 +51,11 @@ every folder you ever open.
 
 - Student setup, recovery and verification limits: [START-HERE.md](START-HERE.md)
 - The prompt the app follows, step by step: [SETUP-PROMPT.md](SETUP-PROMPT.md).
-  Its "reviewed setup identity" block pins the exact installer commit and the
-  reviewed distribution; the release owner fills it in when a distribution is
-  cut. Until then, a paste stops cleanly at step 2.
-- The My Workbench route in detail: [STANDALONE-WORKBENCH.md](STANDALONE-WORKBENCH.md),
+  Step 8 runs `scripts/hub_setup.py`, which creates the workbench from the
+  public template `aibuild-lab/my-workbench-template`. No invitation, no
+  release pin, no course package.
+- The frozen cohort route (hash-pinned engine and packages, for qualification
+  runs; not the student default): [STANDALONE-WORKBENCH.md](STANDALONE-WORKBENCH.md),
   [FAMILY-DELIVERY.md](FAMILY-DELIVERY.md), [FROZEN-FAMILY-DISTRIBUTION.md](FROZEN-FAMILY-DISTRIBUTION.md)
 - Student-owned updates after enrollment: [STUDENT-UPDATES.md](STUDENT-UPDATES.md)
 - What this repository promises each program: [COURSE-INSTALLER-CONTRACT.md](COURSE-INSTALLER-CONTRACT.md)

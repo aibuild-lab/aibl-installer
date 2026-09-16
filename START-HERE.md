@@ -77,14 +77,18 @@ chat instead. Same setup, delivered by hand.
 
 ## When setup pauses
 
-- **"Setup is not released yet":** the setup identity this prompt needs has not
-  been published by the course team. Nothing is wrong with your machine. Ask in
-  your program's channel.
+- **"GitHub is still preparing the new repository":** GitHub takes a moment to
+  fill in a new repository. Wait a minute and tell the app to run that step
+  again. Nothing needs to be undone.
 - **A popup you did not expect:** ask the app what it is. It will tell you what
   to click and why.
 - **You already have a workbench:** it is reused exactly as it is. Nothing is
-  rewritten, nothing is deleted. If it came from an older program generation,
-  the app tells you so and stops; ask your program's channel for the next step.
+  rewritten, nothing is deleted. If it came from an older template and is
+  missing the three skills, the app tells you so and carries on; ask your
+  program's channel for the next step.
+- **A `my-workbench` that is not yours:** if a folder or repository with that
+  name belongs to something else, the app stops and shows you what it found.
+  Nothing is replaced. You can pick another name.
 - **Restricted device:** bring the exact error to your program's channel. Do
   not disable safeguards to get around a policy.
 
@@ -104,34 +108,21 @@ unlocked at your first live session; before that, `aibl-enroll` lists nothing,
 and that is expected. Your course arrives inside this same folder then. You
 never set up a second workbench.
 
-## Fallback: the terminal route
+## Fallback: with a person
 
-If the app cannot run commands on your machine, the same setup runs from a
-terminal with the same reviewed identity the setup prompt carries (the values
-are in its "reviewed setup identity" section). It installs the same tools and
-creates the same workbench.
-
-**Mac.** Open Terminal, download `start.sh` from the exact installer commit,
-then:
+If the app cannot run commands on your machine, ask in your program's channel
+and a person will finish setup with you. They follow the same procedure by
+hand: install Git, Node, the GitHub CLI and Python, sign you in to GitHub in
+your browser, then run the same two commands the app would have run, from a
+terminal in your home folder:
 
 ```bash
-bash start.sh my-workbench DISTRIBUTION_FILE DISTRIBUTION_SHA256 INSTALLER_COMMIT LAUNCHER_SHA256
+git clone https://github.com/aibuild-lab/aibl-installer ~/GitHub/aibl-installer
+python3 ~/GitHub/aibl-installer/scripts/hub_setup.py --harness claude
 ```
 
-macOS 13 or later. Put `AIBL_HARNESS=codex` in front if you chose Codex.
-Missing tools use Homebrew, whose installer may ask for your Mac password in
-your own Terminal.
-
-**Native Windows.** Open PowerShell, download `start.ps1` from the exact
-installer commit, then:
-
-```powershell
-.\start.ps1 -Course my-workbench -DistributionLock DISTRIBUTION_FILE -DistributionSHA256 DISTRIBUTION_SHA256 -InstallerCommit INSTALLER_COMMIT -LauncherSHA256 LAUNCHER_SHA256 -Harness claude
-```
-
-Windows 10 or 11 with WinGet; `-Harness codex` if you chose Codex. If your
-device policy blocks running a downloaded script, ask your program's channel;
-the installer never changes execution policy.
+(Windows: PowerShell, `$HOME\GitHub\aibl-installer` and `py -3`; `--harness codex`
+if you chose Codex.) Same tools, same workbench, same three skills.
 
 ## Verification status
 

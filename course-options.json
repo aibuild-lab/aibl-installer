@@ -4,6 +4,7 @@
   "hub": {
     "template": "aibuild-lab/agent-essentials",
     "default_name": "my-workbench",
+    "public_template": "aibuild-lab/my-workbench-template",
     "candidate_template": "agent-workbench",
     "successor_template": "my-workbench-template"
   },
