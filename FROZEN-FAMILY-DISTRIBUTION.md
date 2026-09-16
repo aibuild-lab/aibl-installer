@@ -15,6 +15,42 @@ No moving default branch, latest release, downloaded package or installed marker
 is a source of trust. A refreshed update recommendation needs a newly admitted
 distribution and handoff digest.
 
+### Release order for the guided paste entry
+
+The student-facing prompt and the retained engine have separate identities.
+`SETUP-PROMPT.md` remains in `REQUIRED_ENGINE_FILES`: its copy inside the engine
+must stay unchanged. The final prompt delivered to the student may be prepared
+after that engine is frozen and name its earlier exact commit. Never insert
+the distribution digest into the retained engine's own prompt or try to make a
+commit name itself.
+
+1. Validate and merge the engine fixes. Freeze that exact clean commit, including
+   its current prompt, launchers and verifier files. Do not switch the public
+   student entry while it lacks qualified release inputs.
+2. Qualify the maintained template/core candidates under the owning Internal
+   release contract. Publish their accepted immutable manifests and archives,
+   then independently read back their tags, target commits and asset hashes.
+   A standalone day-one family needs only `agent-workbench` and `workbench-core`.
+3. Prepare the complete family lock, indexes and distribution against the frozen
+   engine and verified package pins. Publish the named installer release assets
+   at that engine commit and independently read back their exact bytes. Retain
+   the distribution digest and both launcher digests in the reviewed handoff.
+4. Fill the guided prompt's installer commit, distribution URL and distribution
+   digest in a separate delivery artifact or later entry-point change. That
+   prompt names the already frozen engine; it does not change its bytes or
+   repoint its release tag. Review this delivered prompt independently too.
+5. Complete the exact-distribution native/student checks required by the owning
+   release contract before switching the public entry. A source rehearsal or
+   passing guard suite does not supply those observations.
+
+The prompt's `family_setup_handoff.py --harness ... --distribution ...
+--distribution-sha256 ... --no-launch` call is the same setup entry used by the
+native launcher, with the final app-opening action left to the guided session.
+It must run from the unchanged engine retained at `~/.aibl/installers/COMMIT`.
+Existing stored HTTPS origins remain valid when the student's Git configuration
+rewrites HTTPS transport to SSH; the origin checks compare the stored URL.
+The allowed repository, exact commit, clean state and file hashes still apply.
+
 Package locators retain the six-field successor family pin: `version`,
 `manifest_sha256`, `archive_sha256`, `publisher`, `release_tag`, `release_target`.
 The release target is the exact commit reached by dereferencing the release tag.

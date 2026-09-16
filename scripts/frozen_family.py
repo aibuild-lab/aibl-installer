@@ -43,7 +43,8 @@ def verify_engine(root, installer, runner=None):
         raise ReleaseError('Retained installer is missing or linked')
     if Path(runner(['git', 'rev-parse', '--show-toplevel'], root)).resolve() != root.resolve():
         raise ReleaseError('Retained installer is not its own checkout')
-    if runner(['git', 'remote', 'get-url', 'origin'], root) not in ('https://github.com/'+INSTALLER, 'https://github.com/'+INSTALLER+'.git'):
+    # Compare the stored repository identity; Git may rewrite its transport to SSH.
+    if runner(['git', 'config', '--local', '--get', 'remote.origin.url'], root) not in ('https://github.com/'+INSTALLER, 'https://github.com/'+INSTALLER+'.git'):
         raise ReleaseError('Retained installer repository differs')
     if runner(['git', 'rev-parse', 'HEAD'], root) != installer['revision'] or runner(['git', 'status', '--porcelain'], root):
         raise ReleaseError('Use the clean exact retained installer')

@@ -83,7 +83,7 @@ if (Test-Path -LiteralPath $InstallerDir) {
 $GitDir = Join-Path $InstallerDir '.git'
 if (-not (Test-Path -LiteralPath $GitDir -PathType Container)) { throw 'Installer path is occupied by another project. Preserve it for review.' }
 if ((Get-Item -LiteralPath $GitDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer Git metadata is linked. Preserve it for review.' }
-$InstallerOrigin = git -C $InstallerDir remote get-url origin
+$InstallerOrigin = git -C $InstallerDir config --local --get remote.origin.url
 if ($LASTEXITCODE -ne 0 -or $InstallerOrigin -ne 'https://github.com/aibuild-lab/aibl-installer.git') { throw 'Installer origin differs. Preserve it for review.' }
 $InstallerChanges = git -C $InstallerDir status --porcelain
 if ($LASTEXITCODE -ne 0 -or $InstallerChanges) { throw 'Installer has local work. Preserve it for review; no update was applied.' }
