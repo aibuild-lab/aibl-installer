@@ -57,7 +57,7 @@ if [[ ! -e "$INSTALLER_DIR" ]]; then
     git clone --depth 1 https://github.com/aibuild-lab/aibl-installer.git "$INSTALLER_DIR"
   fi
 fi
-if [[ ! -d "$INSTALLER_DIR/.git" || -L "$INSTALLER_DIR/.git" || "$(git -C "$INSTALLER_DIR" remote get-url origin)" != https://github.com/aibuild-lab/aibl-installer.git ]]; then echo 'Installer path is occupied by another project. Preserve it for review.'; exit 1; fi
+if [[ ! -d "$INSTALLER_DIR/.git" || -L "$INSTALLER_DIR/.git" || "$(git -C "$INSTALLER_DIR" config --local --get remote.origin.url)" != https://github.com/aibuild-lab/aibl-installer.git ]]; then echo 'Installer path is occupied by another project. Preserve it for review.'; exit 1; fi
 INSTALLER_CHANGES="$(git -C "$INSTALLER_DIR" status --porcelain)"
 if [[ -n "$INSTALLER_CHANGES" ]]; then echo 'Installer has local work. Preserve it for review; no update was applied.'; exit 1; fi
 if [[ -n "$INSTALLER_COMMIT" && "$(git -C "$INSTALLER_DIR" rev-parse HEAD)" != "$INSTALLER_COMMIT" ]]; then echo 'Frozen installer revision differs. Preserve it for review.'; exit 1; fi

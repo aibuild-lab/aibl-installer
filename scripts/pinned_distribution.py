@@ -167,7 +167,7 @@ def seed_project(folder, temporary, full, manifest, payload, distribution, distr
         require(not any(temporary.iterdir()), 'Interrupted setup contains unrecognized work. It is preserved.')
         runner(['git', 'init', '--initial-branch=main'], cwd=temporary)
         runner(['git', 'remote', 'add', 'origin', 'https://github.com/' + full + '.git'], cwd=temporary)
-    require(runner(['git', 'remote', 'get-url', 'origin'], cwd=temporary) in ('https://github.com/' + full + '.git', 'https://github.com/' + full), 'Staging origin differs from the private destination.')
+    require(runner(['git', 'config', '--local', '--get', 'remote.origin.url'], cwd=temporary) in ('https://github.com/' + full + '.git', 'https://github.com/' + full), 'Staging origin differs from the private destination.')
     require(Path(runner(['git', 'rev-parse', '--show-toplevel'], cwd=temporary)).resolve() == temporary.resolve(), 'Staging is not the project root.')
     files = dict(payload)
     files['.aibl/installed-agent-essentials.json'] = encoded(manifest)
