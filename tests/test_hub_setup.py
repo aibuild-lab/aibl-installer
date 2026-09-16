@@ -153,9 +153,24 @@ class HubSetupTests(unittest.TestCase):
                 if args[:3] == ['git', 'remote', 'get-url']:
                     return 'https://github.com/other/thing.git'
                 return original(args, cwd, interactive)
-            with self.assertRaises(SetupError):
+            with self.assertRaises(SetupError) as cm:
                 hub.setup('claude', Path(d) / 'GitHub', 'my-workbench', TEMPLATE, call, sleep=lambda s: None, home=Path(d))
             self.assertEqual((folder / 'keep.txt').read_text(), 'mine')
+            self.assertIn('Rename that folder', str(cm.exception))
+
+    def test_existing_folder_with_no_remote_at_all_is_named_plainly(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d) / 'GitHub' / 'my-workbench'; (folder / '.git').mkdir(parents=True)
+            f = Fake()
+            original = f.__call__
+            def call(args, cwd=None, interactive=False):
+                if args[:3] == ['git', 'remote', 'get-url']:
+                    raise SetupError('git remote failed. No work was removed.')
+                return original(args, cwd, interactive)
+            with self.assertRaises(SetupError) as cm:
+                hub.setup('claude', Path(d) / 'GitHub', 'my-workbench', TEMPLATE, call, sleep=lambda s: None, home=Path(d))
+            self.assertIn('is not linked to github.com/' + FULL, str(cm.exception))
+            self.assertIn('my-workbench-old', str(cm.exception))
 
     def test_github_not_signed_in_stops_before_anything_is_made(self):
         with tempfile.TemporaryDirectory() as d:

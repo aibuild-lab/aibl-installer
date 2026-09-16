@@ -147,7 +147,11 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
 
     created = False
     if folder.exists():
-        verify_existing(folder, full, runner)
+        try:
+            verify_existing(folder, full, runner)
+        except SetupError as exc:
+            raise SetupError(f'A folder named {name} is already at {folder} and is not linked to github.com/{full} '
+                             f'({exc}). Nothing was changed. Rename that folder (for example {name}-old), or choose another name with --repo-name, and run this again.')
         status = 'already_initialized'
     else:
         existing = existing_repository(runner, full)
