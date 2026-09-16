@@ -8,6 +8,8 @@ Read the whole file before you begin. Follow it in order. Do not summarize it to
 
 These three values are filled in by the course team when setup is released. They pin the exact installer engine and the exact reviewed distribution of the template and its core skills, so every student's workbench is made from the same bytes.
 
+The course team fills this delivered prompt after freezing the engine and verifying its release assets. `INSTALLER_COMMIT` names that earlier engine commit, not the commit containing this completed prompt. Never edit the prompt inside the retained engine or change its pinned files to match this delivered copy. The release order is in `FROZEN-FAMILY-DISTRIBUTION.md`.
+
 ```
 INSTALLER_COMMIT:     TODO-RELEASE
 DISTRIBUTION_URL:     TODO-RELEASE
@@ -60,7 +62,7 @@ Do not improvise a substitute. Do not clone a branch. Stop.
 
 Otherwise, retain the installer's own files (the setup scripts, the secrets guard, the enrollment engine) at the exact commit, read-only. The folder is `~/.aibl/installers/<INSTALLER_COMMIT>` (Windows: `$HOME\.aibl\installers\<INSTALLER_COMMIT>`). Call it `ENGINE` below.
 
-- If `ENGINE` exists: verify it is an unlinked Git checkout, its origin is `https://github.com/aibuild-lab/aibl-installer.git`, `git -C ENGINE rev-parse HEAD` equals `INSTALLER_COMMIT`, and `git -C ENGINE status --porcelain` is empty. Reuse it. If anything differs, stop and preserve it for the course team to review; do not reset, pull, or overwrite it.
+- If `ENGINE` exists: verify it is an unlinked Git checkout, `git -C ENGINE config --local --get remote.origin.url` is `https://github.com/aibuild-lab/aibl-installer.git`, `git -C ENGINE rev-parse HEAD` equals `INSTALLER_COMMIT`, and `git -C ENGINE status --porcelain` is empty. Git may rewrite the stored HTTPS URL to SSH for transport; compare the stored value. Reuse it. If anything differs, stop and preserve it for the course team to review; do not reset, pull, or overwrite it.
 - Otherwise, create it at that exact commit and nothing newer:
 
   ```
