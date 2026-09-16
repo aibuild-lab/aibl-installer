@@ -38,6 +38,17 @@ class RetainedInstallerTests(unittest.TestCase):
                 self.assertEqual(self.git(folder,'rev-parse','HEAD'),head)
             self.assertEqual(list((home/'GitHub').iterdir()),[folder])
 
+    def test_ssh_transport_rewrite_preserves_the_stored_repository_check(self):
+        with tempfile.TemporaryDirectory() as d:
+            home=Path(d);folder=home/'GitHub/aibl-installer';head=self.seed(folder)
+            self.git(folder,'config','url.git@github.com:.insteadOf','https://github.com/')
+            self.assertEqual(self.git(folder,'remote','get-url','origin'),'git@github.com:aibuild-lab/aibl-installer.git')
+            result=self.run_block(home)
+            self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+            self.git(folder,'remote','set-url','origin','https://github.com/other/installer.git')
+            self.assertNotEqual(self.run_block(home).returncode,0)
+            self.assertEqual(self.git(folder,'rev-parse','HEAD'),head)
+
     def test_dirty_installer_and_path_collision_are_preserved(self):
         with tempfile.TemporaryDirectory() as d:
             home=Path(d);folder=home/'GitHub/aibl-installer';self.seed(folder)

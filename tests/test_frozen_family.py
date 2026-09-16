@@ -160,7 +160,7 @@ class FrozenFamily(unittest.TestCase):
     def runner(self, args, cwd):
         if '--show-toplevel' in args:
             return str(self.engine)
-        if 'get-url' in args:
+        if 'remote.origin.url' in args:
             return 'https://github.com/aibuild-lab/aibl-installer.git'
         if 'status' in args:
             return ''
@@ -232,6 +232,8 @@ class FrozenFamily(unittest.TestCase):
             return subprocess.check_output(['git', *args], cwd=self.engine, stderr=subprocess.DEVNULL, text=True).strip()
         git('init')
         git('remote', 'add', 'origin', 'https://github.com/aibuild-lab/aibl-installer.git')
+        git('config', 'url.git@github.com:.insteadOf', 'https://github.com/')
+        self.assertEqual(git('remote', 'get-url', 'origin'), 'git@github.com:aibuild-lab/aibl-installer.git')
         git('add', '.')
         git('-c', 'user.name=Synthetic test', '-c', 'user.email=synthetic@example.invalid', 'commit', '-m', 'Synthetic engine')
         self.revision = git('rev-parse', 'HEAD')
