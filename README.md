@@ -31,14 +31,16 @@ my-workbench/
 └── .claude/skills/  .agents/skills/
     ├── aibl-personalize/      it interviews you and writes your context note
     ├── aibl-checkpoint/       saves or restores exactly the files you choose
-    └── aibl-enroll/           adds your program, on the day it starts
+    └── aibl-enroll/           selects your program once access is released
 ```
 
-Programs join that same workbench later, from inside it. When your program
-starts, `aibl-enroll` shows the programs your GitHub account can read and adds
-the one you choose. Access to a paid program's repository is granted at its
-first live session; before that, `aibl-enroll` lists nothing, and that is
-expected. Run it again whenever you join something new; what is already there
+Programs join that same workbench later, from inside it. `aibl-enroll` shows
+the programs your GitHub account can read. Select one and follow its next step.
+Check your cohort on the [Learn dashboard](https://learn.aibuildlab.com/) for
+its release date, time, and access status. Repository access follows the course's
+release schedule, which can differ from the first live session. Before you have
+access, that program will not appear; other accessible programs may still be
+listed. Run it again whenever you join something new; what is already there
 is left alone.
 
 You work in the app you chose. The installer sets up its command-line twin
