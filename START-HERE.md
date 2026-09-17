@@ -103,10 +103,13 @@ chat instead. Same setup, delivered by hand.
 - Type `/` in Claude, or `$` in Codex, and the three skills are listed. That
   is your proof that everything landed.
 
-`aibl-enroll` is for the day your program starts. Your program's repository is
-unlocked at your first live session; before that, `aibl-enroll` lists nothing,
-and that is expected. Your course arrives inside this same folder then. You
-never set up a second workbench.
+Your workbench is ready even if your course access has not opened. Check your
+cohort on the [Learn dashboard](https://learn.aibuildlab.com/) for its release
+date, time, and access status. Repository access follows your course's release
+schedule, which can differ from the first live session. Before you have access,
+that program will not appear in `aibl-enroll`; other accessible programs may
+still be listed. Once access opens, select the program and follow its next step.
+You never set up a second workbench.
 
 ## Fallback: with a person
 

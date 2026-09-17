@@ -47,7 +47,7 @@ The installer's own files (the program list, the setup script, the secrets guard
 
 If `git` is not available yet, that is step 0 of START-HERE not done: on a Mac, run `xcode-select --install` and hand off as in step 4.1; on Windows, send the student to install Git for Windows from git-scm.com, restart this app, and paste the prompt again.
 
-Do not ask which program the student is in. The installer builds the same workbench for everyone; programs join it later from inside the workbench, with the `aibl-enroll` skill, when the program starts. If the student asks about their program now, say: "Your program lands in this workbench after setup, with one command, on the day your program starts. We build the workbench first."
+Do not ask which program the student is in. The installer builds the same workbench for everyone; programs join it later from inside the workbench, with the `aibl-enroll` skill, once their course access is released. If the student asks about their program now, say: "We build the workbench first. Check your cohort on the Learn dashboard at https://learn.aibuildlab.com/ for its release date, time, and access status. Once your course access is released, use aibl-enroll to select the program and follow its next step."
 
 ## Step 3: Detection sweep, plan, and one confirmation
 
@@ -298,7 +298,7 @@ Tell the student, using the block for your harness:
 > 2. When it asks for a folder, choose `GitHub`, then `my-workbench`. On a Mac: Cmd + Shift + H, then GitHub, then my-workbench. On Windows: This PC, Local Disk (C:), Users, your name, GitHub, my-workbench.
 > 3. If it asks whether you trust the folder, click Trust. It is your folder. It usually will not ask, because my-workbench sits inside the home folder you already trusted.
 > 4. In the new session, type a forward slash. Three items start with `aibl-`: aibl-personalize, aibl-checkpoint, aibl-enroll. Those came with your workbench. Press Escape, then ask: `What is in my workbench, and what can it do? List the files and the three aibl- skills, one line each.` That answer is your proof that everything landed.
-> 5. Leave aibl-enroll alone for now. It is for the day your program starts: your program's repository is unlocked at your first live session, and before that it lists nothing, which is expected. Then open your program's lesson 3 where you left off."
+> 5. Your workbench is ready even if your course access has not opened. Check your cohort on the Learn dashboard at https://learn.aibuildlab.com/ for its release date, time, and access status. Repository access follows your course's release schedule, which can differ from the first live session. Before you have access, that program will not appear in aibl-enroll. Once access opens, use it to select the program and follow its next step. Then return to Essentials lesson 3 where you left off."
 
 **Codex:**
 
@@ -306,7 +306,7 @@ Tell the student, using the block for your harness:
 >
 > 1. In this app, open a new project or folder and choose `GitHub`, then `my-workbench` (Mac: your home folder, then GitHub; Windows: This PC, Local Disk (C:), Users, your name, GitHub).
 > 2. In the new session, type a dollar sign. Three items start with `aibl-`: aibl-personalize, aibl-checkpoint, aibl-enroll. Those came with your workbench. Press Escape, then ask: `What is in my workbench, and what can it do? List the files and the three aibl- skills, one line each.` That answer is your proof that everything landed.
-> 3. Leave aibl-enroll alone for now. It is for the day your program starts: your program's repository is unlocked at your first live session, and before that it lists nothing, which is expected. Then open your program's lesson 3 where you left off."
+> 3. Your workbench is ready even if your course access has not opened. Check your cohort on the Learn dashboard at https://learn.aibuildlab.com/ for its release date, time, and access status. Repository access follows your course's release schedule, which can differ from the first live session. Before you have access, that program will not appear in aibl-enroll. Once access opens, use it to select the program and follow its next step. Then return to Essentials lesson 3 where you left off."
 
 ## Step 10: Final summary
 
@@ -324,7 +324,7 @@ End with one clean message, real versions filled in:
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
 >
-> Every program you join lands inside that same folder, with aibl-enroll, on the day your program starts; you never set up a second one. Your program's repository is unlocked at your first live session. If anything looks wrong, ask in your program's channel with a screenshot."
+> You use the same workbench for each program; you never set up a second one. Check your cohort on the Learn dashboard at https://learn.aibuildlab.com/ for its release date, time, and access status. Once your course access is released, use aibl-enroll to select the program and follow its next step. If anything looks wrong, ask in your program's channel with a screenshot."
 
 ## When something fails
 
@@ -347,8 +347,11 @@ End with one clean message, real versions filled in:
 The `aibl-enroll` skill inside the workbench runs `~/GitHub/aibl-installer/scripts/enroll.py`
 with `--workbench` naming the workbench folder. `--check --json` is read-only: it asks
 GitHub which program repositories the student's account can read and changes nothing.
-Before a program's first live session it lists nothing, and that is expected; access to
-a paid program's repository is granted at that session. Selection records intent and
+Before the student's account has access to a program's repository, that program
+will not appear; other accessible programs may still be listed. Repository access
+follows the course's release schedule, which can differ from the first live session.
+Direct the student to their cohort on the Learn dashboard at
+https://learn.aibuildlab.com/ for its release date, time, and access status. Selection records intent and
 names the program's own next step; installing a program is that program's separate,
 confirmed step. Do not pull a newer installer to run it, and never delete or replace
 anything in the workbench.
