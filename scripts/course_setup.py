@@ -28,14 +28,22 @@ def selected_app_signed_out(args,result):
         return isinstance(value,dict) and value.get('loggedIn') is False and not value.get('error') and not value.get('errors')
     return False
 
+def failure_detail(result,lines=3,width=400):
+    """The failed tool's own last words. gh and git report on stderr; fall back to stdout (gh api prints the JSON error body there).
+    Without this a paused setup names only our guess at the cause, and a GitHub-side hiccup reads as 'check your network' with nothing to diagnose."""
+    text=(result.stderr or '').strip() or (result.stdout or '').strip()
+    kept=[line.strip() for line in text.splitlines() if line.strip()][-lines:]
+    return ' | '.join(kept)[:width]
+
 def command(args,cwd=None,interactive=False):
     child_env={**os.environ,'GH_HOST':'github.com'} if args[0]=='gh' else None
     result=subprocess.run(args,cwd=cwd,text=True,encoding='utf-8',errors='replace',capture_output=not interactive,env=child_env)
     if result.returncode:
         detail=(result.stderr or '').lower()
         reason='authentication_missing' if (args[0]=='gh' and result.returncode==4) or selected_app_signed_out(args,result) else 'not_found' if 'http 404' in detail else 'authentication' if 'http 401' in detail else 'permission' if 'http 403' in detail else 'network' if any(t in detail for t in ('could not resolve','connection refused','connection reset','timed out','error connecting','tls handshake','http 429','http 502','http 503')) else 'operation'
-        recovery='Check the network connection and retry; access has not been determined.' if reason=='network' else 'Complete the visible action and rerun the same launcher.'
-        raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed. {recovery} No work was removed.',reason)
+        recovery='GitHub or the network did not answer. Wait a moment and run the same command again.' if reason=='network' else 'Complete the visible action and run the same command again.'
+        said='' if interactive else failure_detail(result)
+        raise SetupError(f'{args[0]} {args[1] if len(args)>1 else ""} failed (exit {result.returncode}). {recovery} No work was removed.'+(f' The tool said: {said}' if said else ''),reason)
     if not interactive and args==['codex','login','status']:
         return (result.stdout or result.stderr).strip()
     return '' if interactive else result.stdout.strip()
