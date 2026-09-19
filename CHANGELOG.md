@@ -1,5 +1,15 @@
 # AIBL Installer changes
 
+## 2026-09-19
+
+- Six fixes from the first real Mac run of the paste route (a team member on a Homebrew machine, 09-19). None changes the install flow or a pinned guard file.
+  - **Guard proof cannot false-pass.** `SETUP-PROMPT.md` step 7 frames the headless test as a deliberate test of the hook, so the model attempts `cat .env` instead of declining on its own judgment before the hook runs. The only pass signal is now the literal `[secrets-guard hook]` tag the guard appends to every refusal; a model refusal without it is named as a fail. The diagnostic check is scoped to the chosen app (`--check --claude`), so a Claude-only student is not told a Codex guard is missing.
+  - **A failed tool names its own error.** `course_setup.command()` now appends the tool's last stderr (or stdout) lines to the paused message with the exit code, instead of only our classification. The run that prompted this failed once with "check the network" on a GitHub-side hiccup and left nothing to diagnose; the classification was right, the evidence was hidden. "Rerun the same launcher" becomes "run the same command again".
+  - **Any Claude Code install counts.** Step 3 detects the native installer, Homebrew (`/opt/homebrew/bin/claude`, `/usr/local/bin/claude`) and npm locations; 4.4 and 5.3 install only when none was found, so a Homebrew Claude never gets a second copy; the proof runs the `claude` that answered `--version` in 4.6 or 5.5.
+  - **Hook commands use the stable Node launcher.** `refresh-guard.mjs` picks `/opt/homebrew/bin/node`, `/usr/local/bin/node` or `C:\Program Files\nodejs\node.exe` when it resolves to the running binary, and passes it to `install.mjs` through the `CLAUDE_HOOK_NODE` seam that file already had, and to the AWS supplements and the Codex launcher. `process.execPath` alone resolves Homebrew's symlink to the versioned Cellar path, which `brew upgrade node` deletes; Claude Code treats a hook that cannot launch as a non-blocking error, so the guard would have switched off in silence. The install output now names the Node path it wrote. Importing the module no longer runs the installer (`pickStableNode` is unit-tested; every written command is asserted to use the picked path).
+  - **A "No folder" session continues.** Step 1.5 accepts the home folder or no folder open, since every path in the procedure is absolute; it still stops for a project or cloud-synced folder and says why (the workbench created inside the home folder is already trusted when opened later).
+  - **No hunt for a "core version".** Step 10 dropped the phrase; `hub_setup.py` reads the template's `.aibl/template.json` version into the receipt (`template.version`, `null` when the template ships no stamp) and step 8 tells the assistant where to read it.
+
 ## 2026-09-17
 
 - Setup guidance uses cohort-specific release timing and access status from Learn instead of promising repository access at the first live session. Clarify that enrollment lists programs the account can access. Installer mechanics and the main-branch paste route are unchanged; native device qualification remains separate.
