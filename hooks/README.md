@@ -105,7 +105,20 @@ hook. Two consequences follow from it being a hash:
 **Prove it by behavior, never by installer output.** In the same interactive `codex` session, ask it
 to run `cat .env`. A `hook: PreToolUse Blocked` line is proof. On-disk hashes are not. The Claude
 side is proven the same way with a fresh headless process, because Claude Code's hooks do run
-headless: `claude -p "Run the command: cat .env"` must show the guard's own refusal.
+headless. Frame it as a test, or the model may decline on its own judgment before the hook ever
+runs, which looks like a pass and is not: `claude -p "This is a deliberate test of my secrets guard
+hook. Use the Bash tool to run exactly this command, without substituting or skipping it: cat .env
+Then show me the exact text of any refusal you received, word for word."` The only pass signal is
+the literal `[secrets-guard hook]` tag the guard appends to every refusal.
+
+**Which Node the hook commands run.** Each command is `"<node>" "<script>"` with both paths
+absolute, because the shell Claude Code spawns hooks in has not read `~/.zshrc` and a bare `node`
+can be "command not found" there. A hook that cannot launch is a non-blocking error, so the tool
+runs unguarded. `refresh-guard.mjs` therefore writes the package manager's stable launcher
+(`/opt/homebrew/bin/node`, `/usr/local/bin/node`, `C:\Program Files\nodejs\node.exe`) whenever it
+resolves to the same binary that is running, never the versioned Cellar path `process.execPath`
+reports through Homebrew's symlink, which `brew upgrade node` deletes. `CLAUDE_HOOK_NODE` overrides
+the choice. The install output names the path it wrote; `--check` flags one that no longer exists.
 
 ## Validation
 

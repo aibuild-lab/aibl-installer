@@ -11,7 +11,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REAL_SCRIPT = fileURLToPath(import.meta.url).replace(/\.test\.mjs$/, ".mjs");
 const REAL_LOCAL_FILES = [
@@ -60,7 +60,7 @@ const STUB = {
     "let settings = {};\n" +
     "if (fs.existsSync(settingsPath)) { try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { process.exit(1); } }\n" +
     `settings.permissions = { ...(settings.permissions ?? {}), deny: ${JSON.stringify(REQUIRED_DENY)} };\n` +
-    "const node = process.execPath.split(path.sep).join('/');\n" +
+    "const node = (process.env.CLAUDE_HOOK_NODE || process.execPath).split(path.sep).join('/');\n" +
     "const hook = (name) => path.join(os.homedir(), '.claude', 'hooks', name).split(path.sep).join('/');\n" +
     "settings.hooks = { ...(settings.hooks ?? {}),\n" +
     "  PreToolUse: [{ matcher: 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: `\\\"${node}\\\" \\\"${hook('secrets-guard.js')}\\\"` }] }],\n" +
@@ -103,6 +103,32 @@ const codexInstalled = (name) => {
   return fs.existsSync(f) ? fs.readFileSync(f) : null;
 };
 
+// === Phase 0: the Node path written into every hook command ===
+// Importing the real script must NOT run the installer (isMainModule guards that).
+const { pickStableNode } = await import(pathToFileURL(REAL_SCRIPT).href);
+check("importing refresh-guard.mjs installs nothing", !fs.existsSync(path.join(home, ".claude")) && !fs.existsSync(path.join(home, ".codex")));
+{
+  // process.execPath through Homebrew's symlink is the versioned Cellar path, which `brew upgrade node`
+  // deletes. The picker must return the launcher instead, but only when it is the SAME binary.
+  const cellar = "/opt/homebrew/Cellar/node/25.6.1/bin/node";
+  const brewOnly = (p) => (p === "/opt/homebrew/bin/node" || p === cellar ? cellar : null);
+  check("Homebrew Cellar path is replaced by the stable launcher",
+    pickStableNode(cellar, ["/opt/homebrew/bin/node", "/usr/local/bin/node"], brewOnly) === "/opt/homebrew/bin/node");
+  const nvmNode = "/Users/s/.nvm/versions/node/v25.6.1/bin/node";
+  const otherNode = (p) => (p === "/opt/homebrew/bin/node" ? "/opt/homebrew/Cellar/node/24.0.0/bin/node" : p === nvmNode ? p : null);
+  check("a launcher for a DIFFERENT Node is never substituted", pickStableNode(nvmNode, ["/opt/homebrew/bin/node"], otherNode) === nvmNode);
+  check("no launcher present keeps execPath", pickStableNode(cellar, ["/opt/homebrew/bin/node"], (p) => (p === cellar ? cellar : null)) === cellar);
+  check("unresolvable execPath is returned unchanged", pickStableNode("/nowhere/node", ["/opt/homebrew/bin/node"], () => null) === "/nowhere/node");
+  if (process.platform === "win32") {
+    const exe = "C:\\Program Files\\nodejs\\node.exe";
+    check("Windows path comparison ignores case", pickStableNode("c:\\program files\\nodejs\\node.exe", [exe], (p) => p.toUpperCase()) === exe);
+  }
+}
+// What THIS machine's install should write: the launcher when Node came from Homebrew or Program
+// Files, otherwise the running binary. Every hook command below must use exactly this path.
+const expectedNode = pickStableNode(process.execPath).split(path.sep).join("/");
+const hookNodeOf = (command) => (typeof command === "string" ? command.match(/^"([^"]+)"/)?.[1] ?? null : null);
+
 // === Phase A: missing install is detected; valid pinned manifest installs and verifies ===
 writeManifest("test-ref", STUB);
 const missing = run(["--check"]);
@@ -134,6 +160,9 @@ check("Claude AWS supplement covers every local tool path before and after use",
     group.matcher === "*" && group.hooks?.[0]?.command?.includes("aws-credential-tripwire.mjs"))
   && claudeSettings.hooks.PostToolUseFailure.some((group) =>
     group.matcher === "*" && group.hooks?.[0]?.command?.includes("aws-credential-tripwire.mjs")));
+check("every Claude hook command runs the stable Node path (canonical guard via CLAUDE_HOOK_NODE, supplements directly)",
+  ["PreToolUse", "PostToolUse", "PostToolUseFailure"].every((event) =>
+    claudeSettings.hooks[event].every((group) => group.hooks.every((hook) => hookNodeOf(hook.command) === expectedNode))));
 const codexHooksPath = path.join(home, ".codex", "hooks.json");
 const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, "utf8"));
 // Codex launches `command` as ONE executable path with no shell parsing, so these register a
@@ -152,6 +181,12 @@ check("Codex PostToolUse uses the names-only compatibility adapter",
 check("Codex hook command is a single UNQUOTED path (Codex does not shell-parse it)",
   codexHooks.hooks.PreToolUse.every((group) =>
     group.hooks.every((hook) => typeof hook.command === "string" && !/^\s*"/.test(hook.command))));
+check("Codex launcher execs the stable Node path", (() => {
+  const p = path.join(home, ".codex", "hooks", codexLauncher("codex-secrets-guard"));
+  // The launcher body quotes the path as the OS spells it; compare on forward slashes.
+  const quoted = fs.readFileSync(p, "utf8").match(/"([^"]+)"/)?.[1] ?? "";
+  return quoted.split(path.sep).join("/") === expectedNode;
+})());
 check("Codex launcher exists on disk and invokes its adapter", (() => {
   const p = path.join(home, ".codex", "hooks", codexLauncher("codex-secrets-guard"));
   return fs.existsSync(p) && fs.readFileSync(p, "utf8").includes("codex-secrets-guard.mjs");
@@ -246,6 +281,8 @@ fs.writeFileSync(settingsPath, JSON.stringify(missingNodeSettings, null, 2));
 const missingNode = run(["--check"]);
 check("missing absolute Node runtime is unhealthy", missingNode.status !== 0 && /missing or non-absolute Node runtime/.test(missingNode.stdout));
 check("refresh repairs the stale Node runtime path", run().status === 0);
+check("the repaired command uses the stable Node path (the brew-upgrade case, fixed by one re-run)",
+  hookNodeOf(JSON.parse(fs.readFileSync(settingsPath, "utf8")).hooks.PreToolUse[0].hooks[0].command) === expectedNode);
 
 const staleCodex = JSON.parse(fs.readFileSync(codexHooksPath, "utf8"));
 staleCodex.hooks.PreToolUse.find((group) =>

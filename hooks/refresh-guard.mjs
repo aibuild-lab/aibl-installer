@@ -63,7 +63,64 @@ const args = new Set(process.argv.slice(2));
 const APPS = { claude: args.has("--claude") || !args.has("--codex"), codex: args.has("--codex") || !args.has("--claude") };
 const appsLabel = APPS.claude && APPS.codex ? "Claude Code and Codex" : APPS.claude ? "Claude Code" : "Codex";
 
-main().catch((error) => fail(error.message || String(error)));
+// The hook command records an ABSOLUTE path to Node (install.mjs explains why: the shell Claude Code
+// spawns hooks in has not read ~/.zshrc, so a bare `node` can be "command not found" there, and a
+// hook that cannot launch is a non-blocking error that lets the tool run UNGUARDED). But
+// process.execPath is the fully RESOLVED path. Through Homebrew's symlink it reads
+// /opt/homebrew/Cellar/node/25.6.1/bin/node, and `brew upgrade node` deletes that folder, so the
+// guard would switch off in silence the next time Node moved (seen on a real install, 09-19-2026;
+// `--check` reports it, but no student runs `--check`). Prefer the launcher the package manager keeps
+// pointing at the current version, and only when it resolves to the very same binary running now;
+// otherwise keep execPath (nvm, a custom build). CLAUDE_HOOK_NODE, which install.mjs already
+// honors, still wins when set.
+const STABLE_NODE_LAUNCHERS = process.platform === "win32"
+  ? [path.join(process.env.ProgramFiles || "C:\\Program Files", "nodejs", "node.exe")]
+  : ["/opt/homebrew/bin/node", "/usr/local/bin/node"];
+
+export function pickStableNode(execPath, launchers = STABLE_NODE_LAUNCHERS, realpath = realpathOrNull) {
+  const running = realpath(execPath);
+  if (running === null) return execPath;
+  for (const launcher of launchers) {
+    const target = realpath(launcher);
+    if (target !== null && samePath(target, running)) return launcher;
+  }
+  return execPath;
+}
+
+function realpathOrNull(file) {
+  try { return fs.realpathSync.native(file); } catch { return null; }
+}
+
+function samePath(a, b) {
+  const [x, y] = [normalizePath(a), normalizePath(b)];
+  return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+function hookNodePath() {
+  const requested = process.env.CLAUDE_HOOK_NODE;
+  if (requested) {
+    if (!path.isAbsolute(requested) || !fs.existsSync(requested)) {
+      fail("CLAUDE_HOOK_NODE must point to an existing absolute Node executable.");
+    }
+    return requested;
+  }
+  return pickStableNode(process.execPath);
+}
+
+// Run only when invoked as a script. Importing the module (the test suite does, for pickStableNode)
+// must not install anything. When the comparison itself cannot be made, run: this file's job is to
+// install a guard, and a guard that quietly does nothing is the failure mode everything here avoids.
+if (isMainModule()) main().catch((error) => fail(error.message || String(error)));
+
+function isMainModule() {
+  const entry = process.argv[1];
+  if (!entry) return false; // loaded by `node -e`, `--import` or the REPL: never the script being run
+  try {
+    return fs.realpathSync.native(entry) === fs.realpathSync.native(fileURLToPath(import.meta.url));
+  } catch {
+    return true;
+  }
+}
 
 async function main() {
   const manifest = loadManifest();
@@ -99,6 +156,7 @@ async function main() {
     return;
   }
 
+  const hookNode = hookNodePath();
   const before = inspectInstalledGuard(manifest);
 
   // 1. Fetch every file and verify hash + syntax IN MEMORY before touching disk.
@@ -205,13 +263,18 @@ async function main() {
   //    PreToolUse hook is missing from settings.json is silently inactive; the installer is
   //    idempotent, so this is a quiet no-op when everything is already correct.
   if (APPS.claude) {
-    const result = spawnSync(process.execPath, [path.join(claudeHooksDir, "install.mjs")], { stdio: "inherit" });
+    // The installer runs on the Node that is running now; CLAUDE_HOOK_NODE tells it which Node
+    // path to WRITE into the hook commands (the stable launcher, see pickStableNode).
+    const result = spawnSync(process.execPath, [path.join(claudeHooksDir, "install.mjs")], {
+      stdio: "inherit",
+      env: { ...process.env, CLAUDE_HOOK_NODE: hookNode },
+    });
     if (result.status !== 0) {
       fail("The guard installer did not finish cleanly. Read the message above; do not delete ~/.claude/settings.json.");
     }
-    installClaudeSupplementalHooks();
+    installClaudeSupplementalHooks(hookNode);
   }
-  if (APPS.codex) installCodexHooks();
+  if (APPS.codex) installCodexHooks(hookNode);
 
   const after = inspectInstalledGuard(manifest);
   if (!after.healthy) {
@@ -222,8 +285,9 @@ async function main() {
     ].join("\n"));
   }
 
+  console.log("");
+  console.log(`Hook commands run Node from ${hookNode}.`);
   if (changed.length > 0 || !before.healthy) {
-    console.log("");
     console.log(`User-global secrets guard on-disk installation verified for ${appsLabel}.`);
     console.log("Runtime activation is not observable from this installer.");
     console.log(`Manual proof required: fully quit and reopen ${APPS.claude && APPS.codex ? "both apps" : "the app"}${APPS.codex ? ", trust the Codex hooks on the review screen," : ""} and run the synthetic canaries.`);
@@ -343,11 +407,11 @@ function inspectCodexGuard(manifest) {
   return { healthy: issues.length === 0, issues };
 }
 
-function installClaudeSupplementalHooks() {
+function installClaudeSupplementalHooks(hookNode) {
   const settings = readJsonObjectIfExists(claudeSettingsPath, "~/.claude/settings.json");
   validateClaudeHooksMergeTarget(settings);
   const originalText = fs.readFileSync(claudeSettingsPath, "utf8");
-  const nodeBin = normalizePath(process.execPath);
+  const nodeBin = normalizePath(hookNode);
   const ensureHook = (event, script, matcher) => {
     const current = settings.hooks[event] ?? [];
     const scriptPath = normalizePath(path.join(claudeHooksDir, script));
@@ -414,7 +478,7 @@ function installClaudeSupplementalHooks() {
   console.log(`  PostToolUseFailure(aws-credential-tripwire.mjs): ${failureStatus}`);
 }
 
-function installCodexHooks() {
+function installCodexHooks(hookNode) {
   fs.mkdirSync(codexHooksDir, { recursive: true });
   const settings = readJsonObjectIfExists(codexHooksPath, "~/.codex/hooks.json") ?? {};
   const originalText = fs.existsSync(codexHooksPath) ? fs.readFileSync(codexHooksPath, "utf8") : null;
@@ -440,7 +504,7 @@ function installCodexHooks() {
     // does not exist, the hook fails to spawn, and Codex FAILS OPEN: it reports
     // `hook: PreToolUse Failed` and runs the tool call anyway. Point it at one wrapper instead.
     // Because the value is not tokenized, a path containing spaces is safe unquoted.
-    const command = normalizePath(writeCodexLauncher(script));
+    const command = normalizePath(writeCodexLauncher(script, hookNode));
     const canonicalIndex = current.findIndex((group) =>
       group?.matcher === matcher
       && Array.isArray(group.hooks)
@@ -517,10 +581,10 @@ export function codexLauncherName(script) {
   return process.platform === "win32" ? `${base}.cmd` : `${base}.sh`;
 }
 
-function writeCodexLauncher(script) {
+function writeCodexLauncher(script, hookNode) {
   const launcher = path.join(codexHooksDir, codexLauncherName(script));
   const adapter = path.join(codexHooksDir, script);
-  const node = process.execPath;
+  const node = hookNode;
   // Quote inside the launcher (a real shell parses this), never in hooks.json (Codex does not).
   const body = process.platform === "win32"
     ? `@echo off\r\n"${node}" "${adapter}" %*\r\n`
