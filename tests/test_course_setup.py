@@ -137,6 +137,25 @@ class SetupTests(unittest.TestCase):
    with self.subTest(reason=reason),patch.object(setup.subprocess,'run',return_value=subprocess.CompletedProcess(['gh','api','user'],code,'',detail)):
     with self.assertRaises(setup.SetupError) as error:setup.command(['gh','api','user'])
     self.assertEqual(error.exception.reason,reason)
+ def test_failed_command_message_names_the_tools_own_error_not_only_our_guess(self):
+  # Sara Davison's 09-19-2026 run: gh failed once on a GitHub-side hiccup, the message said only
+  # "check the network", and there was nothing to diagnose. The tool's last lines must ride along.
+  stderr='GraphQL: Something went wrong while executing your query. (HTTP 502)\nerror connecting to api.github.com'
+  with patch.object(setup.subprocess,'run',return_value=subprocess.CompletedProcess(['gh','repo','create'],1,'',stderr)):
+   with self.assertRaises(setup.SetupError) as error:setup.command(['gh','repo','create','x/y','--private'])
+  message=str(error.exception)
+  self.assertEqual(error.exception.reason,'network')
+  self.assertIn('gh repo failed (exit 1)',message);self.assertIn('run the same command again',message)
+  self.assertIn('The tool said: GraphQL: Something went wrong while executing your query. (HTTP 502) | error connecting to api.github.com',message)
+  self.assertNotIn('launcher',message)
+ def test_failed_command_falls_back_to_stdout_and_stays_short(self):
+  body=json.dumps({'message':'Not Found','documentation_url':'https://docs.github.com/rest'})
+  with patch.object(setup.subprocess,'run',return_value=subprocess.CompletedProcess(['gh','api','repos/x/y'],1,body,'')):
+   with self.assertRaises(setup.SetupError) as error:setup.command(['gh','api','repos/x/y'])
+  self.assertIn('The tool said: '+body,str(error.exception))
+  long=subprocess.CompletedProcess(['git','clone'],128,'','x'*2000)
+  self.assertLessEqual(len(setup.failure_detail(long)),400)
+  self.assertEqual(setup.failure_detail(subprocess.CompletedProcess(['git'],1,'','')),'')
  def test_selected_api_account_change_preserves_saved_repository_binding(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake();self.run_setup(f,d);before=len(f.calls)

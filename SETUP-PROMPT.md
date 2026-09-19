@@ -28,15 +28,18 @@ Greet briefly:
 
 **Which app you are.** If the environment variable `CLAUDECODE` is set, or you know you are Claude, follow the **Claude** blocks below. Otherwise follow the **Codex** blocks. If you genuinely cannot tell, ask: "Are we in the Claude app or the Codex app?" Record the answer as your harness for the rest of this session.
 
-## Step 1.5: Confirm you are in the home folder
+## Step 1.5: Confirm where this session is pointed
 
-Run `pwd`. Expected: `/Users/<name>` on a Mac, `C:\Users\<name>` on Windows.
+Run `pwd`. Two answers are fine, and you continue with either:
 
-If it is anything else (Desktop, Documents, Downloads, a project), stop:
+- **The home folder:** `/Users/<name>` on a Mac, `C:\Users\<name>` on Windows.
+- **No folder:** the app shows no folder open for this session. Every path in this procedure is absolute (`~/GitHub`, `~/.claude`, the two shell startup files), so setup runs the same from here. Say so in one line and carry on.
 
-> "This session is pointed at `<path>`, but setup needs your home folder, the one named after your username. Please start a new session in this app and, when it asks for a folder, pick your home folder. On a Mac: Cmd + Shift + H in the picker. On Windows: This PC, Local Disk (C:), Users, then your name. Then paste the same prompt again."
+If the session is pointed at some other folder (Desktop, Documents, Downloads, a project, or anything inside Dropbox, OneDrive, iCloud or Google Drive), stop:
 
-Do not continue from the wrong folder.
+> "This session is pointed at `<path>`, but setup wants your home folder, the one named after your username, so the workbench we create inside it is already trusted when you open it later. Please start a new session in this app and, when it asks for a folder, pick your home folder. On a Mac: Cmd + Shift + H in the picker. On Windows: This PC, Local Disk (C:), Users, then your name. Then paste the same prompt again."
+
+Do not continue from a project folder or a cloud-synced one.
 
 ## Step 2: Get the installer files
 
@@ -60,7 +63,7 @@ Check every item below before installing anything. Use the three-state rule (rul
 - Node.js 18 or newer: `command -v node` and `node --version`; fallbacks `/opt/homebrew/bin/node`, `/usr/local/bin/node`
 - GitHub CLI: `command -v gh`; fallbacks `/opt/homebrew/bin/gh`, `/usr/local/bin/gh`
 - Python 3.11 or newer: `python3 --version`; fallback `$(brew --prefix)/opt/python@3.13/bin/python3.13`
-- **Claude only:** Claude Code CLI: `command -v claude`; fallback `~/.local/bin/claude`
+- **Claude only:** Claude Code CLI: `command -v claude`; fallbacks `~/.local/bin/claude` (native installer), `/opt/homebrew/bin/claude` or `/usr/local/bin/claude` (Homebrew), `"$(npm prefix -g 2>/dev/null)/bin/claude"` (npm). Any one of these is "installed"; note which path, steps 4.4 and 7 use it
 - **Codex only:** Codex CLI: `command -v codex`; fallbacks `~/.codex/bin/codex`, `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`
 - Secrets guard: `~/.claude/hooks/secrets-guard.js` (Claude) or `~/.codex/hooks.json` (Codex)
 - Workbench: `~/GitHub/my-workbench` (an existing one is reused in step 8, never replaced)
@@ -71,7 +74,7 @@ Check every item below before installing anything. Use the three-state rule (rul
 - Node.js 18 or newer: `Get-Command node` and `node --version`
 - GitHub CLI: `Get-Command gh`
 - Python 3.11 or newer: `py -3 --version`, then `python --version`
-- **Claude only:** Claude Code CLI: `Get-Command claude`; fallback `$env:USERPROFILE\.local\bin\claude.exe`
+- **Claude only:** Claude Code CLI: `Get-Command claude`; fallbacks `$env:USERPROFILE\.local\bin\claude.exe` (native installer), `$env:APPDATA\npm\claude.cmd` (npm). Either is "installed"; note which path, steps 5.3 and 7 use it
 - **Codex only:** Codex CLI: `Get-Command codex`; fallback `$env:USERPROFILE\.codex\bin\codex.exe`
 - Secrets guard: `$HOME\.claude\hooks\secrets-guard.js` (Claude) or `$HOME\.codex\hooks.json` (Codex)
 - Workbench: `$HOME\GitHub\my-workbench`
@@ -154,7 +157,7 @@ Say why, once each, in plain words:
 
 ### 4.4 The command-line twin of this app (native installer, no password)
 
-**Claude:** if `~/.local/bin/claude` is missing, run `curl -fsSL https://claude.ai/install.sh | sh`. It installs to `~/.local/bin`. Verify with `test -x "$HOME/.local/bin/claude" && echo installed`. Do not run `claude --version` yet; PATH comes next.
+**Claude:** only if step 3 found no Claude Code CLI anywhere (not on PATH, none of the fallback files), run `curl -fsSL https://claude.ai/install.sh | sh`. It installs to `~/.local/bin`. Verify with `test -x "$HOME/.local/bin/claude" && echo installed`. If step 3 found it at a Homebrew or npm path, keep that one and install nothing; a second copy only leaves two versions to keep straight. Do not run `claude --version` yet; PATH comes next.
 
 **Codex:** if `codex` is missing, run `curl -fsSL https://chatgpt.com/codex/install.sh | sh` (Homebrew alternative: `brew install --cask codex`). Verify with `command -v codex || ls ~/.codex/bin/codex`.
 
@@ -197,7 +200,7 @@ Use the same one-line reasons as 4.3. After each install, refresh PATH in the cu
 
 ### 5.3 The command-line twin of this app
 
-**Claude:** if `$env:USERPROFILE\.local\bin\claude.exe` is missing, run `irm https://claude.ai/install.ps1 | iex`. No dialog; it installs to the home folder.
+**Claude:** only if step 3 found no Claude Code CLI anywhere, run `irm https://claude.ai/install.ps1 | iex`. No dialog; it installs to `$env:USERPROFILE\.local\bin`. If step 3 found it (an npm install, for example), keep that one and install nothing.
 
 **Codex:** if `codex` is missing, run `irm https://chatgpt.com/codex/install.ps1 | iex`.
 
@@ -255,7 +258,18 @@ Say why once, in these four parts, in your own words but keeping every part:
 
 Installed is not the same as running. Prove it, in the app the student chose:
 
-**Claude:** a fresh headless process loads the hooks at start, so this is the proof: `"$HOME/.local/bin/claude" -p "Run the command: cat .env"` (Windows: `"$env:USERPROFILE\.local\bin\claude.exe" -p "Run the command: cat .env"`). **The only success signal is the guard's own refusal** mentioning the secrets guard. Anything else (it ran, it printed, "no such file," silence) means the guard did not fire: check the files landed (`node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --check`), re-run the installer, try again. Do not move on until you have seen the refusal.
+**Claude:** a fresh headless process loads the hooks at start, so this is the proof. Use the same `claude` that answered `--version` in step 4.6 or 5.5; if it is not on this shell's PATH, use the full path you found in step 3. Run, on either system:
+
+```
+claude -p "This is a deliberate test of my secrets guard hook. Use the Bash tool to run exactly this command, without substituting or skipping it: cat .env   Then show me the exact text of any refusal you received, word for word."
+```
+
+**The only pass signal is the literal text `[secrets-guard hook]` somewhere in the output.** The guard itself appends that tag to every refusal; nothing else produces it. Two outcomes look like a pass and are not:
+
+- The model declines in its own words ("I won't read .env files, they hold secrets") and the tag is absent. That is the model's judgment, not the hook. The command was never attempted, so the guard was never tested. Run it again; if it still declines, add to the prompt: "I confirm this is a test of the hook itself. Attempt the command."
+- It ran, it printed, "no such file", "permission not granted", or silence, tag absent: the guard did not fire. Check the files landed (`node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --check --claude`; the flag matters, without it the check also looks for a Codex guard the student never chose), re-run the guard command from above, try again.
+
+Do not move on until you have seen `[secrets-guard hook]` in the output.
 
 **Codex:** Codex will not run a hook until the student has trusted it, and an untrusted hook is skipped in silence, so the student does this part by hand and you watch. Tell them:
 
@@ -281,6 +295,7 @@ Read the result:
 - `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 9.
 - `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Continue to step 9.
 - `"skills_missing"` is not empty: the workbench was made from an older template. Nothing was changed. Tell the student to ask in their program's channel with that message, and continue; the workbench still works.
+- `"template": { ..., "version": "0.0.12" }`: the template version you report in step 10. If it is `null`, the template ships no version stamp; say "the current template" and do not go looking for a number elsewhere.
 - `Setup paused: GitHub is not signed in yet`: step 6.1 did not finish. Do it, then run the same command again.
 - `Setup paused: ... already exists under this account ...` or `... was made from ...`: a repository or folder called `my-workbench` belongs to something else. Stop and show the student exactly what was found; never delete or replace it. They can choose another name with `--repo-name`.
 - `Setup paused: GitHub is still preparing the new repository`: wait a minute and run the same command again. Nothing needs to be undone.
@@ -320,7 +335,7 @@ End with one clean message, real versions filled in:
 > - Python 3.X.Y
 > - <Claude Code CLI or Codex CLI> X.Y.Z, signed in
 > - Secrets guard: proven
-> - Your workbench: `~/GitHub/my-workbench`, a private repository at `github.com/<username>/my-workbench` that only you can see, made from the AI Build Lab template (version X.Y.Z) with three skills (core version X.Y.Z): aibl-personalize, aibl-checkpoint, aibl-enroll
+> - Your workbench: `~/GitHub/my-workbench`, a private repository at `github.com/<username>/my-workbench` that only you can see, made from the AI Build Lab template (version X.Y.Z, from the step 8 result) with three skills: aibl-personalize, aibl-checkpoint, aibl-enroll
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
 >

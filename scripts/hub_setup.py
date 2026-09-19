@@ -108,6 +108,17 @@ def local_identity(runner, folder, user):
             runner(['git', 'config', '--local', key, value], cwd=folder)
 
 
+def template_version(folder):
+    """The template's own version stamp (.aibl/template.json), when it ships one. Step 10 of the prompt reports it;
+    without it here the assistant goes hunting through the workbench for a number that may not exist."""
+    try:
+        meta = json.loads((folder / '.aibl' / 'template.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    value = meta.get('version') if isinstance(meta, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
 def skills_present(folder):
     found = {}
     for app_dir in ('.claude/skills', '.agents/skills'):
@@ -181,7 +192,7 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
         'repository': full,
         'private': bool(meta.get('private', True)),
         'workspace': str(folder),
-        'template': source,
+        'template': {**source, 'version': template_version(folder)},
         'versions': versions,
         'skills': skills,
         'skills_missing': missing,

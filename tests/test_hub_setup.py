@@ -21,6 +21,7 @@ class Fake:
         self.template_visible = True
         self.claude = True
         self.with_skills = True
+        self.template_version = '0.0.12'   # .aibl/template.json in the template; None means the template ships no stamp
 
     def __call__(self, args, cwd=None, interactive=False):
         self.calls.append(args)
@@ -50,6 +51,8 @@ class Fake:
             return ''
         if args[:3] == ['gh', 'repo', 'clone']:
             p = Path(args[-1]); p.mkdir(); (p / '.git').mkdir()
+            if self.template_version:
+                (p / '.aibl').mkdir(); (p / '.aibl' / 'template.json').write_text(json.dumps({'schema_version': 'aibl.workbench-template/v1', 'version': self.template_version}))
             if self.with_skills:
                 for app in ('.claude', '.agents'):
                     for s in hub.SKILLS:
@@ -103,6 +106,21 @@ class HubSetupTests(unittest.TestCase):
             self.assertIn(['git', 'config', '--local', 'user.name', 'Student'], f.calls)
             self.assertIn(['git', 'config', '--local', 'user.email', '123+synthetic-student@users.noreply.github.com'], f.calls)
             self.assertFalse(any(c[:2] == ['git', 'config'] and '--global' in c for c in f.calls))
+
+    def test_receipt_carries_the_template_version_stamp_when_the_template_ships_one(self):
+        # Step 10 of the prompt reports "template (version X.Y.Z)"; the number must come from the
+        # receipt, or the assistant hunts through the workbench for it (Sara Davison, 09-19-2026).
+        with tempfile.TemporaryDirectory() as root:
+            r = run(Fake(), root)
+            self.assertEqual(r['template']['version'], '0.0.12')
+            self.assertEqual(r['template']['revision'], 'a' * 40)
+        with tempfile.TemporaryDirectory() as root:
+            f = Fake(); f.template_version = None
+            r = run(f, root)
+            self.assertIsNone(r['template']['version'])
+        with tempfile.TemporaryDirectory() as root:
+            bad = Path(root) / 'wb'; (bad / '.aibl').mkdir(parents=True); (bad / '.aibl' / 'template.json').write_text('not json')
+            self.assertIsNone(hub.template_version(bad))
 
     def test_no_invitation_check_and_no_private_publisher_read(self):
         with tempfile.TemporaryDirectory() as d:
