@@ -3,3 +3,8 @@
 hooks/*.js text eol=lf
 hooks/*.mjs text eol=lf
 hooks/*.json text eol=lf
+
+# The Workforce bridge verifies the retained installer by hashing its files as checked out
+# (frozen_family.verify_engine). Those hashes are LF bytes, so every text file must check out
+# LF on Windows as well, or a Windows student fails verification on start.sh before anything runs.
+* text=auto eol=lf
