@@ -162,7 +162,7 @@ def status(root):
         elif current!={'hash':row['sha256'],'mode':filesystem_mode(row['mode'])}:customized.append(name)
     return {'status':'installed','supplied_packages':prior['packages'],'customized':sorted(customized),'missing':sorted(missing),'update_availability':'unknown'}
 
-def compose(root,bundles,family,products,fail_after=None,preview=False):
+def compose(root,bundles,family,products,fail_after=None,preview=False,template_revision=None):
     root=Path(root).resolve()
     if not set(products)<=PRODUCTS:raise ReleaseError('Unknown product')
     with (nullcontext() if preview else lock(root)) as local:
@@ -173,6 +173,12 @@ def compose(root,bundles,family,products,fail_after=None,preview=False):
         history=read(history_path) if history_path.exists() else {'packages':{},'components':{}}
         marker=under(root,MARKER);prior=read(marker) if marker.exists() else {'schema_version':'aibl.installed-family/v1','packages':{},'files':{}}
         if prior.get('schema_version')!='aibl.installed-family/v1' or not isinstance(prior.get('files'),dict) or not isinstance(prior.get('packages'),dict):raise ReleaseError('Invalid installed family record')
+        if template_revision is not None:
+            from enrollment_bridge import baseline
+            source=baseline(root,template_revision)
+            if set(products)!={'agent-workbench','workbench-core','agent-workforce'}:
+                raise ReleaseError('Template bridge must install the complete selected combination')
+            prior['files']={name:{'path':name,**row,'product':'workbench-core','policy':'supplied'} for name,row in source['files'].items() if '/skills/' in name}
         # A legacy manifest supplies previous managed hashes, never ownership of personal roots.
         if not prior['packages']:
             legacy=under(root,'.aibl/installed-agent-essentials.json')

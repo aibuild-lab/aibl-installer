@@ -158,9 +158,14 @@ def main():
     p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter);p.add_argument('--workbench',help='The workbench folder. Default: this folder, then ~/GitHub/my-workbench.');p.add_argument('--check',action='store_true',help='Show what this account can read and change nothing.');p.add_argument('--yes',action='store_true',help='Confirm selection only, never installation.');p.add_argument('--program',action='append',help='Select only this program id; repeatable.');p.add_argument('--json',action='store_true')
     p.add_argument('--preview',action='store_true',help='Prepare one verified enrollment preview; changes no workbench files.')
     p.add_argument('--apply-plan',help='Apply the exact preview ID after the student confirms its changes.')
+    p.add_argument('--distribution');p.add_argument('--distribution-sha256');p.add_argument('--harness', choices=['claude','codex'])
     p.add_argument('--family-lock');p.add_argument('--family-sha256');p.add_argument('--family-bundles');a=p.parse_args()
     try:
         supplied=(a.family_lock,a.family_sha256,a.family_bundles)
+        distribution=(a.distribution,a.distribution_sha256)
+        if any(distribution) or a.harness:
+            if not a.preview or not all(distribution) or not a.harness or any(supplied):
+                raise SetupError('First enrollment requires preview, both distribution inputs and the selected harness; do not mix family inputs.')
         if any(supplied) and not all(supplied):raise SetupError('Supply the independently reviewed family lock, digest and bundles together.')
         if a.preview or a.apply_plan:
             if a.check or a.yes or (a.preview and a.apply_plan):raise SetupError('Use exactly one of check, selection, preview or apply-plan.')
@@ -168,17 +173,30 @@ def main():
             from enrollment_v2 import preview,apply_plan
             if a.preview:
                 if not a.program or len(a.program)!=1:raise SetupError('Preview requires exactly one program.')
+                bridge=None
+                if all(distribution):
+                    if a.program != ['agent-workforce']:
+                        raise SetupError('The template bridge connects Workforce only.')
+                    from enrollment_bridge import prepare
+                    inputs,bridge=prepare(workbench,*distribution,a.harness)
+                    supplied=(inputs['family_lock'],inputs['family_sha256'],inputs['family_bundles'])
                 if not all(supplied):
                     from workbench_distribution import enrollment_inputs
                     inputs=enrollment_inputs(workbench,a.program[0],Path(__file__).resolve().parents[1])
                     supplied=(inputs['family_lock'],inputs['family_sha256'],inputs['family_bundles'])
-                result=preview(workbench,a.program[0],*supplied)
+                result=preview(workbench,a.program[0],*supplied,**({'bridge':bridge} if bridge else {}))
             else:
                 if a.program:raise SetupError('An approved plan already binds its program; do not override it.')
                 result=apply_plan(workbench,a.apply_plan,family_lock=a.family_lock,family_sha256=a.family_sha256,family_bundles=a.family_bundles)
         else:
             if any(supplied):raise SetupError('Family inputs are used only by explicit preview or apply-plan.')
-            result=enroll(a.workbench,a.yes,a.check,a.program)
+            workbench=find_workbench(a.workbench)
+            if a.check and not (workbench/'.aibl/family.json').exists() and (workbench/'.aibl/template.json').is_file():
+                from enrollment_bridge import available
+                verify_engine(workbench)
+                result=available(workbench,command)
+            else:
+                result=enroll(a.workbench,a.yes,a.check,a.program)
         if a.json:print(json.dumps(result,indent=2))
         elif a.preview or a.apply_plan:print(json.dumps(result,indent=2))
         else:

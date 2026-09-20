@@ -113,3 +113,8 @@ Enrollment refuses to change an already installed package pin. Later updates
 require one student-owned PR, explicit student approval, merge readback, safe
 local synchronization, selected-app refresh and verification. Faculty have no
 routine role in approving or merging that PR.
+
+Existing public-template Essentials workbenches use the explicit
+[Workforce enrollment bridge](WORKFORCE-HANDOFF.md). Ordinary setup reruns still
+refuse implicit adoption; the bridge requires its own admitted inputs and
+student-confirmed preview.

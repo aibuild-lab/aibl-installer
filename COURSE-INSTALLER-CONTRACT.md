@@ -1,5 +1,12 @@
 # Shared course installer contract
 
+The explicit [Workforce handoff](WORKFORCE-HANDOFF.md) adds enrollment-time
+compatibility for reviewed public-template snapshots. It does not change the
+default Essentials setup or activate a published distribution. Its preview binds
+the selected client and independent distribution; confirmation composes base,
+core and Workforce together while preserving student seeds and Git state.
+
+
 The explicit [standalone workbench route](STANDALONE-WORKBENCH.md) uses an
 independently admitted `aibl.family-lock/v2`: public template plus core, private
 student repository, no course invitation at setup. Established-workbench setup

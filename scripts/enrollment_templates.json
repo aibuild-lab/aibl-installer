@@ -1,0 +1,73 @@
+{
+  "repository": "aibuild-lab/my-workbench-template",
+  "snapshots": [
+    {
+      "revision": "d89625d3ce99ee48f11d11c6186a39e227f93b37",
+      "tree": "1bce245f1e03f1f2d9ec2ff2b3bad7738d434b20",
+      "files": {
+        ".agents/skills/aibl-checkpoint/SKILL.md": {
+          "sha256": "1915aa40195d16312088955b70d52340098617d9a8031e5a990b6e5c1b535be4",
+          "mode": 420
+        },
+        ".agents/skills/aibl-enroll/SKILL.md": {
+          "sha256": "6151df50e53a83fa3ad8381147c83307a4a1eb3934cfc6a71f9b59dc6cb2c48b",
+          "mode": 420
+        },
+        ".agents/skills/aibl-personalize/SKILL.md": {
+          "sha256": "5d2c00009da5256e3b7196cecd982645582bdc7673b5b28ac66d1ad5e441b455",
+          "mode": 420
+        },
+        ".aibl/template.json": {
+          "sha256": "329571765ca314ad06269c01db18e46ca25bee22b150663a6448feab8d955c0a",
+          "mode": 420
+        },
+        ".claude/skills/aibl-checkpoint/SKILL.md": {
+          "sha256": "1915aa40195d16312088955b70d52340098617d9a8031e5a990b6e5c1b535be4",
+          "mode": 420
+        },
+        ".claude/skills/aibl-enroll/SKILL.md": {
+          "sha256": "6151df50e53a83fa3ad8381147c83307a4a1eb3934cfc6a71f9b59dc6cb2c48b",
+          "mode": 420
+        },
+        ".claude/skills/aibl-personalize/SKILL.md": {
+          "sha256": "5d2c00009da5256e3b7196cecd982645582bdc7673b5b28ac66d1ad5e441b455",
+          "mode": 420
+        }
+      }
+    },
+    {
+      "revision": "913cdf1819610666de51cbe34d5da90080280114",
+      "tree": "bc92e9ab5805e99b2bda5225d1401231b03d225f",
+      "files": {
+        ".agents/skills/aibl-checkpoint/SKILL.md": {
+          "sha256": "1915aa40195d16312088955b70d52340098617d9a8031e5a990b6e5c1b535be4",
+          "mode": 420
+        },
+        ".agents/skills/aibl-enroll/SKILL.md": {
+          "sha256": "77cec26e10028513bd1b4e14cf1d83600ceb1e308b83642dabdef37c3faaf07d",
+          "mode": 420
+        },
+        ".agents/skills/aibl-personalize/SKILL.md": {
+          "sha256": "5d2c00009da5256e3b7196cecd982645582bdc7673b5b28ac66d1ad5e441b455",
+          "mode": 420
+        },
+        ".aibl/template.json": {
+          "sha256": "329571765ca314ad06269c01db18e46ca25bee22b150663a6448feab8d955c0a",
+          "mode": 420
+        },
+        ".claude/skills/aibl-checkpoint/SKILL.md": {
+          "sha256": "1915aa40195d16312088955b70d52340098617d9a8031e5a990b6e5c1b535be4",
+          "mode": 420
+        },
+        ".claude/skills/aibl-enroll/SKILL.md": {
+          "sha256": "77cec26e10028513bd1b4e14cf1d83600ceb1e308b83642dabdef37c3faaf07d",
+          "mode": 420
+        },
+        ".claude/skills/aibl-personalize/SKILL.md": {
+          "sha256": "5d2c00009da5256e3b7196cecd982645582bdc7673b5b28ac66d1ad5e441b455",
+          "mode": 420
+        }
+      }
+    }
+  ]
+}
