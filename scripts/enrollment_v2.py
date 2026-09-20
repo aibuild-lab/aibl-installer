@@ -74,7 +74,7 @@ def git_state(root, runner=command):
     return {'head': git('rev-parse', 'HEAD'), 'branch': git('symbolic-ref', '--quiet', '--short', 'HEAD'),
             'origin': git('remote', 'get-url', 'origin'),
             'index': hashlib.sha256(index.read_bytes()).hexdigest() if index.exists() else None,
-            'diff': hashlib.sha256(git('diff', '--binary', 'HEAD').encode()).hexdigest(),
+            'diff': hashlib.sha256(git('-c', 'diff.autoRefreshIndex=false', 'diff', '--no-ext-diff', '--no-textconv', '--binary', 'HEAD').encode()).hexdigest(),
             'untracked': untracked}
 
 
@@ -117,14 +117,14 @@ def inputs(lock_path, lock_sha256, bundles, root):
     return family
 
 
-def preview(root, product, lock_path, lock_sha256, bundles, *, runner=command, state_root=None):
+def preview(root, product, lock_path, lock_sha256, bundles, *, runner=command, state_root=None, bridge=None):
     require_no_pending_sync(root)
     if product not in ('agent-workforce', 'agent-essentials'):
         raise SetupError('This release supports Workforce and optional lesson-8 Essentials support only.')
     root = Path(root).resolve()
-    current = installed_record(root)
+    current = {'packages': {}} if bridge else installed_record(root)
     user, full = identity(root, runner)
-    family = inputs(lock_path, lock_sha256, bundles, root)
+    family = load_lock(lock_path, lock_sha256, ROOT) if bridge else inputs(lock_path, lock_sha256, bundles, root)
     if product not in family['packages']:
         raise SetupError('Selected program has no independently admitted package in this family.')
     runner(['gh', 'api', 'repos/' + family['packages'][product]['publisher']])
@@ -132,7 +132,13 @@ def preview(root, product, lock_path, lock_sha256, bundles, *, runner=command, s
         return {'status': 'already_connected', 'program': product, 'native_verification': 'pending'}
     contract = connection(bundles, family, product)
     before = git_state(root, runner)
-    comparison = compose(root, bundles, family, [product], preview=True)
+    products = ['agent-workbench', 'workbench-core', product] if bridge else [product]
+    options = {'template_revision': bridge['template_revision']} if bridge else {}
+    if bridge:
+        expected = ('.agents' if bridge['harness'] == 'codex' else '.claude') + '/skills/aibl-workforce/SKILL.md'
+        if expected not in contract['native'][bridge['harness']]:
+            raise SetupError('Workforce is missing the selected client entry skill.')
+    comparison = compose(root, bundles, family, products, preview=True, **options)
     if git_state(root, runner) != before:
         raise SetupError('Work changed while preparing enrollment. Run preview again.')
     if comparison['status'] != 'ready':
@@ -145,6 +151,10 @@ def preview(root, product, lock_path, lock_sha256, bundles, *, runner=command, s
              'family_bundles': str(Path(bundles).resolve()), 'family': family,
              'git_state': before, 'preview': comparison, 'connection': contract,
              'before_marker': snapshot(root, '.aibl/family.json')}
+    if bridge:
+        value['bridge'] = bridge
+        from enrollment_bridge import validate
+        validate(value)
     with setup_lock(state_root, plan_id):
         write(state_root / (plan_id + '.json'), value)
     return {'status': 'previewed', 'plan_id': plan_id, 'program': product, 'preview': comparison,
@@ -152,6 +162,9 @@ def preview(root, product, lock_path, lock_sha256, bundles, *, runner=command, s
 
 
 def finish(root, plan, result):
+    if plan.get('bridge'):
+        from enrollment_bridge import finish as finish_bridge
+        finish_bridge(root, plan)
     current = installed_record(root)
     for product, pin in plan['family']['packages'].items():
         if product in current['packages'] and current['packages'][product] != pin:
@@ -208,6 +221,10 @@ def apply_plan(root, plan_id, *, runner=command, state_root=None, family_lock=No
         user, full = identity(root, runner)
         if full != plan['repository'] or user['login'] != plan['github_username']:
             raise SetupError('GitHub identity changed since preview.')
+        bridge = plan.get('bridge')
+        if bridge:
+            from enrollment_bridge import validate
+            validate(plan)
         family = load_lock(plan['family_lock'], plan['family_sha256'], ROOT)
         if family != plan['family']:
             raise SetupError('Family changed since preview.')
@@ -219,18 +236,26 @@ def apply_plan(root, plan_id, *, runner=command, state_root=None, family_lock=No
             raise SetupError('Enrollment was interrupted. Run package recover, then retry this plan.', 'recovery_required')
         if plan['phase'] == 'installed':
             return finish(root, plan, plan['result'])
-        if plan['phase'] == 'applying' and installed_record(root)['packages'].get(plan['program']) == family['packages'][plan['program']]:
+        if plan['phase'] == 'applying' and under(root, '.aibl/family.json').exists() and installed_record(root)['packages'].get(plan['program']) == family['packages'][plan['program']]:
             result = finish(root, plan, completed_backup(root, plan))
         else:
-            inputs(plan['family_lock'], plan['family_sha256'], plan['family_bundles'], root)
+            if not bridge:
+                inputs(plan['family_lock'], plan['family_sha256'], plan['family_bundles'], root)
             if git_state(root, runner) != plan['git_state']:
                 raise SetupError('Git or student work changed since preview. Create and confirm a new preview.')
-            comparison = compose(root, plan['family_bundles'], family, [plan['program']], preview=True)
+            products = ['agent-workbench', 'workbench-core', plan['program']] if bridge else [plan['program']]
+            options = {'template_revision': bridge['template_revision']} if bridge else {}
+            comparison = compose(root, plan['family_bundles'], family, products, preview=True, **options)
             if comparison != plan['preview']:
                 raise SetupError('Package or local files changed since preview. Create and confirm a new preview.')
             plan['phase'] = 'applying'
             write(path, plan)
-            installed = compose(root, plan['family_bundles'], family, [plan['program']])
+            if bridge:
+                from enrollment_bridge import admit
+                admit(root, plan)
+                if git_state(root, runner) != plan['git_state']:
+                    raise SetupError('Work changed during acquisition. Create and confirm a new preview.')
+            installed = compose(root, plan['family_bundles'], family, products, **options)
             result = finish(root, plan, installed)
         plan['phase'] = 'installed'
         plan['result'] = result

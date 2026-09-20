@@ -40,7 +40,7 @@ def read_association(workbench,engine,repository,*,state_root=None,runner=None):
     return folder,row,value
 
 
-def retain(workbench,repository,engine,distribution,sha256,*,state_root=None,runner=None):
+def retain(workbench,repository,engine,distribution,sha256,*,state_root=None,runner=None,template_revision=None):
     """Reserve admission before setup effects; never replace an earlier tuple."""
     folder=directory(workbench,state_root)
     if not re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9_.-]+',repository):raise SetupError('Verified student repository identity required.')
@@ -49,10 +49,13 @@ def retain(workbench,repository,engine,distribution,sha256,*,state_root=None,run
         _,row,prior=read_association(workbench,engine,repository,state_root=state_root,runner=runner)
         if row['distribution_sha256']!=sha256 or prior!=value:raise SetupError('Setup distribution changed. Resume the original admitted inputs; do not replace the association.')
         return folder,row,value
-    if Path(workbench).exists() or Path(workbench).is_symlink():raise SetupError('Existing workbench has no retained setup admission. Obtain the official independent distribution and explicit family inputs.')
+    if Path(workbench).exists() or Path(workbench).is_symlink():
+        if template_revision is None:raise SetupError('Existing workbench has no retained setup admission. Obtain the official independent distribution and explicit family inputs.')
+        from enrollment_bridge import baseline
+        baseline(workbench,template_revision)
     folder.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     with process_guard(folder.parent/(folder.name+'.lock')):
-        if folder.exists():return retain(workbench,repository,engine,distribution,sha256,state_root=state_root,runner=runner)
+        if folder.exists():return retain(workbench,repository,engine,distribution,sha256,state_root=state_root,runner=runner,template_revision=template_revision)
         stage=Path(tempfile.mkdtemp(prefix='admission-',dir=folder.parent))
         row={'schema_version':'aibl.workbench-distribution/v1','workbench':str(Path(workbench).resolve()),'repository':repository,'engine':str(Path(engine).resolve()),'installer_revision':value['installer']['revision'],'distribution_sha256':sha256,'family_sha256':value['family_sha256'],'admission':'independent official setup input'}
         atomic(stage/'distribution.json',encoded(value),0o600)
