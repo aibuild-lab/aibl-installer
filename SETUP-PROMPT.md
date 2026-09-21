@@ -365,6 +365,7 @@ change preview, and student approval. Read [WORKFORCE-HANDOFF.md](WORKFORCE-HAND
 An older workbench first uses `UPDATE-PROMPT.md` to refresh its skills after
 showing choices. Do not rerun setup, refresh a retained installer, or call the
 historical package-selection CLI as the current Git enrollment route.
+If Workforce is unavailable, other accessible programs may still be listed.
 GitHub repository access and Learn lesson visibility must be checked separately.
 Start a new session in the existing workbench after enrollment, then use
 `aibl-workforce`. Never create another workbench for this step.
