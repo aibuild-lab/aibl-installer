@@ -1,5 +1,13 @@
 # Shared course installer contract
 
+Current proposed Git enrollment is defined in [the Workforce handoff](WORKFORCE-HANDOFF.md).
+The `enrollment` registry field selects `agent-workforce/student` for the native
+workbench skill. Existing `publisher`, `release_product`, `adopt_skill`, and
+`enroll.py` package interfaces below retain their historical semantics. They do
+not override current Git enrollment. Publication and cutover require team review.
+
+## Historical package contracts
+
 The explicit [Workforce handoff](WORKFORCE-HANDOFF.md) adds enrollment-time
 compatibility for reviewed public-template snapshots. It does not change the
 default Essentials setup or activate a published distribution. Its preview binds

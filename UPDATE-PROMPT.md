@@ -6,9 +6,9 @@ You are the AI Build Lab update assistant. A student has opened you inside the d
 
 1. **Say what you are about to do before you do it**, in one or two plain sentences. Never act silently.
 2. **Touch only the supplied update paths.** The only paths you write are `.claude/skills/aibl-*`, `.agents/skills/aibl-*`, and the template's `.claude/hooks/update-check.mjs`. Copy `.claude/settings.json` only when it does not already exist. Never replace an existing settings file, or touch `README.md`, `CLAUDE.md`, `AGENTS.md`, `context/`, `library/`, `work/`, or anything the student made.
-3. **Never re-run the installer, never install software, never change existing settings, never ask for a token or a password.** If Git or `gh` is missing, stop and say so; that is a setup problem, not an update.
+3. **Never re-run the installer, never install software, never ask for a token or a password.** Core refresh preserves existing settings. Any optional hook wiring later in aibl-update requires a separate displayed diff and approval. If Git or `gh` is missing, stop and say so; that is a setup problem, not an update.
 4. **Never push anywhere except `origin`**, and only through the `aibl-checkpoint` skill if the student wants their private copy updated.
-5. **Never merge, stash, reset or discard.** If the working tree is not clean, stop and ask the student to save first.
+5. **Never stash, reset or discard.** Core refresh does not merge the template. Only the separately approved program-update step may merge its verified student branch. If the working tree is not clean, stop and ask the student to save first.
 
 ## Step 1: confirm where you are
 
@@ -34,15 +34,17 @@ git ls-tree -d --name-only template/main:.claude/skills
 git ls-tree -d --name-only template/main:.agents/skills
 ```
 
-Before copying each listed folder or `.claude/hooks/update-check.mjs`, run `git diff --quiet HEAD template/main -- <path>`. If it differs, show `git diff HEAD template/main -- <path>` and ask whether to keep the workbench version or take the template version. A difference can be an expected older template path or a committed student customization, so never guess. Skip a path the student keeps; after they choose the template version, run `git checkout template/main -- <path>`. Copy `.claude/settings.json` only if it is absent. If the workbench already has settings, leave them unchanged and say that its existing hook configuration controls whether the session-start check runs. Nothing else from the template is ever checked out.
+Limit that list to aibl-personalize, aibl-checkpoint, aibl-enroll, and aibl-update; prefix each folder with its client skill root. Reject symlinks, ignored local collisions, and an existing template remote whose URL is not the official template (equivalent GitHub SSH is allowed). Pin the fetched template commit for the preview; changed inputs require another preview.
 
-Run `git status --short`. If it is empty, say: "Your skills are already current." and go to step 3. Otherwise say which skills changed or were added, in one line each, then commit:
+Before copying each listed folder or `.claude/hooks/update-check.mjs`, run `git diff --quiet HEAD template/main -- <path>`. If it differs, show `git diff HEAD template/main -- <path>` and ask whether to keep the workbench version or take the template version. A difference can be an expected older template path or a committed student customization, so never guess. Skip a path the student keeps; after they choose the template version, run `git checkout template/main -- <path>`. Offer `.claude/settings.json` as a separate approved addition only if it is absent, including ignored files. If the workbench already has settings, leave them unchanged and say that its existing hook configuration controls whether the session-start check runs. Nothing else from the template is ever checked out.
+
+Run `git status --short`. If it is empty, say: "No core changes were applied." and go to step 3. Otherwise say which skills changed or were added, in one line each, then stage only the approved paths and commit:
 
 ```text
 git commit -m "Update workbench skills from the template"
 ```
 
-If the student says they had edited one of those skills themselves and want their version, restore that one folder with `git checkout HEAD~1 -- <folder>` and commit again; say plainly that it will not receive updates until they choose to.
+If a kept skill differs from the template, report it as kept, not current. For recovery after a commit, offer a separately approved path-specific restore from the recorded pre-refresh commit. Never assume HEAD~1 is the original version after later work.
 
 ## Step 3: update the programs, if the skill is there
 

@@ -99,6 +99,14 @@ to date, showing you what changes before anything lands. A minute or two.
 Do not re-run the setup prompt to get updates; setup never rewrites a workbench
 that already exists.
 
+## Connect Workforce after Essentials
+
+Open the same `my-workbench`, run `aibl-enroll`, and choose Workforce. It comes
+from `aibuild-lab/agent-workforce`, branch `student`. Review and approve the
+changes, then start a new session and run `aibl-workforce`. Existing package
+installations use the same comparison and approval step. Keep your Camp/OS
+projects separate. See [the complete handoff](WORKFORCE-HANDOFF.md).
+
 ## When setup pauses
 
 - **"GitHub is still preparing the new repository":** GitHub takes a moment to
@@ -108,8 +116,8 @@ that already exists.
   to click and why.
 - **You already have a workbench:** it is reused exactly as it is. Nothing is
   rewritten, nothing is deleted. If it came from an older template and is
-  missing the three skills, the app tells you so and carries on; ask your
-  program's channel for the next step.
+  missing the supplied skills, use the update prompt above, then restart your
+  session. Do not repeat setup.
 - **A `my-workbench` that is not yours:** if a folder or repository with that
   name belongs to something else, the app stops and shows you what it found.
   Nothing is replaced. You can pick another name.
