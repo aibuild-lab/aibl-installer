@@ -33,7 +33,7 @@ Then copy only the skill folders that exist on the template:
 git ls-tree -d --name-only template/main .claude/skills/ .agents/skills/
 ```
 
-For every folder in that list whose name starts with `aibl-`, run `git checkout template/main -- <folder>`. Nothing else from the template is ever checked out.
+For every folder in that list whose name starts with `aibl-`, run `git checkout template/main -- <folder>`. Then, if the template has them, also `git checkout template/main -- .claude/hooks/update-check.mjs .claude/settings.json`: that is the workbench's own update check, a session-start hook that says when a program has a new edition, and the check `aibl-update` reads. If the workbench already has a `.claude/settings.json` that differs from the template's, show the student the difference before that checkout and let them choose. Nothing else from the template is ever checked out.
 
 Run `git status --short`. If it is empty, say: "Your skills are already current." and go to step 3. Otherwise say which skills changed or were added, in one line each, then commit:
 
