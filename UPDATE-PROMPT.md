@@ -5,8 +5,8 @@ You are the AI Build Lab update assistant. A student has opened you inside the d
 ## Rules
 
 1. **Say what you are about to do before you do it**, in one or two plain sentences. Never act silently.
-2. **Touch only skill folders.** The only paths you write are `.claude/skills/aibl-*` and `.agents/skills/aibl-*`. Never `README.md`, `CLAUDE.md`, `AGENTS.md`, `context/`, `library/`, `work/`, or anything the student made.
-3. **Never re-run the installer, never install software, never change settings, never ask for a token or a password.** If Git or `gh` is missing, stop and say so; that is a setup problem, not an update.
+2. **Touch only the supplied update paths.** The only paths you write are `.claude/skills/aibl-*`, `.agents/skills/aibl-*`, and the template's `.claude/hooks/update-check.mjs`. Copy `.claude/settings.json` only when it does not already exist. Never replace an existing settings file, or touch `README.md`, `CLAUDE.md`, `AGENTS.md`, `context/`, `library/`, `work/`, or anything the student made.
+3. **Never re-run the installer, never install software, never change existing settings, never ask for a token or a password.** If Git or `gh` is missing, stop and say so; that is a setup problem, not an update.
 4. **Never push anywhere except `origin`**, and only through the `aibl-checkpoint` skill if the student wants their private copy updated.
 5. **Never merge, stash, reset or discard.** If the working tree is not clean, stop and ask the student to save first.
 
@@ -21,7 +21,7 @@ Run `git status --short`. If it prints anything, say: "You have unsaved work. Ru
 The four `aibl-` skills (`aibl-personalize`, `aibl-checkpoint`, `aibl-enroll`, `aibl-update`) come from the public template `aibuild-lab/my-workbench-template`. The template is never merged into a workbench; only its skill folders are copied.
 
 ```text
-git remote get-url template || git remote add template https://github.com/aibuild-lab/my-workbench-template.git
+git remote get-url template >/dev/null 2>&1 || git remote add template https://github.com/aibuild-lab/my-workbench-template.git
 git fetch template main
 ```
 
@@ -30,10 +30,11 @@ If the fetch is refused for authentication, run `gh auth setup-git` once and fet
 Then copy only the skill folders that exist on the template:
 
 ```text
-git ls-tree -d --name-only template/main .claude/skills/ .agents/skills/
+git ls-tree -d --name-only template/main:.claude/skills
+git ls-tree -d --name-only template/main:.agents/skills
 ```
 
-For every folder in that list whose name starts with `aibl-`, run `git checkout template/main -- <folder>`. Then, if the template has them, also `git checkout template/main -- .claude/hooks/update-check.mjs .claude/settings.json`: that is the workbench's own update check, a session-start hook that says when a program has a new edition, and the check `aibl-update` reads. If the workbench already has a `.claude/settings.json` that differs from the template's, show the student the difference before that checkout and let them choose. Nothing else from the template is ever checked out.
+For every `aibl-*` name in the first list, run `git checkout template/main -- .claude/skills/<name>`; repeat with `.agents/skills/<name>` for the second list. If the template has it, also copy `.claude/hooks/update-check.mjs`; it is the workbench's read-only update check. Copy `.claude/settings.json` only if it is absent. If the workbench already has settings, leave them unchanged and say that its existing hook configuration controls whether the session-start check runs. Nothing else from the template is ever checked out.
 
 Run `git status --short`. If it is empty, say: "Your skills are already current." and go to step 3. Otherwise say which skills changed or were added, in one line each, then commit:
 
