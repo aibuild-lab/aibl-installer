@@ -1,4 +1,64 @@
-# Connect an Essentials workbench to Workforce
+# From Essentials to Workforce
+
+Review candidate: this PR does not activate a cutover or publish course files.
+After team approval, current enrollment uses `aibuild-lab/agent-workforce`,
+branch `student`, in the student's existing private `my-workbench`.
+
+## Student steps
+
+1. **No workbench yet:** complete [Essentials setup](START-HERE.md), then open
+   the resulting `my-workbench` in your chosen app.
+2. **Already set up:** open that same folder. Use the [update prompt](START-HERE.md#later-update-your-workbench)
+   if its enrollment/update skills are old. Review and approve each replacement;
+   preserve your customizations. Do not rerun setup.
+3. Run `aibl-enroll` (slash in Claude, dollar sign in Codex), choose Workforce,
+   inspect the additions and approve the exact preview. Your GitHub account
+   must be able to read the repository; Learn visibility is a separate check.
+4. Start a new session in that folder, run `aibl-workforce`, and follow the
+   installed orientation. A real named-agent response verifies execution;
+   seeing files alone does not.
+5. Later, use `aibl-update`. It describes incoming changes and asks before
+   applying them. A checkpoint to your private repository is a separate choice.
+
+## Existing package installations
+
+Use the same enrollment skill to compare the package files with the Git branch.
+Identical overlaps need no replacement decision. Different files require a
+specific keep, take, or combine choice before merging. Unfinished work, ignored
+file collisions, wrong remotes, or unexpected file boundaries stop for review.
+Keep existing settings, personal folders, root guidance and package receipts.
+Once connected by Git, old package hashes describe history; do not run package
+repair/update against the Git-managed course files.
+
+## Routing and troubleshooting
+
+`course-options.json` explicitly declares Workforce's current `enrollment`
+repository and branch. Its `publisher`, `release_product`, and `adopt_skill`
+remain the historical package interface. An older retained registry without
+`enrollment` must not override the current skill's Git destination. Do not pull
+or rewrite retained installers to change that history. Historical `enroll.py`
+package commands below remain available only for their original pinned routes.
+
+- Wrong folder: open `my-workbench`, not the installer or a course-source clone.
+- Missing skill: use the official update prompt, then start a new session.
+- Repository unavailable: inspect the signed-in GitHub username and contact the
+  course team yourself. A 404 does not establish invitation timing.
+- Missing student branch or failed fetch: stop; never enroll from main or a stale ref.
+- Existing customizations: preview choices; never automatically stash or discard.
+- Agent not discovered: retain the error and installed revision for support;
+  do not copy agents into global folders as an improvised repair.
+
+See [the team review packet](docs/essentials-workforce-review.md) for evidence,
+remaining acceptance checks and proposed rollout. Nothing is merged or activated
+by preparing these PRs.
+
+---
+
+# Historical verified-package bridge
+
+The following procedure retains its original independently admitted distribution
+contract. It is not the current Git-enrollment instruction.
+
 
 State: reviewable source bridge. No accepted distribution is published or
 activated by these changes. If the course team has not supplied the approved

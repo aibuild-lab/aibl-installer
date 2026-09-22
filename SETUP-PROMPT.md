@@ -359,14 +359,13 @@ End with one clean message, real versions filled in:
 
 ## Later program selection
 
-The `aibl-enroll` skill inside the workbench runs `~/GitHub/aibl-installer/scripts/enroll.py`
-with `--workbench` naming the workbench folder. `--check --json` is read-only: it asks
-GitHub which program repositories the student's account can read and changes nothing.
-Before the student's account has access to a program's repository, that program
-will not appear; other accessible programs may still be listed. Repository access
-follows the course's release schedule, which can differ from the first live session.
-Direct the student to their cohort on the Learn dashboard at
-https://learn.aibuildlab.com/ for its release date, time, and access status. Selection records intent and
-names the program's own next step; installing a program is that program's separate,
-confirmed step. Do not pull a newer installer to run it, and never delete or replace
-anything in the workbench.
+Use the workbench's current `aibl-enroll` skill to connect Workforce from
+`aibuild-lab/agent-workforce`, branch `student`, after access verification,
+change preview, and student approval. Read [WORKFORCE-HANDOFF.md](WORKFORCE-HANDOFF.md).
+An older workbench first uses `UPDATE-PROMPT.md` to refresh its skills after
+showing choices. Do not rerun setup, refresh a retained installer, or call the
+historical package-selection CLI as the current Git enrollment route.
+If Workforce is unavailable, other accessible programs may still be listed.
+GitHub repository access and Learn lesson visibility must be checked separately.
+Start a new session in the existing workbench after enrollment, then use
+`aibl-workforce`. Never create another workbench for this step.

@@ -59,7 +59,9 @@ every folder you ever open.
 - The frozen cohort route (hash-pinned engine and packages, for qualification
   runs; not the student default): [STANDALONE-WORKBENCH.md](STANDALONE-WORKBENCH.md),
   [FAMILY-DELIVERY.md](FAMILY-DELIVERY.md), [FROZEN-FAMILY-DISTRIBUTION.md](FROZEN-FAMILY-DISTRIBUTION.md)
-- Student-owned updates after enrollment: [STUDENT-UPDATES.md](STUDENT-UPDATES.md)
+- Current enrollment and Git updates: [WORKFORCE-HANDOFF.md](WORKFORCE-HANDOFF.md)
+- Team-review evidence and rollout proposal: [transition review](docs/essentials-workforce-review.md)
+- Historical package updates: [STUDENT-UPDATES.md](STUDENT-UPDATES.md)
 - What this repository promises each program: [COURSE-INSTALLER-CONTRACT.md](COURSE-INSTALLER-CONTRACT.md)
 - Facilitators, end-to-end test and real-device walkthrough: [E2E-TESTING.md](E2E-TESTING.md)
 - Frozen cohort distributions (historical route): [PINNED-COURSE-DELIVERY.md](PINNED-COURSE-DELIVERY.md)
