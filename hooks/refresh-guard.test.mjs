@@ -247,7 +247,7 @@ check("JSON check reports deterministic per-client disk health",
   && parsedHealthyJson.runtime.observableFromInstaller === false
   && parsedHealthyJson.ownership.status === "installer-managed"
   && parsedHealthyJson.ownership.receipt.owner === "aibl-installer"
-  && parsedHealthyJson.ownership.receipt.source.location === fs.realpathSync(repo)
+  && parsedHealthyJson.ownership.receipt.source.location === fs.realpathSync(repo).replaceAll("\\", "/")
   && parsedHealthyJson.ownership.receipt.clients.join(",") === "claude,codex");
 const receiptPath = path.join(home, ".claude", "hooks", "aibl-installer-guard-receipt.json");
 fs.writeFileSync(receiptPath, "{broken");
