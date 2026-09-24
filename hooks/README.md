@@ -69,7 +69,10 @@ class deterministically, whether or not the model "remembers." (Anthropic issue 
   verifies every one against `secrets-guard.manifest.json` (LF-normalized sha256), stages and
   atomically swaps only what changed with backup and rollback, wires `~/.claude/settings.json`
   through `install.mjs`, and writes `~/.codex/hooks.json` (user level, strict schema: it strips a
-  stray `description` key that would make Codex load no hooks) plus per-platform launchers.
+  stray `description` key that would make Codex load no hooks) plus per-platform launchers. On
+  Windows each launcher is registered as `cmd /d /c "<launcher>"`: Codex runs hook commands through
+  PowerShell there, which splits a bare path at a space in the account folder name (`C:\Users\First
+  Last`), so the hook failed to launch and Codex ran the command unguarded.
   `--check` reports on-disk health; `--session-check` prints a one-line warning for a session
   hook. Neither can observe runtime activation.
 - **`codex-secrets-guard.mjs`** - Codex `PreToolUse` adapter. Runs the canonical guard beside it

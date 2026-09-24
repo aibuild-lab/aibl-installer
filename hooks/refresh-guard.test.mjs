@@ -165,11 +165,27 @@ check("every Claude hook command runs the stable Node path (canonical guard via 
     claudeSettings.hooks[event].every((group) => group.hooks.every((hook) => hookNodeOf(hook.command) === expectedNode))));
 const codexHooksPath = path.join(home, ".codex", "hooks.json");
 const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, "utf8"));
-// Codex launches `command` as ONE executable path with no shell parsing, so these register a
+// Codex runs `command` through the session's shell (PowerShell on Windows), so these register a
 // platform launcher (.cmd / .sh) rather than the adapter directly. A quoted `"<node>" "<script>"`
-// value names a program that does not exist: the hook fails to spawn and Codex FAILS OPEN.
+// value fails to launch there, and Codex FAILS OPEN.
 const launcherExt = process.platform === "win32" ? ".cmd" : ".sh";
 const codexLauncher = (base) => `${base}${launcherExt}`;
+// Launch a hooks.json command the way Codex does: `cmd /C "<command>"` (raw) when no shell is known,
+// `<powershell> -NoProfile -Command <command>` for a Windows PowerShell session, `sh -c` elsewhere.
+const CODEX_HOOK_SHELLS = process.platform === "win32"
+  ? {
+      "cmd /C": (command, input) => spawnSync("cmd.exe", ["/C", `"${command}"`], { input, encoding: "utf8", windowsVerbatimArguments: true }),
+      "Windows PowerShell": (command, input) => spawnSync("powershell.exe", ["-NoProfile", "-Command", command], { input, encoding: "utf8" }),
+      "PowerShell 7": (command, input) => spawnSync("pwsh.exe", ["-NoProfile", "-Command", command], { input, encoding: "utf8" }),
+    }
+  : { "sh -c": (command, input) => spawnSync("sh", ["-c", command], { input, encoding: "utf8" }) };
+// The canonical guard is stubbed to allow here, so leak payloads use a rule the ADAPTER owns (its
+// AWS credential scan). The value is assembled from fragments and is not a real key.
+const leakPayload = JSON.stringify({ tool_name: "Bash", tool_input: { command: `echo ${"ASIA" + "ABCDEFGH12345678"}` } });
+const deniedThrough = (result) => {
+  if (result.error || result.status !== 0 || !result.stdout) return false;
+  try { return JSON.parse(result.stdout)?.hookSpecificOutput?.permissionDecision === "deny"; } catch { return false; }
+};
 check("Codex supplemental PreToolUse covers every local tool path",
   codexHooks.hooks.PreToolUse.some((group) =>
     group.matcher === "*"
@@ -178,9 +194,13 @@ check("Codex PostToolUse uses the names-only compatibility adapter",
   codexHooks.hooks.PostToolUse.some((group) =>
     group.matcher === "*"
     && group.hooks?.[0]?.command?.includes(codexLauncher("codex-secrets-tripwire"))));
-check("Codex hook command is a single UNQUOTED path (Codex does not shell-parse it)",
-  codexHooks.hooks.PreToolUse.every((group) =>
-    group.hooks.every((hook) => typeof hook.command === "string" && !/^\s*"/.test(hook.command))));
+check(process.platform === "win32"
+    ? "Codex hook command is `cmd /d /c \"<launcher>\"` (survives PowerShell and a space in the path)"
+    : "Codex hook command is the bare launcher path",
+  ["PreToolUse", "PostToolUse"].every((event) => codexHooks.hooks[event].every((group) =>
+    group.hooks.every((hook) => process.platform === "win32"
+      ? /^cmd \/d \/c "[^"]+\.cmd"$/.test(hook.command)
+      : typeof hook.command === "string" && !/^\s*"/.test(hook.command)))));
 check("Codex launcher execs the stable Node path", (() => {
   const p = path.join(home, ".codex", "hooks", codexLauncher("codex-secrets-guard"));
   // The launcher body quotes the path as the OS spells it; compare on forward slashes.
@@ -197,28 +217,15 @@ check("Codex launcher exists on disk and invokes its adapter", (() => {
 // on-disk health check passes, and the guard simply never runs. Keep this file schema-exact.
 check("Codex hooks.json carries no top-level field other than `hooks`",
   JSON.stringify(Object.keys(codexHooks)) === JSON.stringify(["hooks"]));
-// The regression test that actually matters: drive the FULL chain the way Codex does, by executing
-// the registered launcher path with a leak payload on stdin. Proves the guard can be REACHED, which
-// no on-disk hash check can. Codex sends Claude's dialect (tool_name "Bash", command a string).
-// This harness stubs the canonical guard to always allow, so the payload uses a rule the ADAPTER
-// itself owns (its AWS credential scan). Value is assembled from fragments and is not a real key.
-check("leak payload through the registered launcher is DENIED (end-to-end chain)", (() => {
-  const launcherPath = codexHooks.hooks.PreToolUse[0].hooks[0].command;
-  const fakeSessionKeyId = "ASIA" + "ABCDEFGH12345678";
-  // Node cannot exec a .cmd without a shell on Windows (EINVAL), so this proves the
-  // launcher -> node -> adapter -> deny chain, not Codex's own spawn. Codex's ability to launch the
-  // launcher is verified live: on 0.145.0 (Windows and macOS) the quoted two-token form yields
-  // `hook: PreToolUse Failed` and this launcher form yields `hook: PreToolUse Blocked`.
-  const probe = spawnSync(launcherPath, [], {
-    input: JSON.stringify({ tool_name: "Bash", tool_input: { command: `echo ${fakeSessionKeyId}` } }),
-    encoding: "utf8",
-    shell: process.platform === "win32",
-  });
-  if (!probe.stdout) return false;
-  try {
-    return JSON.parse(probe.stdout)?.hookSpecificOutput?.permissionDecision === "deny";
-  } catch { return false; }
-})());
+// The regression test that actually matters: drive the FULL chain the way Codex does, by running the
+// registered command through each shell Codex may use, with a leak payload on stdin. Proves the
+// guard can be REACHED, which no on-disk hash check can. Codex sends Claude's dialect (tool_name
+// "Bash", command a string). A shell that is not installed here is reported and skipped.
+for (const [shell, launch] of Object.entries(CODEX_HOOK_SHELLS)) {
+  const probe = launch(codexHooks.hooks.PreToolUse[0].hooks[0].command, leakPayload);
+  if (probe.error?.code === "ENOENT") { console.log(`skip - ${shell} is not installed on this machine`); continue; }
+  check(`leak payload through the registered hook command is DENIED under ${shell} (end-to-end chain)`, deniedThrough(probe));
+}
 check("installer ran once", installerRuns() === 1);
 check("first run verifies user-global on-disk scope", /on-disk installation verified/.test(a1.stdout));
 check("installer distinguishes runtime activation from disk health",
@@ -481,6 +488,47 @@ check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
   check("--codex installs the Codex guard", x.status === 0 && fs.existsSync(path.join(only, ".codex", "hooks.json")));
   const both = runOnly(["--check", "--json"]);
   check("after both opt-ins, the no-flag check sees both as healthy", both.status === 0 && !/not selected|incomplete/.test(both.stdout));
+}
+
+// --- a Windows account folder whose name has a space (student report 09-24-2026) ---
+// Codex runs hook commands through PowerShell on Windows. The old bare launcher path was split at
+// the space, the hook failed to launch (`hook: PreToolUse Failed`), and Codex ran the tool call
+// unguarded. Every other check in this file uses a home path without a space, so none caught it.
+if (process.platform === "win32") {
+  const spaced = path.join(root, "First Last");
+  fs.mkdirSync(spaced, { recursive: true });
+  writeManifest("good", STUB);
+  const runSpaced = (flags) => spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), ...flags], {
+    env: { ...process.env, HOME: spaced, USERPROFILE: spaced, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  check("--codex installs under an account folder with a space", runSpaced(["--codex"]).status === 0);
+  const spacedHooksPath = path.join(spaced, ".codex", "hooks.json");
+  const spacedHooks = JSON.parse(fs.readFileSync(spacedHooksPath, "utf8"));
+  const preCommand = spacedHooks.hooks.PreToolUse[0].hooks[0].command;
+  const postCommand = spacedHooks.hooks.PostToolUse[0].hooks[0].command;
+  for (const [shell, launch] of Object.entries(CODEX_HOOK_SHELLS)) {
+    const pre = launch(preCommand, leakPayload);
+    if (pre.error?.code === "ENOENT") { console.log(`skip - ${shell} is not installed on this machine`); continue; }
+    check(`space in account folder: leak is DENIED through the PreToolUse command under ${shell}`, deniedThrough(pre));
+    const post = launch(postCommand, JSON.stringify({ tool_name: "Bash", tool_response: { stdout: "ordinary output" } }));
+    check(`space in account folder: the PostToolUse command launches under ${shell}`, post.status === 0);
+  }
+  // Pin the bug itself, so a future "simplification" back to the bare path fails here.
+  const bareLauncher = path.join(spaced, ".codex", "hooks", codexLauncher("codex-secrets-guard")).replaceAll("\\", "/");
+  check("the old bare-path form FAILS under Windows PowerShell with a space (the bug this guards against)",
+    !deniedThrough(CODEX_HOOK_SHELLS["Windows PowerShell"](bareLauncher, leakPayload)));
+  // An install made before the fix is flagged by --check and repaired by --codex.
+  const oldShape = structuredClone(spacedHooks);
+  oldShape.hooks.PreToolUse[0].hooks[0].command = bareLauncher;
+  fs.writeFileSync(spacedHooksPath, JSON.stringify(oldShape, null, 2) + "\n");
+  const stale = runSpaced(["--check", "--codex"]);
+  check("--check flags the old Windows form and says how to repair it",
+    stale.status !== 0 && /old Windows form/.test(stale.stdout + stale.stderr));
+  runSpaced(["--codex"]);
+  const repaired = JSON.parse(fs.readFileSync(spacedHooksPath, "utf8"));
+  check("--codex repairs the old Windows form in place, with exactly one guard hook",
+    repaired.hooks.PreToolUse.length === 1 && repaired.hooks.PreToolUse[0].hooks[0].command === preCommand);
+  check("after repair, --check --codex is healthy", runSpaced(["--check", "--codex"]).status === 0);
 }
 
 check("unpinned error says it is not pinned to a release", /not pinned to a released version/.test(c.stderr));

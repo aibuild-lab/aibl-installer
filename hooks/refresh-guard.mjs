@@ -499,12 +499,10 @@ function installCodexHooks(hookNode) {
     if (!Array.isArray(current)) {
       fail(`~/.codex/hooks.json hooks.${event} must be an array. Fix it, then re-run; it was not overwritten.`);
     }
-    // Codex launches `command` as a SINGLE executable path; it does not shell-parse it the way
-    // Claude Code does. A Claude-style `"<node>" "<script>"` value therefore names a program that
-    // does not exist, the hook fails to spawn, and Codex FAILS OPEN: it reports
-    // `hook: PreToolUse Failed` and runs the tool call anyway. Point it at one wrapper instead.
-    // Because the value is not tokenized, a path containing spaces is safe unquoted.
-    const command = normalizePath(writeCodexLauncher(script, hookNode));
+    // Register one wrapper script per hook, launched in the form codexHookCommand() explains. A
+    // Claude-style `"<node>" "<script>"` value fails to launch under Codex, and Codex FAILS OPEN:
+    // it reports `hook: PreToolUse Failed` and runs the tool call anyway.
+    const command = codexHookCommand(writeCodexLauncher(script, hookNode));
     const canonicalIndex = current.findIndex((group) =>
       group?.matcher === matcher
       && Array.isArray(group.hooks)
@@ -571,21 +569,34 @@ function installCodexHooks(hookNode) {
   console.log(`  PostToolUse(codex-secrets-tripwire.mjs): ${postStatus}`);
 }
 
-// Codex launches a hook `command` as ONE executable path with no shell parsing, so the adapter
-// cannot be invoked as `"<node>" "<script>.mjs"`. Emit a tiny platform launcher that execs Node on
-// the adapter, and register THAT. Verified against codex-cli 0.145.0 on Windows and macOS: the
-// quoted two-token form yields `hook: PreToolUse Failed` and Codex then FAILS OPEN, while a single
-// launcher path yields `hook: PreToolUse Blocked` on a real leak.
+// Codex runs a hook `command` through the session's shell (codex-rs core session/mod.rs,
+// build_hooks_config): Windows PowerShell on a default Windows install, `cmd /C` when no shell is
+// known, the user's shell on macOS. The adapter is therefore wrapped in a tiny platform launcher
+// that execs Node on it, and the launcher is what gets registered. On codex-cli 0.145.0 the quoted
+// two-token `"<node>" "<script>.mjs"` form yielded `hook: PreToolUse Failed`, which is PowerShell
+// refusing two adjacent strings, while a launcher path yielded `hook: PreToolUse Blocked`.
 export function codexLauncherName(script) {
   const base = script.replace(/\.mjs$/, "");
   return process.platform === "win32" ? `${base}.cmd` : `${base}.sh`;
+}
+
+// The hooks.json `command` value for a launcher. On Windows a bare path is not enough: PowerShell
+// splits it at a space, so `C:/Users/First Last/.codex/hooks/x.cmd` runs a program named
+// `C:/Users/First`, the hook fails, and Codex runs the tool call unguarded (student report
+// 09-24-2026, codex-cli 0.156.1, a Windows account name with a space). Quoting alone does not help,
+// because PowerShell prints a quoted string instead of running it. `cmd /d /c "<launcher>"` launches
+// under cmd, Windows PowerShell and PowerShell 7 alike, with or without a space; `/d` skips cmd's
+// AutoRun, which could otherwise print text into the hook's JSON reply. macOS account folders cannot
+// contain a space, so the bare path stays there.
+export function codexHookCommand(launcher) {
+  return process.platform === "win32" ? `cmd /d /c "${launcher}"` : normalizePath(launcher);
 }
 
 function writeCodexLauncher(script, hookNode) {
   const launcher = path.join(codexHooksDir, codexLauncherName(script));
   const adapter = path.join(codexHooksDir, script);
   const node = hookNode;
-  // Quote inside the launcher (a real shell parses this), never in hooks.json (Codex does not).
+  // Quote inside the launcher, which a shell parses; hooks.json takes the form codexHookCommand gives.
   const body = process.platform === "win32"
     ? `@echo off\r\n"${node}" "${adapter}" %*\r\n`
     : `#!/bin/sh\nexec "${node}" "${adapter}" "$@"\n`;
@@ -606,9 +617,9 @@ function writeCodexLauncher(script, hookNode) {
   return launcher;
 }
 
-// The Codex side registers a single unquoted launcher path, so it cannot reuse verifyHook (which
-// requires the Claude `"<node>" "<script>"` shape). Assert the launcher is registered, absolute,
-// present on disk, and actually points at the adapter it claims to.
+// The Codex side registers a launcher in codexHookCommand's form, so it cannot reuse verifyHook
+// (which requires the Claude `"<node>" "<script>"` shape). Assert the launcher is registered in
+// exactly that form, present on disk, and actually points at the adapter it claims to.
 function verifyCodexHook(settings, event, script, matcher, issues) {
   const launcherName = codexLauncherName(script);
   const groups = settings.hooks?.[event];
@@ -629,13 +640,17 @@ function verifyCodexHook(settings, event, script, matcher, issues) {
     return;
   }
   const command = group.hooks[0].command;
-  if (typeof command !== "string" || /^\s*"/.test(command)) {
-    // A quoted value is the pre-fix shape; Codex would fail to launch it and then fail open.
-    issues.push(`User-level ${event} hook must be a single unquoted launcher path, not a quoted command line.`);
+  const launcherPath = path.join(codexHooksDir, launcherName);
+  if (typeof command !== "string") {
+    issues.push(`User-level ${event} ${launcherName} hook has no command.`);
     return;
   }
-  if (!isAbsolutePortable(command) || normalizePath(command) !== normalizePath(path.join(codexHooksDir, launcherName))) {
-    issues.push(`User-level ${event} ${launcherName} hook points to the wrong path.`);
+  if (normalizePath(command) !== normalizePath(codexHookCommand(launcherPath))) {
+    // The bare path is the pre-09-24-2026 Windows shape: it fails to launch whenever the account
+    // folder has a space, and Codex then fails open. Anything else is a wrong path or form.
+    issues.push(normalizePath(command) === normalizePath(launcherPath)
+      ? `User-level ${event} ${launcherName} hook uses the old Windows form, which fails when the account folder name has a space. Re-run with --codex to repair it.`
+      : `User-level ${event} ${launcherName} hook points to the wrong path or uses the wrong form.`);
     return;
   }
   const onDisk = readIfExists(path.join(codexHooksDir, launcherName));
