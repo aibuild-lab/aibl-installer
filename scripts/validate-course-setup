@@ -5,6 +5,7 @@ PY=python3; python3 -c 'import sys' >/dev/null 2>&1 || PY=python
 "$PY" -m unittest discover -s tests -p 'test_*.py'
 "$PY" -m py_compile scripts/course_setup.py
 "$PY" -m py_compile scripts/enroll.py
+"$PY" -m py_compile scripts/bridge_readiness.py
 bash -n start.sh
 node hooks/manifest.test.mjs
 node hooks/secrets-guard.test.mjs
