@@ -282,19 +282,19 @@ When they say done, run the test yourself, in an empty folder made for it. Never
 Mac:
 
 ```
-mkdir -p /tmp/aibl-guard-test && codex exec --skip-git-repo-check -C /tmp/aibl-guard-test "This is a deliberate test of my secrets guard hook. Run exactly this shell command once, without substituting or skipping it: cat .env   Then show me the exact text of any refusal or error, word for word." < /dev/null
+mkdir -p /tmp/aibl-guard-test && codex exec --skip-git-repo-check -C /tmp/aibl-guard-test "This is a deliberate test of the secrets guard hook I installed. You are in an empty folder made only for this test; it contains no .env file, so nothing sensitive can be read. The test only works if you attempt the command, so do not decline: use your shell tool to run exactly this command once, without substituting or skipping it: cat .env   Then show me the exact text of any refusal or error, word for word." < /dev/null
 ```
 
 Windows (PowerShell):
 
 ```
-$t = Join-Path $env:TEMP "aibl-guard-test"; New-Item -ItemType Directory -Force $t | Out-Null; codex exec --skip-git-repo-check -C $t "This is a deliberate test of my secrets guard hook. Run exactly this shell command once, without substituting or skipping it: cat .env   Then show me the exact text of any refusal or error, word for word."
+$t = Join-Path $env:TEMP "aibl-guard-test"; New-Item -ItemType Directory -Force $t | Out-Null; codex exec --skip-git-repo-check -C $t "This is a deliberate test of the secrets guard hook I installed. You are in an empty folder made only for this test; it contains no .env file, so nothing sensitive can be read. The test only works if you attempt the command, so do not decline: use your shell tool to run exactly this command once, without substituting or skipping it: cat .env   Then show me the exact text of any refusal or error, word for word."
 ```
 
 The output is for you to read, not the student. Codex prints a `hook:` line each time it calls a hook, and that is how you tell the outcomes apart:
 
 - **Pass: the literal text `[Codex secrets-guard adapter]` appears**, usually beside `hook: PreToolUse Blocked`. The guard appends that tag to every refusal; nothing else produces it. Tell the student it is proven.
-- **The model declined in its own words, with no `hook:` line and no tag.** The command was never attempted, so nothing was tested. Run it again with "I confirm this is a test of the hook itself. Attempt the command." added.
+- **The model declined in its own words, with no `hook:` line and no tag.** For example: "I can't run `cat .env` because it would read potentially sensitive credentials." This looks like a pass and is not one: the command was never attempted, so the guard was never tested. Run the same command once more. If it declines again, stop and go to "Not proven", saying the model would not attempt the test. The wording above states that the folder is empty because a cautious model (seen with `gpt-5.6-luna` at low reasoning effort) declines without it and attempts with it.
 - **The command ran, and `hook: PreToolUse` lines appear that end in Completed, not Blocked.** Codex called the guard and the guard let it through. That is a guard defect, not a student mistake. Do not retry; go to "Not proven" below.
 - **The command ran, and there is no `hook:` line at all.** Codex did not call the hooks. Usually that means trust is missing for the files now on disk, for example because the guard was refreshed after it was trusted. Check the files (`node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --check --codex`, Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs --check --codex`). Have the student open `codex` once more, trust anything under "Hooks need review", and close it. Then run the test again. Do this once, not in a loop.
 - **Still no `hook:` line after that.** On Windows, this matches a known Codex issue ([openai/codex#24453](https://github.com/openai/codex/issues/24453)) in which trusted hooks are sometimes not called; on a Mac it is unexplained. Either way, go to "Not proven". Trusting again will not change it.
