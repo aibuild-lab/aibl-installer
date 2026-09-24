@@ -1,5 +1,9 @@
 # AIBL Installer changes
 
+## 2026-09-24
+
+- **Secrets guard: Windows shells are unwrapped, and the Windows read verbs apply under Codex's `Bash` label.** A Windows student on Codex CLI 0.156.1 reported that the Codex canary (`cat .env`) ran instead of being refused, and that Codex showed it as `pwsh.exe -Command 'cat .env'`. Replayed against the pinned guard, every Windows-wrapped form was allowed: `pwsh`/`powershell -Command`, `-EncodedCommand`, Windows PowerShell's positional command, `cmd /c`, and `Invoke-Expression`. `secrets-guard.js` now unwraps each one and inspects the inner command recursively, like `bash -c`. It also closes camp-hq **W-#234**. Codex on Windows labels its PowerShell shell `Bash`, so `type .env`, `Get-Content .env` and `Get-ChildItem Env:` used to pass. The Windows readers and `Env:` rules now apply under either tool name. W-#234's local compensating hook (`codex-windows-verb-guard`) can be retired on machines that have it. The test table gains 37 cases, 26 deny and 11 allow. Replaying 24,084 unique real Bash and PowerShell commands through the old and new guard changed exactly one verdict: a heredoc commit body that named `[System.Environment]::GetEnvironmentVariables()` in prose. Under the Bash label, the two `Env:` text rules now match only where a command can begin, and that case is pinned as an allow. Manifest re-pinned for `secrets-guard.js` only. Not fixable here, now documented in `hooks/README.md`: Codex on Windows sometimes does not invoke `PreToolUse` at all ([openai/codex#24453](https://github.com/openai/codex/issues/24453)). When that happens, no guard change helps, and the canary fails even though the hooks are trusted.
+
 ## 2026-09-19
 
 - Six fixes from the first real Mac run of the paste route (a team member on a Homebrew machine, 09-19). None changes the install flow or a pinned guard file.

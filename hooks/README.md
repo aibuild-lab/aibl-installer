@@ -44,8 +44,11 @@ class deterministically, whether or not the model "remembers." (Anthropic issue 
   `Get-Content`/`gc`/`type`/`Select-String` reads of secret files, while allowing `$env:NAME`
   single reads and `ls $env:VAR` path uses. Command inspection is token-based and recursive, so a
   runtime-injection wrapper (`op run` / `infisical run`), a path-qualified command
-  (`/usr/bin/env`), and a nested shell (`bash -c '<cmd>'`) are all vetted without dropping any
-  sibling segment. It also blocks a literal vendor-shaped key embedded in a shell command
+  (`/usr/bin/env`), and a nested shell (`bash -c '<cmd>'`, `pwsh -Command '<cmd>'`,
+  `powershell -EncodedCommand <base64>`, `cmd /c <cmd>`, `Invoke-Expression '<cmd>'`) are all
+  vetted without dropping any sibling segment. The Windows read verbs and `Env:` rules also apply
+  under the Bash tool name, because Codex on Windows labels its PowerShell shell `Bash`
+  (camp-hq W-#234). It also blocks a literal vendor-shaped key embedded in a shell command
   (`printf`, heredoc, `node -e writeFileSync`, inline `Authorization: Bearer …`) and - via the
   `Write`/`Edit`/`MultiEdit`/`NotebookEdit` matcher - a real key written straight into a file.
   Direct `infisical dynamic-secrets` and `infisical pam` invocations are denied because they can
@@ -101,6 +104,16 @@ hook. Two consequences follow from it being a hash:
 - **Headless Codex can never be trusted this way.** `codex exec`, schedulers, and CI have no
   screen, so they take the "Continue without trusting (hooks won't run)" branch every time. Hooks
   are not a secret boundary for automation; keep secrets out of the environment there instead.
+
+**On some Windows setups, Codex does not call a trusted hook at all.** Upstream issue
+[openai/codex#24453](https://github.com/openai/codex/issues/24453) (open, last reproduced on
+codex-cli 0.154.0 on 09-23-2026) reports a trusted, active `PreToolUse` hook receiving no call
+for PowerShell-backed shell commands. It is not universal: the same version on Windows 11
+blocked the `cat .env` canary on 09-24-2026. A hook that is never invoked cannot deny, and
+nothing in this directory can change that. The payload Codex sends is the raw command
+(`cat .env`), not the `powershell.exe -Command '...'` form it shows on screen (Codex's
+`exec_command` hook payload is `{ command: args.cmd }`, and real Windows denials carry the
+unwrapped command); the guard unwraps that form anyway.
 
 **Prove it by behavior, never by installer output.** In the same interactive `codex` session, ask it
 to run `cat .env`. A `hook: PreToolUse Blocked` line is proof. On-disk hashes are not. The Claude

@@ -438,6 +438,51 @@ const CASES = [
   ['Bash', 'rg -n "cat .env" docs/', 'allow'],
   ['Bash', "awk -F, '{print $2}' data.csv", 'allow'],
   ['Bash', 'sort access.log | uniq -c | head', 'allow'],
+
+  // === Windows shells (student report 09-24-2026, Codex CLI 0.156.1 on Windows) and camp-hq
+  // === W-#234. Codex on Windows labels PowerShell `Bash` and displays commands wrapped as
+  // === `powershell.exe -Command '...'`; either shell tool can also launch pwsh or cmd directly.
+  ['Bash', "pwsh.exe -Command 'cat .env'", 'deny'],
+  ['Bash', "pwsh -NoProfile -NonInteractive -Command 'Get-Content .env'", 'deny'],
+  ['Bash', `"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'cat .env'`, 'deny'],
+  ['Bash', "powershell -ExecutionPolicy Bypass -c 'type .env'", 'deny'],
+  ['Bash', 'powershell.exe cat .env', 'deny'],
+  ['Bash', '/usr/bin/pwsh --command "gci env:"', 'deny'],
+  ['Bash', "pwsh -Command 'Write-Output $env:OPENAI_API_KEY'", 'deny'],
+  // `cat .env` as base64 UTF-16LE, which is what -EncodedCommand carries.
+  ['Bash', 'pwsh -EncodedCommand YwBhAHQAIAAuAGUAbgB2AA==', 'deny'],
+  ['Bash', 'powershell -enc YwBhAHQAIAAuAGUAbgB2AA==', 'deny'],
+  ['Bash', 'cmd.exe /c type .env', 'deny'],
+  ['Bash', 'cmd //c "type .env"', 'deny'],
+  ['Bash', `"C:\\Windows\\System32\\cmd.exe" /c type .env`, 'deny'],
+  ['Bash', 'cmd /d /s /c "more < .env"', 'deny'],
+  ['Bash', "Invoke-Expression 'cat .env'", 'deny'],
+  ['PowerShell', "pwsh -Command 'Get-Content .env'", 'deny'],
+  ['PowerShell', 'cmd /c type .env', 'deny'],
+  ['PowerShell', "iex 'Get-Content .env'", 'deny'],
+  // W-#234: the Windows read verbs and Env: dumps arrive under the Bash tool name.
+  ['Bash', 'type .env', 'deny'],
+  ['Bash', 'Get-Content .env', 'deny'],
+  ['Bash', 'gc -Path .env', 'deny'],
+  ['Bash', 'Select-String -Pattern KEY -Path .env', 'deny'],
+  ['Bash', 'Get-ChildItem Env:', 'deny'],
+  ['Bash', '[Environment]::GetEnvironmentVariables()', 'deny'],
+  ['Bash', '$all = [System.Environment]::GetEnvironmentVariables()', 'deny'],
+  ['Bash', 'Write-Output ([Environment]::GetEnvironmentVariables())', 'deny'],
+  ['Bash', 'gci env: | Out-String', 'deny'],
+  // Naming the call in a commit body is prose, not a dump (the one flip in the history replay).
+  ['Bash', "git commit -F - <<'EOF'\nguard: `[System.Environment]::GetEnvironmentVariables()` and `Get-Item Env:` now match\nEOF", 'allow'],
+  // Ordinary Windows work stays allowed, wrapped or not.
+  ['Bash', "pwsh.exe -Command 'Get-ChildItem'", 'allow'],
+  ['Bash', "pwsh -NoProfile -Command 'Get-Content README.md'", 'allow'],
+  ['Bash', "powershell.exe -Command 'git status --short'", 'allow'],
+  ['Bash', "pwsh -Command 'Get-Content .env.example'", 'allow'],
+  ['Bash', 'pwsh -File scripts/build.ps1', 'allow'],
+  ['Bash', 'cmd /c dir', 'allow'],
+  ['Bash', 'cmd /c npm run build', 'allow'],
+  ['Bash', 'type node', 'allow'],
+  ['Bash', 'Get-Content package.json', 'allow'],
+  ['Bash', 'Get-Item Env:PATH', 'allow'],
 ];
 
 // A PreToolUse hook runs before every tool call, so an unexpected payload shape must exit
