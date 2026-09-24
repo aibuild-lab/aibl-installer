@@ -37,10 +37,7 @@ const PATTERNS = [
   },
   {
     name: 'DB URL with password',
-    re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:@/\s]+:([^@/\s]+)@/g,
-    // A template slot is not a credential: printf `%s`, `%(pw)s`, shell `$VAR`/`${VAR}`,
-    // `{password}`, `<password>`, or a run of asterisks. DB_PASSWORD remains a redaction
-    // trigger below, even when a synthetic default makes it look like a template.
+    re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:@/\s]+:([^@/\s]+)@/gi,
   },
   { name: 'Bearer token', re: /\bBearer\s+[A-Za-z0-9._-]{20,}/g },
   { name: 'JWT', re: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g },
