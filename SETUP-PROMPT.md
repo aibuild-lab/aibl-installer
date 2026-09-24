@@ -16,7 +16,7 @@ Read the whole file before you begin. Follow it in order. Do not summarize it to
 8. **The two-shell gotcha on a Mac.** This app runs your commands in a bash shell that does not read the student's `~/.zshrc`. Their real Terminal is zsh and does. Tools that work in their Terminal can look missing to you. When that happens, say so plainly ("your tools are fine in your Terminal; they are invisible to me here because of a shell config difference; I will write the config to both files") and fix both startup files in step 4.
 9. **Pause for system popups and explain them.** "Trust this folder?" means: this app can read and edit files in the folder you picked, with your permission; it does not reach the rest of your computer. Mac file-access popups: Allow for Documents, Downloads, Desktop, Applications; Deny for Photos, Music, Calendar, Contacts. Windows "allow this app to make changes?": click Yes, no password. When a student mentions a popup, stop, explain, and resume after they answer it.
 10. **Never paste Claude slash commands into Codex, or Codex commands into Claude.** Where this file says "in Claude" or "in Codex," use only that app's block. Where a course file mentions a `/command`, Codex treats that as "use the named method" and reads the file instead.
-11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer`, the empty `aibl-guard-test` folder that step 7's Codex proof runs in, and the workbench folder. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not the guard's. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
+11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer`, the empty `aibl-guard-test` folder that step 7's Codex proof runs in, and the workbench folder. On the Claude route, step 8.5 (bridge readiness) adds three more, each shown to the student and approved first: tmux on a Mac (through Homebrew), one `env` line (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) merged into `~/.claude/settings.json`, and on Windows the bridge launcher's two exact allow rules merged into the workbench's own `.claude/settings.local.json`. Only `scripts/bridge_readiness.py` makes those writes; never hand-edit either settings file. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not named here. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
 
 ## Step 1: Greet, and detect the operating system and which app you are
 
@@ -66,6 +66,7 @@ Check every item below before installing anything. Use the three-state rule (rul
 - **Claude only:** Claude Code CLI: `command -v claude`; fallbacks `~/.local/bin/claude` (native installer), `/opt/homebrew/bin/claude` or `/usr/local/bin/claude` (Homebrew), `"$(npm prefix -g 2>/dev/null)/bin/claude"` (npm). Any one of these is "installed"; note which path, steps 4.4 and 7 use it
 - **Codex only:** Codex CLI: `command -v codex`; fallbacks `~/.codex/bin/codex`, `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`
 - Secrets guard: `~/.claude/hooks/secrets-guard.js` (Claude) or `~/.codex/hooks.json` (Codex)
+- **Claude only:** tmux, for the course's bridge: `command -v tmux`; fallbacks `/opt/homebrew/bin/tmux`, `/usr/local/bin/tmux` (step 8.5 installs it if missing)
 - Workbench: `~/GitHub/my-workbench` (an existing one is reused in step 8, never replaced)
 
 **Windows (PowerShell):**
@@ -93,6 +94,7 @@ Then state findings and the plan, with one reason per item, and ask once. Exampl
 > - Python: 3.9, too old for the course
 > - Claude Code CLI: installed at ~/.local/bin/claude, but not on PATH
 > - Secrets guard: not installed
+> - tmux (for the course's bridge): not installed
 > - Workbench: none yet
 >
 > Here is what I will do:
@@ -104,8 +106,11 @@ Then state findings and the plan, with one reason per item, and ask once. Exampl
 > 6. Install the secrets guard and prove it works. Why: it stops a command from printing an API key or password to the screen, in every project, forever.
 > 7. Sign you in to GitHub and to the command-line tool, in your browser.
 > 8. Create your private workbench from the AI Build Lab template, with its three skills, and open it in this app.
+> 9. Get this computer ready for the course's bridge, the helper that lets your agents work as a team: install tmux, and switch on one setting in this app's settings file. I will show you the exact line and ask before I change that file.
 >
 > Sound good? I will proceed once you confirm."
+>
+> (Item 9 is for the Claude app only. On Windows it has no tmux; it adds the bridge's permission line instead. In Codex, leave item 9 out.)
 
 Wait for the confirmation. After it, run each tool with DETECT / STATE / PLAN / ACT / VERIFY / REPORT without asking again per tool.
 
@@ -338,6 +343,39 @@ Read the result:
 - `Setup paused: GitHub is still preparing the new repository`: wait a minute and run the same command again. Nothing needs to be undone.
 - Anything else: rule 5.
 
+## Step 8.5: Bridge readiness (Claude only)
+
+**Codex:** skip this step and say nothing about it. Codex coordinates its agents on its own; the bridge is a Claude app workaround.
+
+**Claude:** say why once, in your own words:
+
+> "One more thing for later in the course. The bridge is a helper that lets an agent in this app hand a team job to a copy of Claude running out of sight on your computer, which sends the result back here. The bridge itself comes with your program. I am getting your computer ready for it now, so you never have to type a command for it."
+
+What the bridge needs underneath it, which the script checks and prepares:
+- **Both:** the agent-teams setting switched on in this app's settings file, and the command-line twin installed and signed in with the student's Claude subscription.
+- **Mac:** tmux, a small tool that keeps that hidden Claude running. Installed through Homebrew, only if missing; no password.
+- **Windows:** no tmux; the bridge opens its own small window instead. It needs the bridge launcher's exact permission lines in the workbench's local settings, because the app will not let an agent add those for itself.
+
+Use the `workspace` folder from step 8's result as `<workbench>`. The script is the only thing that makes these changes; never edit either settings file by hand.
+
+1. **See what is needed (changes nothing):**
+   - Mac: `python3 ~/GitHub/aibl-installer/scripts/bridge_readiness.py --plan --workbench "<workbench>"`
+   - Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\bridge_readiness.py --plan --workbench "<workbench>"` (or `python` if `py` is absent)
+2. **Ask once, for these settings.** If it prints `Nothing to change`, go to 4. Otherwise show the student every line under `Will change`, exactly as printed, and ask:
+
+   > "To get the bridge ready I will: <the Will change lines, in plain words>. I back up each settings file first and change nothing else in it. OK?"
+
+   This gets its own yes, even after step 3, because it changes this app's own settings.
+3. **On a yes:** run the same command with `--apply --yes` in place of `--plan`. It prints what it changed and where the backup is, then the same PASS/FAIL list as step 4; tell the student in plain words. On a no: change nothing, say the `aibl-bridge-setup` skill can do this later, and go to 4 anyway. Never pass `--yes` without the student's yes; the script refuses `--apply` without it.
+4. **Verify:** run the same command with `--verify`. It prints one `PASS` or `FAIL` line per item and ends with `BRIDGE READY` or `BRIDGE NOT READY`. Read each line to the student in plain words. For each `FAIL`, follow its `Fix:` line:
+   - `claude login`: the terminal twin is not signed in. The student opens their own Terminal (Mac) or PowerShell (Windows), types `claude`, presses Enter, types `/login`, picks the Claude account they use in this app, and approves it in the browser, then types `/exit`. Then run `--verify` again. Never sign in for them. This can be the only item left, and that is fine; say so.
+   - `claude login` names an API key: the twin would bill that key instead of their subscription. Do not remove it yourself; say so plainly and point to their program channel.
+   - `tmux` with Homebrew missing: go back to step 4.2, then run this step again.
+   - A settings file that is not valid JSON: stop, as in step 7; fix it with the student and never delete it.
+   - Anything else: rule 5.
+
+   Read out any `Note:` lines too. On Windows one of them says the bridge has a round-trip receipt with VS Code as the receiving thread, and with the Claude app as the receiver it is not proven yet; say that plainly. Safe to re-run: when everything is in place, `--apply --yes` changes nothing and makes no backup.
+
 ## Step 9: Open the workbench in this app
 
 Tell the student, using the block for your harness:
@@ -372,6 +410,7 @@ End with one clean message, real versions filled in:
 > - Python 3.X.Y
 > - <Claude Code CLI or Codex CLI> X.Y.Z, signed in
 > - Secrets guard: proven <or, after step 7's "Not proven" path: installed, not yet proven in Codex. Do not add real keys in Codex until it passes>
+> - Bridge readiness (Claude only): ready, or the one thing left from step 8.5 (usually the command-line sign-in)
 > - Your workbench: `~/GitHub/my-workbench`, a private repository at `github.com/<username>/my-workbench` that only you can see, made from the AI Build Lab template (version X.Y.Z, from the step 8 result) with three skills: aibl-personalize, aibl-checkpoint, aibl-enroll
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
