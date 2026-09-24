@@ -616,6 +616,10 @@ function withoutRedirections(tokens) {
   return { tokens: kept, redirected };
 }
 
+function isPrintenvAll(tokens) {
+  return tokens.slice(1).every(arg => ['-0', '--null', '--'].includes(arg));
+}
+
 function denyIfSecretPath(text) {
   const raw = String(text || '');
   if (!raw) return;
@@ -742,7 +746,7 @@ if (!isPS) {
     const namesOnly = namesOnlyEnvStages.has(stage);
     if (cmd === 'env' && envPayload(tokens)?.length === 0 && !namesOnly)
       deny('env without a utility payload prints the environment, including injected secrets. Run a real command after its options and assignments.');
-    if (['printenv', 'run-printenv'].includes(cmd) && tokens.slice(1).every(arg => ['-0', '--null'].includes(arg)))
+    if (['printenv', 'run-printenv'].includes(cmd) && isPrintenvAll(tokens))
       deny('Bare printenv prints every variable. Name one non-secret var, e.g. `printenv PATH`.');
     if (cmd === 'set' && tokens.length === 1) deny('Bare `set` dumps all shell variables.');
     if (['declare', 'typeset'].includes(cmd) && tokens.slice(1).some(arg => /^-\w*p\w*$/.test(arg)))
