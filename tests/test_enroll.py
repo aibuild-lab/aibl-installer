@@ -37,13 +37,13 @@ class EnrollTests(unittest.TestCase):
    rec=json.loads((wb/'.aibl'/'enroll.json').read_text());self.assertEqual(rec['schema_version'],'aibl.enroll/v1');self.assertEqual(rec['chosen'],[])
  def test_joined_workforce_enrolls_and_names_the_adoption_skill(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-native-workforce'}))
+   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-workforce'}))
    self.assertEqual(r['status'],'selected');self.assertEqual(r['chosen'],['agent-workforce'])
-   self.assertEqual(r['next'],[{'id':'agent-workforce','do':'run aibl-adopt-workforce'}])
+   self.assertEqual(r['next'],[{'id':'agent-workforce','do':'run aibl-enroll to join aibuild-lab/agent-workforce branch student'}])
    rec=json.loads((wb/'.aibl'/'enroll.json').read_text());self.assertEqual(rec['chosen'],['agent-workforce']);self.assertIn('setup_sha256',rec['installer'])
  def test_bundled_lab_is_reported_as_included_not_missing(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-native-workforce'}))
+   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-workforce'}))
    lab=next(p for p in r['programs'] if p['id']=='the-lab')
    self.assertEqual(lab['access'],'unavailable');self.assertEqual(lab['included_by'],'Agent Workforce');self.assertNotIn('the-lab',r['chosen'])
  def test_joined_lab_without_an_adoption_route_says_so(self):
@@ -52,25 +52,25 @@ class EnrollTests(unittest.TestCase):
    self.assertEqual(r['chosen'],['the-lab']);self.assertEqual(r['next'][0]['do'],'no verified adoption route yet; ask the course team for supported delivery')
  def test_already_installed_program_is_left_alone_and_rerun_is_a_noop(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d,installed=[('agent-native-workforce','agent-native-workforce-v0.2.1')]);fake=FakeGh(readable={'aibuild-lab/agent-native-workforce'})
+   wb=workbench(d,installed=[('agent-native-workforce','agent-native-workforce-v0.2.1')]);fake=FakeGh(readable={'aibuild-lab/agent-workforce'})
    r=self.run_enroll(wb,fake);self.assertEqual(r['status'],'nothing to select')
    wf=next(p for p in r['programs'] if p['id']=='agent-workforce');self.assertEqual(wf['installed'],'agent-native-workforce-v0.2.1');self.assertTrue(wf['next'].startswith('installed release recorded'))
    again=self.run_enroll(wb,fake);self.assertEqual(again['status'],'nothing to select');self.assertEqual(again['chosen'],[])
  def test_declining_the_confirmation_changes_nothing(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-native-workforce'}),ask=lambda _:'n')
+   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-workforce'}),ask=lambda _:'n')
    self.assertEqual(r['status'],'declined');self.assertEqual(r['chosen'],[]);self.assertFalse((wb/'.aibl'/'enroll.json').exists())
  def test_yes_skips_the_question(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);asked=[];r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-native-workforce'}),yes=True,ask=lambda q:asked.append(q) or 'n')
+   wb=workbench(d);asked=[];r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-workforce'}),yes=True,ask=lambda q:asked.append(q) or 'n')
    self.assertEqual(asked,[]);self.assertEqual(r['status'],'selected')
  def test_check_shows_and_writes_nothing(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-native-workforce'}),check=True)
+   wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-workforce'}),check=True)
    self.assertEqual(r['status'],'checked');self.assertFalse((wb/'.aibl'/'enroll.json').exists())
  def test_program_filter_limits_the_enrollment_and_rejects_unknown_ids(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);fake=FakeGh(readable={'aibuild-lab/agent-native-workforce','aibuild-lab/the-lab'})
+   wb=workbench(d);fake=FakeGh(readable={'aibuild-lab/agent-workforce','aibuild-lab/the-lab'})
    r=self.run_enroll(wb,fake,only=['the-lab']);self.assertEqual(r['chosen'],['the-lab'])
    with self.assertRaises(setup.SetupError):self.run_enroll(wb,fake,only=['legacy-workshop'])
  def test_signed_out_github_is_a_plain_stop_not_absence(self):
@@ -102,7 +102,7 @@ class EnrollTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    wb=workbench(d);(wb/'work').mkdir();(wb/'work/draft.txt').write_text('unsaved draft')
    (wb/'.aibl-local').mkdir();(wb/'.aibl-local/progress.json').write_text('{"pending":true}')
-   fake=FakeGh(readable={'aibuild-lab/agent-native-workforce'})
+   fake=FakeGh(readable={'aibuild-lab/agent-workforce'})
    self.run_enroll(wb,fake,yes=True);self.run_enroll(wb,fake,yes=True)
    self.assertEqual((wb/'work/draft.txt').read_text(),'unsaved draft')
    self.assertEqual((wb/'.aibl-local/progress.json').read_text(),'{"pending":true}')
@@ -127,7 +127,7 @@ class EnrollTests(unittest.TestCase):
    self.assertEqual(target.read_text(),'keep')
  def test_cli_json_and_plain_output(self):
   with tempfile.TemporaryDirectory() as d:
-   wb=workbench(d);fake=FakeGh(readable={'aibuild-lab/agent-native-workforce'})
+   wb=workbench(d);fake=FakeGh(readable={'aibuild-lab/agent-workforce'})
    from unittest.mock import patch
    with patch.object(enroll,'command',fake),patch.object(sys,'argv',['enroll.py','--workbench',str(wb),'--yes','--json']),contextlib.redirect_stdout(io.StringIO()) as out:code=enroll.main()
    self.assertEqual(code,0);payload=json.loads(out.getvalue());self.assertEqual(payload['status'],'selected');self.assertEqual(payload['chosen'],['agent-workforce'])

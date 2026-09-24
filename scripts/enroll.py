@@ -83,7 +83,14 @@ def plan(workbench,reg=None,runner=command):
                 program.update(publisher='aibuild-lab/agent-workforce',release_product='agent-workforce',adopt_skill=None)
 
     for p in programs(reg):
-        row={'id':p['id'],'label':p['label'].split(' (')[0],'publisher':p['publisher'],'release_product':p['release_product'],'adopt_skill':p.get('adopt_skill'),'access':access(p['publisher'],runner),'installed':installed(workbench,p['release_product']),'included_by':None}
+        # The registry's 'enrollment' block is the current Git route; 'publisher'
+        # and 'release_product' stay as the historical package identity, exactly
+        # as course-options.json says. Read access against whichever repository
+        # the student is actually granted, or a student on the cohort team is
+        # told "repository unavailable" while holding valid access.
+        enr=p.get('enrollment') or {}
+        checked=enr.get('repository') or p['publisher']
+        row={'id':p['id'],'label':p['label'].split(' (')[0],'publisher':p['publisher'],'release_product':p['release_product'],'adopt_skill':p.get('adopt_skill'),'enrollment':enr or None,'checked':checked,'access':access(checked,runner),'installed':installed(workbench,p['release_product']),'included_by':None}
         if installed_family and p['id']=='agent-workforce':
             pin=installed_family.get('packages',{}).get('agent-workforce')
             row['installed']=('agent-workforce-v'+pin['version']) if pin else None
@@ -100,8 +107,10 @@ def plan(workbench,reg=None,runner=command):
 def next_step(r):
     if r['installed']:return 'installed release recorded ('+r['installed']+')'
     if r.get('family_adoption') and r['access']=='readable':return 'use scripts/workbench_packages.py apply with the reviewed family lock, digest, bundles and --product agent-workforce; see FAMILY-DELIVERY.md'
+    enr=r.get('enrollment') or {}
+    if r['access']=='readable' and enr.get('skill'):return 'run '+enr['skill']+' to join '+enr['repository']+' branch '+enr.get('branch','student')
     if r['access']=='readable':return ('run '+r['adopt_skill']) if r['adopt_skill'] else 'no verified adoption route yet; ask the course team for supported delivery'
-    return 'repository unavailable; check the signed-in account and access with the course team (invitation status unknown)'
+    return r['checked']+' is not readable by the signed-in account; check access with the course team (invitation status unknown)'
 
 def enrollable(rows):return [r for r in rows if r['access']=='readable' and not r['installed']]
 
