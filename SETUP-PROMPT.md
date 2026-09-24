@@ -302,7 +302,7 @@ The output is for you to read, not the student. Codex prints a `hook:` line each
 
 **Not proven.** Tell the student plainly, in these words or close to them:
 
-> "Your guard is installed, but I could not prove it is running in Codex on this computer, and nothing you did caused that. This course does not use API keys, so you are safe to continue. Until the guard is proven, keep real keys and .env files out of your Codex sessions. Please post in your program's channel with the test output I am showing you, so the team can look."
+> "Your guard is installed, but I could not prove it is running in Codex on this computer, and nothing you did caused that. Finishing setup is safe, because nothing here uses a real key. Before you put a real API key or .env file into a Codex project, this guard needs to pass its test, and the team will help you get there. Please post in your program's channel with the test output I am showing you, so the team can look."
 
 Show them the full test output and the result of `codex --version` to post. Then continue to step 8. In step 10, use the "installed, not yet proven in Codex" line instead of "proven".
 
@@ -363,7 +363,7 @@ End with one clean message, real versions filled in:
 > - GitHub CLI X.Y.Z
 > - Python 3.X.Y
 > - <Claude Code CLI or Codex CLI> X.Y.Z, signed in
-> - Secrets guard: proven <or, after step 7's "Not proven" path: installed, not yet proven in Codex; keep real keys out of Codex until it is>
+> - Secrets guard: proven <or, after step 7's "Not proven" path: installed, not yet proven in Codex. Do not add real keys in Codex until it passes>
 > - Your workbench: `~/GitHub/my-workbench`, a private repository at `github.com/<username>/my-workbench` that only you can see, made from the AI Build Lab template (version X.Y.Z, from the step 8 result) with three skills: aibl-personalize, aibl-checkpoint, aibl-enroll
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
