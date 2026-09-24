@@ -275,7 +275,7 @@ def check_tmux(machine):
     if not brew:
         return item('tmux', False, 'not installed, and Homebrew is missing',
                     fix='Homebrew installs tmux. Go back to step 4.2 (Homebrew), then run this step again.')
-    return item('tmux', False, 'not installed', fix='Run this step with --apply --yes; it installs tmux with Homebrew.',
+    return item('tmux', False, 'not installed', fix='(Agent: rerun this script with --apply --yes after the student\'s yes; it installs tmux with Homebrew.)',
                 change={'kind': 'brew', 'brew': brew, 'text': 'install tmux with Homebrew (no password needed)'})
 
 
@@ -288,7 +288,7 @@ def check_teams(machine):
     if not changes:
         return item('agent teams', True, f'switched on in {display(machine.user_settings)}')
     return item('agent teams', False, f'switched off in {display(machine.user_settings)}',
-                fix='Run this step again and say yes; it adds one line under "env" in that file.',
+                fix='(Agent: rerun this script with --apply --yes after the student\'s yes; it adds one line under "env" in that file.)',
                 change={'kind': 'settings', 'path': str(machine.user_settings), 'env': {TEAMS_KEY: TEAMS_VALUE},
                         'label': 'settings.json',
                         'text': f'in {display(machine.user_settings)}: ' + '; '.join(changes)})
@@ -309,7 +309,7 @@ def check_allow_rule(machine):
     if not changes:
         return item('launcher permission', True, f'the bridge launcher is allowed in {display(machine.workbench_settings)}')
     return item('launcher permission', False, 'the bridge launcher is not allowed yet, so the agent could be stopped from starting the bridge',
-                fix='Run this step again and say yes; it adds the launcher\'s exact allow rules to the workbench\'s local settings.',
+                fix='(Agent: rerun this script with --apply --yes after the student\'s yes; it adds the launcher\'s exact allow rules to the workbench\'s local settings.)',
                 change={'kind': 'settings', 'path': str(machine.workbench_settings), 'allow': rules,
                         'label': 'workbench-settings.local.json',
                         'text': f'in {display(machine.workbench_settings)}: ' + '; '.join(changes)})
@@ -383,8 +383,9 @@ def check_claude(machine):
         return [cli, item('claude login', False, 'cannot check until the terminal Claude is installed', fix=cli['fix'])]
     cli = item('claude CLI', True, f'installed at {claude}')
     data, why = auth_status(machine, claude)
-    login_fix = ('You run: claude auth login --claudeai   It opens the student\'s browser; the student picks the Claude account '
-                 'they use in this app (not an API console) and approves it there. The student never types a command, and you '
+    login_fix = ('Agent: start claude auth login --claudeai in the background (a foreground run can time out and hide the sign-in '
+                 'link), watch its output, and show the student any sign-in link it prints. The student picks the Claude account '
+                 'they use in this app (not an API console) and approves it in the browser. The student never types a command, and you '
                  'never ask for or see a password or code. Then run this check again.')
     key_fix = ('Do not remove the key yourself. Tell the student plainly that bridge runs would be billed to an API key, not their '
                'subscription, and point them to their program channel.')

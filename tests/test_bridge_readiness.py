@@ -316,6 +316,8 @@ class SignIn(unittest.TestCase):
         login, _, _ = self.login(auth={'loggedIn': False, 'authMethod': 'none'})
         self.assertFalse(login['pass'])
         self.assertIn('claude auth login --claudeai', login['fix'])
+        self.assertIn('in the background', login['fix'])
+        self.assertIn('sign-in link', login['fix'])
         self.assertIn('never types a command', login['fix'])
         self.assertNotIn('/login', login['fix'])
         self.assertNotIn('/exit', login['fix'])
