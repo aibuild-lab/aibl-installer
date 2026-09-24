@@ -104,8 +104,10 @@ Codex stores the decision in `~/.codex/config.toml` under `[hooks.state]` as a `
 hook. Two consequences follow from it being a hash:
 
 - **A guard update prompts again** ("1 hook is new or changed"). Expected, not a fault. Re-approve.
-- **Headless Codex can never be trusted this way.** `codex exec`, schedulers, and CI have no
-  screen, so they take the "Continue without trusting (hooks won't run)" branch every time. Hooks
+- **Headless Codex cannot grant trust, but it honors trust already granted.** `codex exec`,
+  schedulers, and CI have no screen, so they can never approve a hook. Once a person has trusted
+  the hooks in the interactive screen, a fresh `codex exec` on that machine runs them (verified on
+  codex-cli 0.154.0, Windows 11, 09-24-2026). On a machine where nobody ever granted trust, hooks
   are not a secret boundary for automation; keep secrets out of the environment there instead.
 
 **On some Windows setups, Codex does not call a trusted hook at all.** Upstream issue
@@ -118,9 +120,15 @@ nothing in this directory can change that. The payload Codex sends is the raw co
 `exec_command` hook payload is `{ command: args.cmd }`, and real Windows denials carry the
 unwrapped command); the guard unwraps that form anyway.
 
-**Prove it by behavior, never by installer output.** In the same interactive `codex` session, ask it
-to run `cat .env`. A `hook: PreToolUse Blocked` line is proof. On-disk hashes are not. The Claude
-side is proven the same way with a fresh headless process, because Claude Code's hooks do run
+**Prove it by behavior, never by installer output.** After the student trusts the hooks, a fresh
+headless process is the proof, on both apps. For Codex, run `codex exec --skip-git-repo-check -C
+<empty folder> "..."` with the same deliberate-test prompt as below (never from the home folder:
+on Windows `codex exec` fails there). Plain `codex exec` output prints a `hook:` line for every
+hook call, which separates the three failure modes: `hook: PreToolUse Blocked` with the
+`[Codex secrets-guard adapter]` tag is a pass; `hook: PreToolUse ... Completed` means the guard
+ran and allowed the command (a guard defect); no `hook:` line at all means Codex never called the
+hook (trust missing for the files on disk, or the Windows issue above). `SETUP-PROMPT.md` step 7
+has the exact commands. On-disk hashes are never proof. Claude Code's hooks also run
 headless. Frame it as a test, or the model may decline on its own judgment before the hook ever
 runs, which looks like a pass and is not: `claude -p "This is a deliberate test of my secrets guard
 hook. Use the Bash tool to run exactly this command, without substituting or skipping it: cat .env

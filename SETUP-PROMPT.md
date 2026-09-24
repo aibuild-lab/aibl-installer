@@ -16,7 +16,7 @@ Read the whole file before you begin. Follow it in order. Do not summarize it to
 8. **The two-shell gotcha on a Mac.** This app runs your commands in a bash shell that does not read the student's `~/.zshrc`. Their real Terminal is zsh and does. Tools that work in their Terminal can look missing to you. When that happens, say so plainly ("your tools are fine in your Terminal; they are invisible to me here because of a shell config difference; I will write the config to both files") and fix both startup files in step 4.
 9. **Pause for system popups and explain them.** "Trust this folder?" means: this app can read and edit files in the folder you picked, with your permission; it does not reach the rest of your computer. Mac file-access popups: Allow for Documents, Downloads, Desktop, Applications; Deny for Photos, Music, Calendar, Contacts. Windows "allow this app to make changes?": click Yes, no password. When a student mentions a popup, stop, explain, and resume after they answer it.
 10. **Never paste Claude slash commands into Codex, or Codex commands into Claude.** Where this file says "in Claude" or "in Codex," use only that app's block. Where a course file mentions a `/command`, Codex treats that as "use the named method" and reads the file instead.
-11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer`, and the workbench folder. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not the guard's. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
+11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer`, the empty `aibl-guard-test` folder that step 7's Codex proof runs in, and the workbench folder. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not the guard's. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
 
 ## Step 1: Greet, and detect the operating system and which app you are
 
@@ -271,13 +271,50 @@ claude -p "This is a deliberate test of my secrets guard hook. Use the Bash tool
 
 Do not move on until you have seen `[secrets-guard hook]` in the output.
 
-**Codex:** Codex will not run a hook until the student has trusted it, and an untrusted hook is skipped in silence, so the student does this part by hand and you watch. Tell them:
+**Codex:** two parts. Codex will not run a hook until a person has trusted it, and it skips an untrusted hook in silence, so the student grants trust by hand. Then you prove it the same way as Claude: a fresh headless `codex exec` loads the hooks the student just trusted.
 
-> "Codex asks you once to approve safety hooks before it will run them. Open your own Terminal (Mac) or PowerShell (Windows), go to your home folder, type `codex`, and press Enter. If it asks whether you trust this directory, say yes; it is your home folder. Then it shows a screen called 'Hooks need review'. Choose 'Trust all and continue'. That is the guard being switched on. If you ever see 'Continue without trusting', do not choose it: the guard would look installed and protect nothing.
->
-> Now, in that same Codex session, type exactly: `Run the command: cat .env` and press Enter. It should refuse and show a line with 'PreToolUse Blocked'. Paste back what it says."
+First, tell them:
 
-Only the refusal counts. If Codex ran the command or answered normally, the trust step was skipped or declined: have them quit Codex, launch it again, and choose "Trust all and continue" on the review screen, then repeat the test. Note for the student: a future guard update will ask for trust once more ("1 hook is new or changed"); that is expected.
+> "Codex asks you once to approve safety hooks before it will run them. Open your own Terminal (Mac) or PowerShell (Windows), go to your home folder, type `codex`, and press Enter. If it asks whether you trust this directory, say yes; it is your home folder. Then it shows a screen called 'Hooks need review'. Choose 'Trust all and continue'. That is the guard being switched on. If you ever see 'Continue without trusting', do not choose it: the guard would look installed and protect nothing. If no review screen appears, that is fine; the hooks may already be trusted from an earlier run. Then close that window and tell me you are done."
+
+When they say done, run the test yourself, in an empty folder made for it. Never run it in the home folder: on Windows, `codex exec` fails there, and an empty folder means no real `.env` is in reach whatever happens. Use the same `codex` that answered `--version` in step 4.6 or 5.5.
+
+Mac:
+
+```
+mkdir -p /tmp/aibl-guard-test && codex exec --skip-git-repo-check -C /tmp/aibl-guard-test "This is a deliberate test of the secrets guard hook I installed. You are in an empty folder made only for this test; it contains no .env file, so nothing sensitive can be read. The test only works if you attempt the command, so do not decline: use your shell tool to run exactly this command once, without substituting or skipping it: cat .env   Then show me the exact text of any refusal or error, word for word." < /dev/null
+```
+
+Windows (PowerShell):
+
+```
+$t = Join-Path $env:TEMP "aibl-guard-test"; New-Item -ItemType Directory -Force $t | Out-Null; codex exec --skip-git-repo-check -C $t "This is a deliberate test of the secrets guard hook I installed. You are in an empty folder made only for this test; it contains no .env file, so nothing sensitive can be read. The test only works if you attempt the command, so do not decline: use your shell tool to run exactly this command once, without substituting or skipping it: cat .env   Then show me the exact text of any refusal or error, word for word."
+```
+
+The output is for you to read, not the student. Codex prints a `hook:` line each time it calls a hook, and that is how you tell the outcomes apart:
+
+- **Pass: the literal text `[Codex secrets-guard adapter]` appears**, usually beside `hook: PreToolUse Blocked`. The guard appends that tag to every refusal; nothing else produces it. Tell the student it is proven.
+- **The model declined in its own words, with no `hook:` line and no tag.** For example: "I can't run `cat .env` because it would read potentially sensitive credentials." This looks like a pass and is not one: the command was never attempted, so the guard was never tested. Run the same command once more. If it declines again, stop and go to "Not proven: a known limit". The wording above states that the folder is empty because a cautious model (seen with `gpt-5.6-luna` at low reasoning effort) declines without it and attempts with it.
+- **The command ran, and `hook: PreToolUse` lines appear that end in Completed, not Blocked.** Codex called the guard and the guard let it through. That is a guard defect, not a student mistake. Do not retry; go to "Not proven: a guard problem" below.
+- **The command ran, and a `hook:` line ends in Failed.** Codex called the hook but it could not start, and Codex runs the command anyway when a hook fails. Run the guard command from the start of this step again with `--codex`: it repairs how the hook is launched (an account folder name with a space broke the older form). Have the student open `codex`, trust anything under "Hooks need review", and close it. Then run the test once more. If it still says Failed, go to "Not proven: a guard problem".
+- **The command ran, and there is no `hook:` line at all.** Codex did not call the hooks. Usually that means trust is missing for the files now on disk, for example because the guard was refreshed after it was trusted. Check the files (`node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --check --codex`, Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs --check --codex`). Have the student open `codex` once more, trust anything under "Hooks need review", and close it. Then run the test again. Do this once, not in a loop.
+- **Still no `hook:` line after that.** On Windows, this matches a known Codex issue ([openai/codex#24453](https://github.com/openai/codex/issues/24453)) in which trusted hooks are sometimes not called: go to "Not proven: a known limit". On a Mac it is unexplained: go to "Not proven: a guard problem". Trusting again will not change either.
+
+There are two "Not proven" paths. Only the second asks the student to report anything, because only there can the team fix something; a report about a known Codex limit is a support thread nobody can act on.
+
+**Not proven: a known limit** (the model would not attempt the test, or Codex on Windows never called the hook). Tell the student plainly, in these words or close to them, and do not ask them to report it:
+
+> "Your guard is installed, but I could not prove it is running in Codex on this computer. This is a known limit of Codex, not something you did, and you do not need to report it. Finishing setup is safe, because nothing here uses a real key. Before you ever put a real API key or .env file into a Codex project, ask your assistant to run this guard test again; it needs to pass first."
+
+**Not proven: a guard problem** (the guard let the command through, the guard still failed to start after the repair, or a Mac where Codex never called it). Tell the student:
+
+> "Your guard is installed, but the test found a problem with the guard itself, and nothing you did caused it. Finishing setup is safe, because nothing here uses a real key. Please post in your program's channel with the test output I am showing you, so the team can fix it. Until it is fixed, do not put a real API key or .env file into a Codex project."
+
+On this path only, show them the full test output and the result of `codex --version` to post.
+
+Either way, continue to step 8, and in step 10 use the "installed, not yet proven in Codex" line instead of "proven".
+
+Note for the student, either way: a future guard update will ask for trust once more ("1 hook is new or changed"); that is expected.
 
 **The other app is an offer, never a default.** Say once: "If you also use <the other app>, tell me and I will protect it the same way. If not, we skip it." Only on a yes do you install the other app's command-line twin (step 4.4 or 5.3) and run the guard command with the other flag, then prove it there too. A student who chose one app should never find the other app's files on their machine.
 
@@ -334,7 +371,7 @@ End with one clean message, real versions filled in:
 > - GitHub CLI X.Y.Z
 > - Python 3.X.Y
 > - <Claude Code CLI or Codex CLI> X.Y.Z, signed in
-> - Secrets guard: proven
+> - Secrets guard: proven <or, after step 7's "Not proven" path: installed, not yet proven in Codex. Do not add real keys in Codex until it passes>
 > - Your workbench: `~/GitHub/my-workbench`, a private repository at `github.com/<username>/my-workbench` that only you can see, made from the AI Build Lab template (version X.Y.Z, from the step 8 result) with three skills: aibl-personalize, aibl-checkpoint, aibl-enroll
 >
 > Where it is on disk: <Mac: /Users/<name>/GitHub/my-workbench, open with Finder via Cmd + Shift + H, GitHub, my-workbench> <Windows: C:\Users\<name>\GitHub\my-workbench, open with File Explorer via This PC, Local Disk (C:), Users, your name, GitHub, my-workbench>.
