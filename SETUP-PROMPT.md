@@ -241,7 +241,7 @@ Run `gh auth login --hostname github.com --git-protocol https --web`. The studen
 
 ### 6.2 The twin
 
-**Claude:** run `claude auth status --json`. If `loggedIn` is false, have the student open their own Terminal (Mac) or PowerShell (Windows), type `claude`, press Enter, and finish the browser sign-in. Then re-run `claude auth status --json`. The app and the CLI may sign in separately; that is expected.
+**Claude:** run `claude auth status --json`. If `loggedIn` is false, run `claude auth login --claudeai` yourself. It opens the student's browser; the student picks the Claude account they use in this app and approves it there. The student never types a command, and you never ask for or see a password or code. Then re-run `claude auth status --json`. The app and the CLI may sign in separately; that is expected.
 
 **Codex:** run `codex login status`. If it does not report signed in, run `codex login`, which opens the browser. The app and the CLI share one sign-in, so this is usually already done.
 
@@ -333,9 +333,9 @@ This is the one step that runs a tested script rather than you improvising, so e
 It checks tool versions, checks GitHub is signed in, creates the private repository `<username>/my-workbench` from the public template `aibuild-lab/my-workbench-template` (no invitation, no course package), waits for GitHub to finish making it, clones it to `~/GitHub/my-workbench`, sets a Git identity for that folder only, checks that the three skills landed in `.claude/skills/` and `.agents/skills/`, and writes a small receipt in `.aibl-local/` (which never goes to GitHub). It prints JSON at the end; you read it, the student does not need to. Say plainly what happened.
 
 Read the result:
-- `"status": "created"`: new repository, new folder. Continue to step 9.
-- `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 9.
-- `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Continue to step 9.
+- `"status": "created"`: new repository, new folder. Continue to step 8.5 (Claude) or step 9 (Codex).
+- `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 8.5 (Claude) or step 9 (Codex).
+- `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Continue to step 8.5 (Claude) or step 9 (Codex).
 - `"skills_missing"` is not empty: the workbench was made from an older template. Nothing was changed. Tell the student to ask in their program's channel with that message, and continue; the workbench still works.
 - `"template": { ..., "version": "0.0.12" }`: the template version you report in step 10. If it is `null`, the template ships no version stamp; say "the current template" and do not go looking for a number elsewhere.
 - `Setup paused: GitHub is not signed in yet`: step 6.1 did not finish. Do it, then run the same command again.
@@ -366,13 +366,15 @@ Use the `workspace` folder from step 8's result as `<workbench>`. The script is 
    > "To get the bridge ready I will: <the Will change lines, in plain words>. I back up each settings file first and change nothing else in it. OK?"
 
    This gets its own yes, even after step 3, because it changes this app's own settings.
-3. **On a yes:** run the same command with `--apply --yes` in place of `--plan`. It prints what it changed and where the backup is, then the same PASS/FAIL list as step 4; tell the student in plain words. On a no: change nothing, say the `aibl-bridge-setup` skill can do this later, and go to 4 anyway. Never pass `--yes` without the student's yes; the script refuses `--apply` without it.
+3. **On a yes:** run the same command with `--apply --yes` in place of `--plan`. It prints what it changed and where the backup is, then the same PASS/FAIL list as step 4; tell the student in plain words. On a no: change nothing, say you can run this step again any time they want the bridge ready, and go to 4 anyway. Never pass `--yes` without the student's yes; the script refuses `--apply` without it.
 4. **Verify:** run the same command with `--verify`. It prints one `PASS` or `FAIL` line per item and ends with `BRIDGE READY` or `BRIDGE NOT READY`. Read each line to the student in plain words. For each `FAIL`, follow its `Fix:` line:
-   - `claude login`: the terminal twin is not signed in. The student opens their own Terminal (Mac) or PowerShell (Windows), types `claude`, presses Enter, types `/login`, picks the Claude account they use in this app, and approves it in the browser, then types `/exit`. Then run `--verify` again. Never sign in for them. This can be the only item left, and that is fine; say so.
-   - `claude login` names an API key: the twin would bill that key instead of their subscription. Do not remove it yourself; say so plainly and point to their program channel.
+   - `claude login`: the terminal twin is not signed in with the student's subscription. Run `claude auth login --claudeai` yourself; it opens the student's browser, and the student picks the Claude account they use in this app and approves it there. The student never types a command, and you never ask for or see a password or code. Then run `--verify` again.
+   - `claude login` names an API key: the twin would bill that key instead of their subscription, even when it also says it is signed in. Do not remove the key yourself; say so plainly and point to their program channel.
    - `tmux` with Homebrew missing: go back to step 4.2, then run this step again.
    - A settings file that is not valid JSON: stop, as in step 7; fix it with the student and never delete it.
    - Anything else: rule 5.
+
+   Backups of each settings file as it was go to `~/.claude/backups/bridge-readiness/`, outside every repository.
 
    Read out any `Note:` lines too. On Windows one of them says the bridge has a round-trip receipt with VS Code as the receiving thread, and with the Claude app as the receiver it is not proven yet; say that plainly. Safe to re-run: when everything is in place, `--apply --yes` changes nothing and makes no backup.
 

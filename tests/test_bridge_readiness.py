@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import bridge_readiness as br
@@ -73,9 +74,9 @@ class FakeMachine:
         self.settings.parent.mkdir(parents=True, exist_ok=True)
         self.settings.write_text(raw if raw is not None else json.dumps(data, indent=2) + '\n', encoding='utf-8')
 
-    def backups(self, folder=None):
-        folder = folder or self.settings.parent
-        return sorted(p for p in folder.iterdir() if br.BACKUP_TAG in p.name)
+    def backups(self):
+        folder = self.machine.backup_dir
+        return sorted(folder.iterdir()) if folder.is_dir() else []
 
     def brew_installs(self):
         return [c for c in self.calls if c[1:] == ['install', 'tmux']]
@@ -178,12 +179,12 @@ class Idempotency(unittest.TestCase):
                 first = br.apply(fake.machine, yes=True)
                 self.assertTrue(first['changed'])
                 snapshot = {p: p.read_bytes() for p in (fake.settings, local)}
-                backups = fake.backups() + fake.backups(local.parent)
+                backups = fake.backups()
                 second = br.apply(fake.machine, yes=True)
                 self.assertEqual(second['changed'], [])
                 self.assertEqual(second['backups'], [])
                 self.assertEqual({p: p.read_bytes() for p in snapshot}, snapshot)
-                self.assertEqual(fake.backups() + fake.backups(local.parent), backups)
+                self.assertEqual(fake.backups(), backups)
                 self.assertTrue(second['ready'])
                 self.assertEqual(br.plan(fake.machine)['will_change'], [])
 
@@ -256,15 +257,31 @@ class Windows(unittest.TestCase):
         self.assertEqual(fake.brew_installs(), [])
         self.assertTrue(report['ready'])
 
+    def rules_for(self, workbench):
+        return br.Machine(home='C:\\Users\\x', system='windows', workbench=workbench, which=lambda n: None, env={},
+                          is_file=lambda p: False).windows_allow_rules()
+
     def test_rules_are_exact_with_no_wildcard(self):
-        machine = br.Machine(home='C:\\Users\\Student Name', system='windows',
-                             workbench='C:\\Users\\Student Name\\GitHub\\my-workbench', which=lambda n: None, env={},
-                             is_file=lambda p: False)
-        self.assertEqual(machine.windows_allow_rules(), [
+        rules = self.rules_for('C:\\Users\\student\\GitHub\\my-workbench')
+        self.assertEqual(rules, [
             'PowerShell(workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)',
-            'PowerShell(C:/Users/Student Name/GitHub/my-workbench/workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)',
+            'PowerShell(C:/Users/student/GitHub/my-workbench/workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)',
         ])
-        self.assertFalse(any('*' in r for r in machine.windows_allow_rules()))
+        self.assertFalse(any('*' in r for r in rules))
+
+    def test_absolute_rule_is_dropped_when_the_path_has_a_space(self):
+        # A path with a space must be quoted to run, so the typed command could never equal an unquoted rule.
+        self.assertEqual(self.rules_for('C:\\Users\\Student Name\\GitHub\\my-workbench'),
+                         ['PowerShell(workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)'])
+
+    def test_no_backup_lands_inside_the_workbench(self):
+        fake = FakeMachine(self, system='windows')
+        local = fake.machine.workbench_settings
+        local.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)']}}), encoding='utf-8')
+        br.apply(fake.machine, yes=True)
+        self.assertEqual(sorted(p.name for p in local.parent.iterdir()), ['settings.local.json'])
+        self.assertEqual([p.name.split('.2')[0] for p in fake.backups()], ['workbench-settings.local.json'])
+        self.assertNotIn(fake.workbench, fake.backups()[0].parents)
 
     def test_missing_workbench_is_a_fail_not_a_write(self):
         fake = FakeMachine(self, system='windows')
@@ -298,8 +315,10 @@ class SignIn(unittest.TestCase):
     def test_signed_out_fails_with_a_hand_off(self):
         login, _, _ = self.login(auth={'loggedIn': False, 'authMethod': 'none'})
         self.assertFalse(login['pass'])
-        self.assertIn('/login', login['fix'])
-        self.assertIn('Never sign in for them', login['fix'])
+        self.assertIn('claude auth login --claudeai', login['fix'])
+        self.assertIn('never types a command', login['fix'])
+        self.assertNotIn('/login', login['fix'])
+        self.assertNotIn('/exit', login['fix'])
 
     def test_api_key_fails_as_billing(self):
         login, _, _ = self.login(auth={'loggedIn': True, 'authMethod': 'api_key', 'apiProvider': 'firstParty'})
@@ -349,6 +368,109 @@ class VerifyOutput(unittest.TestCase):
         fake = FakeMachine(self, system='windows', tools=('zsh',), auth={'loggedIn': False})
         for report in (br.plan(fake.machine), br.verify(fake.machine)):
             self.assertNotIn('\u2014', br.render(report))
+
+
+class FileSafety(unittest.TestCase):
+    def test_utf16_file_pauses_even_on_plan(self):
+        fake = FakeMachine(self)
+        fake.settings.parent.mkdir(parents=True, exist_ok=True)
+        raw = json.dumps(STUDENT_SETTINGS).encode('utf-16')
+        fake.settings.write_bytes(raw)
+        teams = by_item(br.plan(fake.machine))['agent teams']
+        self.assertFalse(teams['pass'])
+        self.assertIn('not saved as UTF-8', teams['detail'])
+        br.apply(fake.machine, yes=True)
+        self.assertEqual(fake.settings.read_bytes(), raw)
+        self.assertEqual(fake.backups(), [])
+        self.assertEqual(quiet_main(['--plan'], fake.machine), 0)
+
+    def test_symlinked_settings_are_written_through_to_the_target(self):
+        fake = FakeMachine(self)
+        dotfiles = fake.home / 'dotfiles'
+        dotfiles.mkdir()
+        target = dotfiles / 'claude-settings.json'
+        raw = json.dumps(STUDENT_SETTINGS, indent=2) + '\n'
+        target.write_text(raw, encoding='utf-8')
+        fake.settings.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fake.settings.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest('symlinks are not available to this account')
+        br.apply(fake.machine, yes=True)
+        self.assertTrue(fake.settings.is_symlink(), 'the link survives')
+        self.assertEqual(json.loads(target.read_text())['env'][TEAMS], '1')
+        self.assertEqual(fake.backups()[0].read_text(), raw)
+        self.assertEqual([p.name for p in dotfiles.iterdir()], ['claude-settings.json'])
+
+    def test_write_failure_pauses_and_leaves_no_temp_file(self):
+        fake = FakeMachine(self)
+        fake.write_settings(STUDENT_SETTINGS)
+        before = fake.settings.read_bytes()
+        def refuse(src, dst):
+            raise PermissionError(13, 'Permission denied')
+        with mock.patch.object(br.os, 'replace', refuse):
+            with self.assertRaises(br.Paused) as raised:
+                br.apply(fake.machine, yes=True)
+        self.assertIn('could not be written', str(raised.exception))
+        self.assertIn('left as it was', str(raised.exception))
+        self.assertEqual(fake.settings.read_bytes(), before)
+        self.assertEqual([p.name for p in fake.settings.parent.iterdir() if p.is_file()], ['settings.json'])
+        self.assertFalse(any(p.name.endswith('.tmp') for p in fake.settings.parent.rglob('*')))
+        with mock.patch.object(br.os, 'replace', refuse):
+            self.assertEqual(quiet_main(['--apply', '--yes'], fake.machine), 2, 'a clean Paused, not a traceback')
+
+    def test_temp_file_is_private_from_the_start(self):
+        if os.name == 'nt':
+            self.skipTest('POSIX file modes')
+        fake = FakeMachine(self)
+        seen = []
+        real_open = os.open
+        def spy(path, flags, mode=0o777, *args, **kwargs):
+            if str(path).endswith('.tmp'):
+                seen.append(mode)
+            return real_open(path, flags, mode, *args, **kwargs)
+        with mock.patch.object(br.os, 'open', spy):
+            br.apply(fake.machine, yes=True)
+        self.assertEqual(seen, [0o600])
+        self.assertEqual(fake.settings.stat().st_mode & 0o777, 0o600)
+
+
+class SignInMethods(unittest.TestCase):
+    def verdict(self, auth=None, raw=None):
+        fake = FakeMachine(self, auth=auth, auth_raw=raw)
+        report = br.verify(fake.machine)
+        return by_item(report)['claude login'], br.render(report)
+
+    def test_subscription_with_an_api_key_source_fails(self):
+        login, text = self.verdict({**SUBSCRIPTION, 'apiKeySource': 'ANTHROPIC_API_KEY'})
+        self.assertFalse(login['pass'])
+        self.assertIn('API key', login['detail'])
+        self.assertIn('ANTHROPIC_API_KEY', login['detail'])
+        self.assertIn('Do not remove the key yourself', login['fix'])
+
+    def test_key_source_that_is_not_a_plain_name_is_not_printed(self):
+        login, _ = self.verdict({**SUBSCRIPTION, 'apiKeySource': 'sk-ant-' + 'x' * 60})
+        self.assertFalse(login['pass'])
+        self.assertNotIn('sk-ant-', login['detail'])
+
+    def test_missing_method_fails(self):
+        login, _ = self.verdict({'loggedIn': True, 'apiProvider': 'firstParty'})
+        self.assertFalse(login['pass'])
+
+    def test_only_subscription_methods_pass(self):
+        for method, ok in (('claude.ai', True), ('oauth_token', True), ('api_key', False), ('api_key_helper', False),
+                           ('third_party', False), ('none', False), ('something_new', False)):
+            with self.subTest(method=method):
+                login, _ = self.verdict({'loggedIn': True, 'authMethod': method, 'apiProvider': 'firstParty'})
+                self.assertIs(login['pass'], ok)
+
+    def test_noisy_shell_output_with_stray_braces(self):
+        raw = ('Welcome {friend}! Loading {plugins}\n' + json.dumps(SUBSCRIPTION, indent=2) +
+               '\n} trailing noise {"not": "status"}\n')
+        login, _ = self.verdict(raw=raw)
+        self.assertTrue(login['pass'])
+        self.assertEqual(br.parse_auth(raw)['authMethod'], 'claude.ai')
+        self.assertIsNone(br.parse_auth('{"not": "status"} and {broken'))
 
 
 if __name__ == '__main__':

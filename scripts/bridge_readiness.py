@@ -13,14 +13,16 @@ What the bridge needs, and what this script does about each:
   Mac      tmux                  installs it with Homebrew, only if missing
   both     agent teams switched  adds "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
            on                    under "env" in ~/.claude/settings.json (merged,
-                                 never overwritten, backed up first)
+                                 never overwritten, backed up first to
+                                 ~/.claude/backups/bridge-readiness/)
   Windows  launcher permission   adds the exact allow rules for the bridge's
                                  zero-argument launcher (bridge-go.ps1) to the
                                  workbench's own .claude/settings.local.json,
                                  which Git ignores; the agent cannot add these
                                  itself, the app treats that as self-modification
   both     terminal Claude       checks it is installed and signed in with a
-           signed in             Claude subscription; never signs in for anyone
+           signed in             Claude subscription, and that no API key
+                                 outranks it; the script never signs in itself
 
 Windows needs no tmux: the Windows port opens its own console window instead,
 and WSL would not help (the desktop thread's inbox is a Windows named pipe).
@@ -45,6 +47,7 @@ import copy
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,7 +60,12 @@ BRIDGE_GO = 'workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1'
 BRIDGE_SKILL_DIR = ('workforce', 'skills', 'aibl-bridge')
 TMUX_FALLBACKS = ('/opt/homebrew/bin/tmux', '/usr/local/bin/tmux')
 BREW_FALLBACKS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')
-BACKUP_TAG = '.backup.bridge-readiness-'
+# Backups live outside every repository (the workbench's .gitignore does not cover backup names), beside the
+# app's own backups folder.
+BACKUP_DIR = ('.claude', 'backups', 'bridge-readiness')
+# The only sign-in methods that bill the student's Claude subscription. `claude auth status --json` reports one of:
+# none, third_party, claude.ai, api_key_helper, oauth_token, api_key.
+SUBSCRIPTION_METHODS = ('claude.ai', 'oauth_token')
 
 
 class Paused(Exception):
@@ -99,9 +107,22 @@ class Machine:
     def workbench_settings(self):
         return self.workbench / '.claude' / 'settings.local.json'
 
+    @property
+    def backup_dir(self):
+        return self.home.joinpath(*BACKUP_DIR)
+
     def windows_allow_rules(self):
+        """Exact rules, no wildcard (auto mode drops wildcarded interpreter rules).
+
+        The relative rule matches the path the aibl-bridge skill tells the agent to type from the workbench root.
+        The absolute rule is the form Wade's allow-rule receipts proved (09-20). It is kept only when the path has
+        no space: a path with a space has to be quoted to run, so the typed command could never equal the rule.
+        """
+        rules = [f'PowerShell({BRIDGE_GO})']
         absolute = PureWindowsPath(str(self.workbench)).as_posix().rstrip('/')
-        return [f'PowerShell({BRIDGE_GO})', f'PowerShell({absolute}/{BRIDGE_GO})']
+        if not any(ch.isspace() for ch in absolute):
+            rules.append(f'PowerShell({absolute}/{BRIDGE_GO})')
+        return rules
 
 
 # ---------------------------------------------------------------- settings merge
@@ -113,6 +134,9 @@ def read_settings(path):
         return None
     try:
         text = path.read_text(encoding='utf-8-sig')
+    except UnicodeDecodeError:
+        raise Paused(f'{display(path)} is not saved as UTF-8 text (it may be UTF-16), so it cannot be merged into. '
+                     'Nothing was changed and it was not overwritten. Fix that file with the student; never delete it.')
     except OSError as exc:
         raise Paused(f'{display(path)} could not be read ({exc.strerror or exc}). Nothing was changed.')
     if not text.strip():
@@ -162,30 +186,52 @@ def merge(data, env=None, allow=()):
     return new, changes
 
 
-def write_settings(path, original, new, stamp=None):
-    """Back up the existing file, write the merged one atomically, read it back. Return the backup path or None."""
+def _create_private(path):
+    """Open a new file for writing that is 0600 from its first byte. Fails if the name is taken."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0), 0o600)
+    return os.fdopen(fd, 'wb')
+
+
+def write_settings(path, original, new, backup_dir, label, stamp=None):
+    """Back up the existing file, write the merged one atomically, read it back. Return the backup path or None.
+
+    A symlinked settings file (dotfiles users) is written through to its target, so the link survives.
+    Any failure leaves the original file as it was, removes the temporary file, and raises Paused.
+    """
     path = Path(path)
-    backup = None
-    mode = None
-    if path.exists():
-        mode = path.stat().st_mode & 0o777
-        stamp = stamp or datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        backup = path.with_name(path.name + BACKUP_TAG + stamp)
-        n = 1
-        while backup.exists():
-            n += 1
-            backup = path.with_name(f'{path.name}{BACKUP_TAG}{stamp}-{n}')
-        shutil.copy2(path, backup)
-        if os.name != 'nt':
-            os.chmod(backup, 0o600)
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + '.bridge-readiness.tmp')
-    temp.write_text(json.dumps(new, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    if mode is not None and os.name != 'nt':
-        os.chmod(temp, mode)
-    os.replace(temp, path)
-    readback = read_settings(path)
+    target = Path(os.path.realpath(path)) if path.is_symlink() else path
+    backup = temp = None
+    try:
+        mode = None
+        if target.exists():
+            mode = target.stat().st_mode & 0o777
+            stamp = stamp or datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+            Path(backup_dir).mkdir(parents=True, exist_ok=True)
+            backup = Path(backup_dir) / f'{label}.{stamp}'
+            n = 1
+            while backup.exists():
+                n += 1
+                backup = Path(backup_dir) / f'{label}.{stamp}-{n}'
+            with _create_private(backup) as out:
+                out.write(target.read_bytes())
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name(f'{target.name}.bridge-readiness-{os.getpid()}.tmp')
+        with _create_private(temp) as out:
+            out.write((json.dumps(new, indent=2, ensure_ascii=False) + '\n').encode('utf-8'))
+        if mode is not None and os.name != 'nt':
+            os.chmod(temp, mode)
+        os.replace(temp, target)
+        temp = None
+    except OSError as exc:
+        if temp is not None:
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+        kept = f' A copy of the file as it was is at {backup}.' if backup else ''
+        raise Paused(f'{display(path)} could not be written ({exc.strerror or exc}). It was left as it was.{kept}')
+    readback = read_settings(target)
     if readback != new or not set(original or {}) <= set(readback):
         raise Paused(f'{display(path)} did not read back as written. The backup is at {backup}.')
     return backup
@@ -244,6 +290,7 @@ def check_teams(machine):
     return item('agent teams', False, f'switched off in {display(machine.user_settings)}',
                 fix='Run this step again and say yes; it adds one line under "env" in that file.',
                 change={'kind': 'settings', 'path': str(machine.user_settings), 'env': {TEAMS_KEY: TEAMS_VALUE},
+                        'label': 'settings.json',
                         'text': f'in {display(machine.user_settings)}: ' + '; '.join(changes)})
 
 
@@ -264,6 +311,7 @@ def check_allow_rule(machine):
     return item('launcher permission', False, 'the bridge launcher is not allowed yet, so the agent could be stopped from starting the bridge',
                 fix='Run this step again and say yes; it adds the launcher\'s exact allow rules to the workbench\'s local settings.',
                 change={'kind': 'settings', 'path': str(machine.workbench_settings), 'allow': rules,
+                        'label': 'workbench-settings.local.json',
                         'text': f'in {display(machine.workbench_settings)}: ' + '; '.join(changes)})
 
 
@@ -298,14 +346,32 @@ def auth_status(machine, claude):
     out = result.stdout or ''
     if result.returncode == 127 or 'command not found' in (out + (result.stderr or '')).lower():
         return None, 'terminal_cannot_find'
-    start, end = out.find('{'), out.rfind('}')
-    if start < 0 or end < start:
-        return None, 'unreadable'
-    try:
-        data = json.loads(out[start:end + 1])
-    except ValueError:
-        return None, 'unreadable'
-    return (data if isinstance(data, dict) else None), 'ok'
+    data = parse_auth(out)
+    return (data, 'ok') if data is not None else (None, 'unreadable')
+
+
+def parse_auth(out):
+    """Find the status object in output that may carry shell noise before or after it (zsh -ic reads ~/.zshrc).
+
+    Decodes one JSON value at each '{' in turn, so a stray brace in a greeting cannot swallow or split the object.
+    """
+    decoder = json.JSONDecoder()
+    i = out.find('{')
+    while i >= 0:
+        try:
+            obj, _ = decoder.raw_decode(out, i)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict) and 'loggedIn' in obj:
+            return obj
+        i = out.find('{', i + 1)
+    return None
+
+
+def safe_name(value):
+    """A key source is a setting's name (ANTHROPIC_API_KEY, apiKeyHelper), never a value; print it only if it looks like one."""
+    text = str(value or '')
+    return text if re.fullmatch(r'[A-Za-z0-9_ ./-]{1,40}', text) else None
 
 
 def check_claude(machine):
@@ -317,9 +383,11 @@ def check_claude(machine):
         return [cli, item('claude login', False, 'cannot check until the terminal Claude is installed', fix=cli['fix'])]
     cli = item('claude CLI', True, f'installed at {claude}')
     data, why = auth_status(machine, claude)
-    login_fix = ('The student opens their own Terminal (Mac) or PowerShell (Windows), types claude, presses Enter, types /login, '
-                 'picks their Claude account (the one they use in the app, not an API console), and approves it in the browser. '
-                 'Then type /exit and run this check again. Never sign in for them.')
+    login_fix = ('You run: claude auth login --claudeai   It opens the student\'s browser; the student picks the Claude account '
+                 'they use in this app (not an API console) and approves it there. The student never types a command, and you '
+                 'never ask for or see a password or code. Then run this check again.')
+    key_fix = ('Do not remove the key yourself. Tell the student plainly that bridge runs would be billed to an API key, not their '
+               'subscription, and point them to their program channel.')
     if why == 'terminal_cannot_find':
         return [cli, item('claude login', False, 'your Terminal cannot find the terminal Claude, and the bridge starts it from there',
                           fix='Redo step 4.5 so ~/.zshrc has the ~/.local/bin line, then run this check again.')]
@@ -327,14 +395,23 @@ def check_claude(machine):
         return [cli, item('claude login', False, 'the terminal Claude did not say whether it is signed in', fix=login_fix)]
     if data.get('loggedIn') is not True:
         return [cli, item('claude login', False, 'the terminal Claude is not signed in', fix=login_fix)]
-    method = str(data.get('authMethod') or 'unknown')
+    method = str(data.get('authMethod') or 'none')
     provider = str(data.get('apiProvider') or 'firstParty')
-    if 'api' in method.lower() and 'key' in method.lower():
-        return [cli, item('claude login', False, 'the terminal Claude is signed in with an API key, not a Claude subscription, so bridge runs would be billed to that key',
-                          fix='Do not remove the key yourself. Tell the student plainly and point them to the aibl-bridge-setup skill (step 3, "FAIL billing") or their program channel.')]
-    if provider != 'firstParty':
+    if data.get('apiKeySource') is not None:
+        # An API key in the environment or a key helper outranks the subscription sign-in, whatever authMethod says.
+        source = safe_name(data.get('apiKeySource'))
+        where = f' (from {source})' if source else ''
+        return [cli, item('claude login', False, f'the terminal Claude would use an API key{where}, not the Claude subscription, '
+                          'so bridge runs would be billed to that key', fix=key_fix)]
+    if method in ('api_key', 'api_key_helper'):
+        return [cli, item('claude login', False, 'the terminal Claude is signed in with an API key, not a Claude subscription, '
+                          'so bridge runs would be billed to that key', fix=key_fix)]
+    if provider != 'firstParty' or method == 'third_party':
         return [cli, item('claude login', False, f'the terminal Claude is signed in through {provider}, not a Claude subscription',
                           fix='Tell the student plainly and ask in their program channel before using the bridge.')]
+    if method not in SUBSCRIPTION_METHODS:
+        return [cli, item('claude login', False, f'the terminal Claude is not signed in with a Claude subscription (method: {safe_name(method) or "unrecognized"})',
+                          fix=login_fix)]
     return [cli, item('claude login', True, f'signed in with a Claude subscription (method: {method})')]
 
 
@@ -385,7 +462,7 @@ def apply(machine, yes=False, stamp=None):
             data = read_settings(path)
             new, changes = merge(data, env=change.get('env'), allow=change.get('allow', ()))
             if changes:
-                backup = write_settings(path, data, new, stamp=stamp)
+                backup = write_settings(path, data, new, machine.backup_dir, change['label'], stamp=stamp)
                 if backup:
                     backups.append(str(backup))
                 changed.append(f'{display(path)}: ' + '; '.join(changes))
