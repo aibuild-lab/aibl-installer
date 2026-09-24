@@ -563,6 +563,35 @@ function isNamesOnlyRead(cmd, tokens) {
   return !pattern.includes('=') || /=\$?$/.test(pattern);
 }
 
+// Names-only environment listing, NUL-record form only: `env -0 | cut -z -d= -f1`.
+// With NUL records every variable is exactly one record, so `cut` keeps only the text before
+// the first `=`, which is the name. Newline records are NOT accepted: a multi-line value (a PEM
+// key, say) spills continuation lines, and `cut` prints a line without the delimiter in full;
+// `-s` does not fix that, because base64 lines can themselves contain `=`.
+function isBareNulEnv(tokens) {
+  return commandName(tokens[0]) === 'env' && tokens.length === 2 && ['-0', '--null'].includes(tokens[1]);
+}
+// `cut -z -d= -f1` in any spelling of those three options. Any other field list, a range,
+// `--complement`, a different delimiter, or a missing `-z` could carry values and is refused.
+function isNulCutFieldOneOnEquals(tokens) {
+  if (commandName(tokens[0]) !== 'cut') return false;
+  let delimiter = null;
+  let fields = null;
+  let zeroTerminated = false;
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === '-z' || token === '--zero-terminated') zeroTerminated = true;
+    else if (token === '-d' || token === '--delimiter') delimiter = tokens[++i];
+    else if (token.startsWith('--delimiter=')) delimiter = token.slice('--delimiter='.length);
+    else if (/^-d./.test(token)) delimiter = token.slice(2);
+    else if (token === '-f' || token === '--fields') fields = tokens[++i];
+    else if (token.startsWith('--fields=')) fields = token.slice('--fields='.length);
+    else if (/^-f./.test(token)) fields = token.slice(2);
+    else return false;
+  }
+  return zeroTerminated && delimiter === '=' && fields === '1';
+}
+
 function denyIfSecretPath(text) {
   const raw = String(text || '');
   if (!raw) return;
@@ -633,14 +662,22 @@ if (/\bbw\s+export\b/.test(inspection))                       deny('bw export pr
 if (/\bbw\s+list\s+items\b/.test(inspection))                 deny('bw list items prints item contents including passwords. Use `bw get <id>` for a single field.');
 if (/\bop\s+item\s+get\b[^|]*--reveal/.test(inspection))      deny('op item get --reveal prints field values. Use Infisical runtime injection for non-human consumers; keep 1Password use interactive and human-only.');
 if (/\bsupabase\s+projects\s+api-keys\b[^|]*--reveal/i.test(inspection)) deny('supabase projects api-keys --reveal prints project secrets.');
-// systemd's `--plain` suppresses tree glyphs in a unit listing; it does not reveal unit
-// configuration or environment. Keep this exception exact so similarly named flags on secret
-// stores remain denied, including variants of the systemctl command with broader selectors.
-const inspectionWithoutSafeSystemdPlain = inspection.replace(
-  /\bsystemctl\s+list-units\s+--type=service\s+--state=running\s+--no-legend\s+--no-pager\s+--plain\b/g,
-  'systemctl list-units --type=service --state=running --no-legend --no-pager'
-);
-if (/--plain\b/.test(inspectionWithoutSafeSystemdPlain))       deny('--plain forces raw secret values to stdout.');
+// `--plain` only means "print raw values" on secret-store CLIs. On everything else it is an
+// output-format flag (systemd's `--plain` just drops tree glyphs from a unit listing), so key on
+// the binary each segment actually runs. `segments` already includes unwrapped payloads
+// (`bash -c`, `ssh host "..."`, `op run --`, `sudo`), so a wrapped secret-store call is still seen.
+const PLAIN_VALUE_CLIS = new Set(['infisical', 'op', 'vault', 'doppler', 'bw', 'chamber', 'sops', 'gopass', 'pass', 'teller']);
+for (const seg of segments) {
+  const tokens = words(seg);
+  if (!PLAIN_VALUE_CLIS.has(resolveBinary(tokens) || '')) continue;
+  if (tokens.some(token => token === '--plain' || token.startsWith('--plain=')))
+    deny('--plain on a secret-store CLI forces raw secret values to stdout.');
+}
+// Payloads the tokenizer does not unwrap (`python3 -c "os.system('doppler ... --plain')"`,
+// `node -e`, `xargs doppler ...`) keep the old text match, now scoped to a secret-store CLI
+// name followed by --plain in the same command run, so `systemctl ... --plain` stays allowed.
+if (/(?:^|[\s'"`(\/])(?:infisical|op|vault|doppler|bw|chamber|sops|gopass|pass|teller)\s[^\n;&|'"`]*--plain\b/.test(inspection))
+  deny('--plain on a secret-store CLI forces raw secret values to stdout.');
 // `op read` as a LIVE command prints a secret. Token inspection distinguishes an executable
 // (including a path-qualified one or a nested shell payload) from inert quoted grep text.
 for (const clause of clauses) {
@@ -661,10 +698,24 @@ if (!isMaskedClause(inspection) &&
 
 // 2a. Whole-environment dumps - BASH. Check each command segment for a bare dump form.
 if (!isPS) {
-  for (const seg of segments) {
-    const tokens = words(seg);
+  // `env -0` piped straight into `cut -z -d= -f1` prints variable NAMES only, the same
+  // allowance isNamesOnlyRead gives a .env audit. Track it per pipeline stage, since the
+  // `segments` list alone loses which stage feeds which.
+  const namesOnlyEnvStages = new WeakSet();
+  const envStages = [];
+  for (const clause of clauses) {
+    const stages = splitShell(clause, true).map(stage => ({ text: stage }));
+    stages.forEach((stage, index) => {
+      envStages.push(stage);
+      if (isBareNulEnv(words(stage.text)) && isNulCutFieldOneOnEquals(words(stages[index + 1]?.text || '')))
+        namesOnlyEnvStages.add(stage);
+    });
+  }
+  for (const stage of envStages) {
+    const tokens = words(stage.text);
     const cmd = commandName(tokens[0]);
-    if (cmd === 'env' && envPayload(tokens)?.length === 0)
+    const namesOnly = namesOnlyEnvStages.has(stage);
+    if (cmd === 'env' && envPayload(tokens)?.length === 0 && !namesOnly)
       deny('env without a utility payload prints the environment, including injected secrets. Run a real command after its options and assignments.');
     if (['printenv', 'run-printenv'].includes(cmd) && tokens.length === 1)
       deny('Bare printenv prints every variable. Name one non-secret var, e.g. `printenv PATH`.');
@@ -842,7 +893,12 @@ for (const segment of segments) {
       (QUALIFIED_DUMP_VERBS.has(verb) && RUNTIME_INTROSPECTORS.has(binary));
     const safeDockerMetadata = binary === 'docker' && verb === 'inspect' &&
       topLevelSegments.has(segment) && selectsSafeDockerInspectFormat(segment, tokens);
-    if (dumps && !safeDockerMetadata)
+    // `docker buildx inspect <builder>` describes a build instance (driver, nodes, platforms),
+    // not a container or image, so it has no environment to render. `buildx imagetools inspect`
+    // can print an image config and stays covered.
+    const dockerBuilderInspect = binary === 'docker' && verb === 'inspect' &&
+      i > 0 && positionals[i - 1].toLowerCase() === 'buildx';
+    if (dumps && !safeDockerMetadata && !dockerBuilderInspect)
       deny(`\`${binary} ${verb}\` renders the target's full configuration, which includes its environment variables. Read the single setting you need, or pass a --format/--property selector that excludes Env.`);
   }
   // `kubectl get pod -o yaml` prints the whole spec; plain `kubectl get pods` does not. Key on
