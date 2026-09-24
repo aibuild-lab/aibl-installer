@@ -119,7 +119,7 @@ check('failed shell errors emit names-only context and never repeat the value', 
 
 // A script that BUILDS a DSN prints a template slot, not a password. Each slot below must pass
 // through untouched, while a real password in the same position is still redacted.
-const DSN_TEMPLATE_SLOTS = ['%s', '%(pw)s', '$PGPASSWORD', '${PGPASSWORD}', '{password}', '<password>', '****'];
+const DSN_TEMPLATE_SLOTS = ['%s', '%(pw)s', '$PGPASSWORD', '${PGPASSWORD}', '$DB_PASSWORD', '${DB_PASSWORD}', '{password}', '<password>', '****'];
 const dsn = (password) => ['postgresql://svc', password].join(':') + '@127.0.0.1:5432/app';
 
 check('DSN template slots are not reported as leaked passwords', () => {
@@ -135,7 +135,7 @@ check('DSN template slots are not reported as leaked passwords', () => {
 
 check('a real DSN password is still redacted next to a template slot', () => {
   const realPassword = 'N0t' + 'A' + 'Slot' + '9'.repeat(8);
-  for (const password of [realPassword, `${realPassword}%s`, `$${realPassword}!`]) {
+  for (const password of [realPassword, `${realPassword}%s`, `$${realPassword}!`, '$ecretPw9']) {
     const result = run({
       hook_event_name: 'PostToolUse',
       tool_response: { stdout: `${dsn('%s')} ${dsn(password)}`, stderr: '', interrupted: false, isImage: false },

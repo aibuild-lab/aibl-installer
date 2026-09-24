@@ -42,7 +42,7 @@ const PATTERNS = [
     // `{password}`, `<password>`, or a run of asterisks. Leaving these alone stops a script
     // that BUILDS a DSN from being reported as a leaked one.
     isPlaceholder: password =>
-      /^(?:%[-+ 0#]*\d*s|%\([A-Za-z_][A-Za-z0-9_]*\)s|\$[A-Za-z_][A-Za-z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_:-]*\}|\{[A-Za-z_][A-Za-z0-9_]*\}|<[A-Za-z_][A-Za-z0-9_ -]*>|\*+)$/.test(password),
+      /^(?:%[-+ 0#]*\d*s|%\([A-Za-z_][A-Za-z0-9_]*\)s|\$[A-Z_][A-Z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_:-]*\}|\{[A-Za-z_][A-Za-z0-9_]*\}|<[A-Za-z_][A-Za-z0-9_ -]*>|\*+)$/.test(password),
   },
   { name: 'Bearer token', re: /\bBearer\s+[A-Za-z0-9._-]{20,}/g },
   { name: 'JWT', re: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g },
