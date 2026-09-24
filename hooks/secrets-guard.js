@@ -569,17 +569,19 @@ function isNamesOnlyRead(cmd, tokens) {
 // key, say) spills continuation lines, and `cut` prints a line without the delimiter in full;
 // `-s` does not fix that, because base64 lines can themselves contain `=`.
 function isBareNulEnv(tokens) {
-  return commandName(tokens[0]) === 'env' && tokens.length === 2 && ['-0', '--null'].includes(tokens[1]);
+  const parsed = withoutRedirections(tokens);
+  return !parsed.redirected && commandName(parsed.tokens[0]) === 'env' && parsed.tokens.length === 2 && ['-0', '--null'].includes(parsed.tokens[1]);
 }
 // `cut -z -d= -f1` in any spelling of those three options. Any other field list, a range,
 // `--complement`, a different delimiter, or a missing `-z` could carry values and is refused.
 function isNulCutFieldOneOnEquals(tokens) {
-  if (commandName(tokens[0]) !== 'cut') return false;
+  const parsed = withoutRedirections(tokens);
+  if (parsed.redirected || commandName(parsed.tokens[0]) !== 'cut') return false;
   let delimiter = null;
   let fields = null;
   let zeroTerminated = false;
-  for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
+  for (let i = 1; i < parsed.tokens.length; i++) {
+    const token = parsed.tokens[i];
     if (token === '-z' || token === '--zero-terminated') zeroTerminated = true;
     else if (token === '-d' || token === '--delimiter') delimiter = tokens[++i];
     else if (token.startsWith('--delimiter=')) delimiter = token.slice('--delimiter='.length);
@@ -590,6 +592,28 @@ function isNulCutFieldOneOnEquals(tokens) {
     else return false;
   }
   return zeroTerminated && delimiter === '=' && fields === '1';
+}
+
+// Shell redirections are neither utility options nor operands. Keep them out of the command
+// parser, but remember their presence: `env -0 > names | cut ...` does not feed cut at all.
+function withoutRedirections(tokens) {
+  const kept = [];
+  let redirected = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (/^(?:\d*>>?|&>>?|<>|<&|>&)$/.test(token)) {
+      redirected = true;
+      i++;
+    } else if (/^(?:\d*>>?|&>>?|<>|<&|>&).+/.test(token)) {
+      redirected = true;
+    } else if (/^(.+?)(?:>>?|&>>?|<>|<&|>&).+$/.test(token)) {
+      kept.push(token.replace(/^(.+?)(?:>>?|&>>?|<>|<&|>&).+$/, "$1"));
+      redirected = true;
+    } else {
+      kept.push(token);
+    }
+  }
+  return { tokens: kept, redirected };
 }
 
 function denyIfSecretPath(text) {
@@ -712,12 +736,13 @@ if (!isPS) {
     });
   }
   for (const stage of envStages) {
-    const tokens = words(stage.text);
+    const parsed = withoutRedirections(words(stage.text));
+    const tokens = parsed.tokens;
     const cmd = commandName(tokens[0]);
     const namesOnly = namesOnlyEnvStages.has(stage);
     if (cmd === 'env' && envPayload(tokens)?.length === 0 && !namesOnly)
       deny('env without a utility payload prints the environment, including injected secrets. Run a real command after its options and assignments.');
-    if (['printenv', 'run-printenv'].includes(cmd) && tokens.length === 1)
+    if (['printenv', 'run-printenv'].includes(cmd) && tokens.slice(1).every(arg => ['-0', '--null'].includes(arg)))
       deny('Bare printenv prints every variable. Name one non-secret var, e.g. `printenv PATH`.');
     if (cmd === 'set' && tokens.length === 1) deny('Bare `set` dumps all shell variables.');
     if (['declare', 'typeset'].includes(cmd) && tokens.slice(1).some(arg => /^-\w*p\w*$/.test(arg)))

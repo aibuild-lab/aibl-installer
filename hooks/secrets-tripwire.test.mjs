@@ -119,7 +119,7 @@ check('failed shell errors emit names-only context and never repeat the value', 
 
 // A script that BUILDS a DSN prints a template slot, not a password. Each slot below must pass
 // through untouched, while a real password in the same position is still redacted.
-const DSN_TEMPLATE_SLOTS = ['%s', '%(pw)s', '$PGPASSWORD', '${PGPASSWORD}', '$DB_PASSWORD', '${DB_PASSWORD}', '{password}', '<password>', '****'];
+const DSN_TEMPLATE_SLOTS = ['%s', '%(pw)s', '$PGPASSWORD', '${PGPASSWORD}', '{password}', '<password>', '****'];
 const dsn = (password) => ['postgresql://svc', password].join(':') + '@127.0.0.1:5432/app';
 
 check('DSN template slots are not reported as leaked passwords', () => {
@@ -145,6 +145,18 @@ check('a real DSN password is still redacted next to a template slot', () => {
     assert.ok(!serialized.includes(password));
     assert.match(serialized, /DB URL with password/);
     assert.ok(serialized.includes(dsn('%s')), 'template slot next to a real password was altered');
+  }
+});
+
+check('DB_PASSWORD forms are redacted even when they look synthetic', () => {
+  for (const password of ['$DB_PASSWORD', '${DB_PASSWORD}', '${DB_PASSWORD:-SyntheticSecret123}']) {
+    const result = run({
+      hook_event_name: 'PostToolUse',
+      tool_response: { stdout: dsn(password), stderr: '', interrupted: false, isImage: false },
+    });
+    assert.equal(result.status, 0);
+    assert.ok(!result.stdout.includes(password));
+    assert.match(result.stdout, /DB URL with password/);
   }
 });
 

@@ -39,8 +39,8 @@ const PATTERNS = [
     name: 'DB URL with password',
     re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:@/\s]+:([^@/\s]+)@/g,
     // A template slot is not a credential: printf `%s`, `%(pw)s`, shell `$VAR`/`${VAR}`,
-    // `{password}`, `<password>`, or a run of asterisks. Leaving these alone stops a script
-    // that BUILDS a DSN from being reported as a leaked one.
+    // `{password}`, `<password>`, or a run of asterisks. DB_PASSWORD remains a redaction
+    // trigger below, even when a synthetic default makes it look like a template.
     isPlaceholder: password =>
       /^(?:%[-+ 0#]*\d*s|%\([A-Za-z_][A-Za-z0-9_]*\)s|\$[A-Z_][A-Z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_:-]*\}|\{[A-Za-z_][A-Za-z0-9_]*\}|<[A-Za-z_][A-Za-z0-9_ -]*>|\*+)$/.test(password),
   },
@@ -55,6 +55,10 @@ function redactText(value) {
   for (const pattern of PATTERNS) {
     pattern.re.lastIndex = 0;
     redacted = redacted.replace(pattern.re, (match, group) => {
+      if (pattern.name === 'DB URL with password' && /^\$\{?DB_PASSWORD\b/i.test(group)) {
+        hits.add(pattern.name);
+        return `[REDACTED: ${pattern.name}]`;
+      }
       if (pattern.isPlaceholder && pattern.isPlaceholder(group)) return match;
       hits.add(pattern.name);
       return `[REDACTED: ${pattern.name}]`;
