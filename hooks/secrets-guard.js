@@ -14,7 +14,8 @@
 // `infisical secrets agent-proxy run -- cat .env` cannot dump. Blocks raw op reads AND printed `$(op read …)` command
 // substitution; feeding a program `"$(op read …)"` and masked first4 checks stay allowed.
 // Remote-exec and wrapper forms (ssh, docker/kubectl exec, sudo, nohup, timeout, su -c,
-// find -exec) are likewise unwrapped so the inner command faces the same rules as a local run.
+// find -exec) are likewise unwrapped so the inner command faces the same rules as a local run,
+// and so are the Windows shells (pwsh/powershell -Command or -EncodedCommand, cmd /c, iex).
 
 const fs = require('fs');
 
@@ -243,6 +244,37 @@ const NESTED_COMMAND_FLAGS = new Set([
   '--scripts', '--script', '--exec', '--entrypoint', '--run', '--cmd',
 ]);
 
+// PowerShell host parameters that take a SEPARATE operand. Names match on any unambiguous
+// prefix and any case, so the documented short aliases are listed alongside the full names.
+// A double-quoted Windows path loses its backslashes to the tokenizer's escape handling, so
+// `"C:\WINDOWS\...\powershell.exe"` arrives as one run-together word. Match the `.exe` suffix too.
+const isPowershellHost = name => /^(?:pwsh|powershell)$/.test(name) || /(?:pwsh|powershell)\.exe$/.test(name);
+const isCmdHost = name => name === 'cmd' || name.endsWith('cmd.exe');
+const POWERSHELL_OPERAND_PARAMETERS = ['executionpolicy', 'ep', 'ex', 'windowstyle', 'w', 'workingdirectory', 'wd',
+  'outputformat', 'o', 'of', 'inputformat', 'if', 'in', 'configurationname', 'configurationfile', 'config',
+  'version', 'v', 'psconsolefile', 'settingsfile', 'settings', 'custompipename', 'cu'];
+
+// Return the command text a PowerShell host would run: the -Command tail, a decoded
+// -EncodedCommand, or (Windows PowerShell 5.1 only) the first positional, which that host treats
+// as a command where pwsh treats it as a script file. -File runs a script and is not inspected,
+// the same as `bash script.sh`.
+function powershellPayload(tokens) {
+  const host = commandName(tokens[0]);
+  for (let i = 1; i < tokens.length; i++) {
+    const param = /^(?:--?|\/)([A-Za-z]+)$/.exec(tokens[i]);
+    if (!param) return /powershell(?:\.exe)?$/.test(host) ? tokens.slice(i).join(' ') : '';
+    const name = param[1].toLowerCase();
+    if ('command'.startsWith(name)) return tokens.slice(i + 1).filter(arg => arg !== '-').join(' ');
+    if (name === 'e' || name === 'ec' || (name.length > 1 && 'encodedcommand'.startsWith(name))) {
+      // The operand is base64 of UTF-16LE text. Decoding only reads it; nothing runs.
+      try { return Buffer.from(String(tokens[i + 1] || ''), 'base64').toString('utf16le'); } catch (_) { return ''; }
+    }
+    if ('file'.startsWith(name)) return '';
+    if (POWERSHELL_OPERAND_PARAMETERS.includes(name)) i++;
+  }
+  return '';
+}
+
 // Skip a wrapper's option tokens to reach its first positional argument. `--` ends option parsing.
 function skipOptionTokens(tokens, start, operandOptions) {
   let i = start;
@@ -303,6 +335,31 @@ function collectInspectionCommands(root) {
         (arg === '-c' || /^-[A-Za-z]*c[A-Za-z]*$/.test(arg)));
       if (commandIndex >= 0 && commandIndex + 1 < effective.length)
         inspectCommand(effective[commandIndex + 1], depth + 1);
+    }
+
+    // Windows shells are the same nesting under other names: `pwsh -Command 'cat .env'` and
+    // `cmd /c type .env` leak exactly what `bash -c 'cat .env'` does, and either shell tool can
+    // launch them. Codex on Windows also displays every command in this wrapped form. (Student
+    // report 09-24-2026, Codex CLI 0.156.1 on Windows.)
+    if (isPowershellHost(executable)) {
+      const payload = powershellPayload(effective);
+      if (payload) inspectCommand(payload, depth + 1);
+    }
+    if (['invoke-expression', 'iex'].includes(executable)) {
+      const payload = effective.slice(1).filter(arg => !/^-command$/i.test(arg)).join(' ');
+      if (payload) inspectCommand(payload, depth + 1);
+    }
+    if (isCmdHost(executable)) {
+      // `/c`, `/k` and `/r` hand the rest of the line to cmd. Git Bash spells them `//c`.
+      for (let i = 1; i < effective.length; i++) {
+        const run = /^\/{1,2}([ckr])(.*)$/i.exec(effective[i]);
+        if (run) {
+          const payload = [run[2], ...effective.slice(i + 1)].filter(Boolean).join(' ');
+          if (payload) inspectCommand(payload, depth + 1);
+          break;
+        }
+        if (!effective[i].startsWith('/')) break;
+      }
     }
 
     // Remote-exec and wrapper forms must face the same rules as a local run, so unwrap each to
@@ -457,11 +514,16 @@ const topLevelSegments = new Set(splitShell(c, true));
 // executable token, not words inside quoted grep patterns or an unrelated neighboring command.
 // Whole-file printers: every non-option token is a filename. The Bash list is POSIX text
 // utilities - a set that has not gained a member in decades, unlike the vendor-CLI lists.
-const READ_COMMANDS = new Set((isPS
-  ? ['get-content', 'gc', 'type', 'cat', 'more', 'select-string', 'sls']
+// The Windows readers apply under the Bash tool name as well (camp-hq W-#234): Codex on Windows
+// reports its shell as `Bash` while running PowerShell, so `type .env` and `Get-Content .env`
+// arrive labelled Bash, and a wrapped `pwsh -Command` or `cmd /c` payload is Windows syntax
+// whichever tool sent it. In a POSIX shell these names read nothing, so the cost is nil.
+const WINDOWS_READ_COMMANDS = ['get-content', 'gc', 'type', 'cat', 'more', 'select-string', 'sls'];
+const READ_COMMANDS = new Set(isPS ? WINDOWS_READ_COMMANDS
   : ['cat', 'bat', 'less', 'more', 'head', 'tail', 'nl', 'xxd', 'od', 'strings', 'tac',
      'sort', 'uniq', 'tee', 'rev', 'fold', 'paste', 'join', 'column', 'expand', 'unexpand',
-     'pr', 'base64', 'base32', 'hexdump', 'cut', 'shuf', 'split', 'csplit', 'dd', 'cmp']));
+     'pr', 'base64', 'base32', 'hexdump', 'cut', 'shuf', 'split', 'csplit', 'dd', 'cmp',
+     ...WINDOWS_READ_COMMANDS]);
 // Pattern-taking readers: the first positional is a search pattern or filter EXPRESSION, not a
 // file. Skipping it keeps `grep -n "cat .env" notes.md` and `jq .env config.json` allowed while
 // `grep . .env` is caught. PowerShell uses named parameters, so this does not apply there.
@@ -633,14 +695,24 @@ if (!isPS) {
 
 // 2b. Whole-environment dumps - POWERSHELL. The Env: drive holds injected secrets
 // (op run / infisical run populate it). `$env:NAME` single reads are deliberately allowed.
-if (isPS) {
+// These run under the Bash tool name too, for the same reason as the Windows readers in rule 3
+// (camp-hq W-#234): on Windows, Codex labels PowerShell `Bash`. None of these spellings mean
+// anything to a POSIX shell, so applying them there blocks nothing real.
+{
+  // Under the Bash label the two text rules below match only where a command can begin (segment
+  // start, or after `=`, `(`, `|`), so a heredoc commit body that NAMES the call in prose is not
+  // read as running it. Replayed against ~24k real commands, that prose case was the only change.
+  const psTexts = isPS ? [inspection] : segments;
+  const lead = isPS ? '' : '(?:^|[=(|]\\s*)';
   // Get-Item is a second way to reach the drive, `Env:*` a second way to spell "all of it", and
   // `)` a terminator that `(Get-Item Env:).Value` relies on. A named read (`Get-Item Env:PATH`)
   // has a variable name after the colon and stays allowed.
-  if (/\b(Get-ChildItem|gci|Get-Item|gi|ls|dir)\s+(-\w+\s+)*env:(\\|\*)?\s*(\||;|&|\)|$)/i.test(inspection))
+  const envDriveList = new RegExp(lead + '\\b(Get-ChildItem|gci|Get-Item|gi|ls|dir)\\s+(-\\w+\\s+)*env:(\\\\|\\*)?\\s*(\\||;|&|\\)|$)', 'i');
+  if (psTexts.some(text => envDriveList.test(text)))
     deny('Listing the Env: drive prints every environment variable, including injected secrets. Read one with $env:NAME.');
   // [System.Environment] is the fully-qualified spelling of the same call and must match too.
-  if (/\[(?:System\.)?Environment\]::GetEnvironmentVariables/i.test(inspection))
+  const environmentDump = new RegExp(lead + '\\[(?:System\\.)?Environment\\]::GetEnvironmentVariables', 'i');
+  if (psTexts.some(text => environmentDump.test(text)))
     deny('[Environment]::GetEnvironmentVariables() dumps all environment variables.');
   for (const seg of segments) {
     if (/^(Get-Variable|gv)\s*$/i.test(seg)) deny('Bare Get-Variable dumps all PowerShell variables, which may hold secrets. Name one: Get-Variable PATH.');
