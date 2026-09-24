@@ -117,6 +117,37 @@ check('failed shell errors emit names-only context and never repeat the value', 
   assert.match(specific.additionalContext, /Anthropic API key/);
 });
 
+// A script that BUILDS a DSN prints a template slot, not a password. Each slot below must pass
+// through untouched, while a real password in the same position is still redacted.
+const DSN_TEMPLATE_SLOTS = ['%s', '%(pw)s', '$PGPASSWORD', '${PGPASSWORD}', '{password}', '<password>', '****'];
+const dsn = (password) => ['postgresql://svc', password].join(':') + '@127.0.0.1:5432/app';
+
+check('DSN template slots are not reported as leaked passwords', () => {
+  for (const slot of DSN_TEMPLATE_SLOTS) {
+    const result = run({
+      hook_event_name: 'PostToolUse',
+      tool_response: { stdout: `connect ${dsn(slot)}`, stderr: '', interrupted: false, isImage: false },
+    });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '', `slot ${slot} was redacted`);
+  }
+});
+
+check('a real DSN password is still redacted next to a template slot', () => {
+  const realPassword = 'N0t' + 'A' + 'Slot' + '9'.repeat(8);
+  for (const password of [realPassword, `${realPassword}%s`, `$${realPassword}!`]) {
+    const result = run({
+      hook_event_name: 'PostToolUse',
+      tool_response: { stdout: `${dsn('%s')} ${dsn(password)}`, stderr: '', interrupted: false, isImage: false },
+    });
+    assert.equal(result.status, 0);
+    const serialized = result.stdout;
+    assert.ok(!serialized.includes(password));
+    assert.match(serialized, /DB URL with password/);
+    assert.ok(serialized.includes(dsn('%s')), 'template slot next to a real password was altered');
+  }
+});
+
 check('non-tool events are silent', () => {
   const result = run({
     hook_event_name: 'SessionStart',

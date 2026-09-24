@@ -1,5 +1,13 @@
 # AIBL Installer changes
 
+## 2026-09-24
+
+- Secrets guard: four false-alarm fixes from a live database cutover. Guard files and manifest change together (`ref` aibl-installer-2026-09-24-secrets-guard-narrow-false-positives).
+  - **`--plain` keys on the binary.** The deny fires only when a secret-store CLI (infisical, op, vault, doppler, bw, chamber, sops, gopass, pass, teller) runs with `--plain`, including wrapped forms (`bash -c`, `ssh`, `sudo`, `op run --`) and payloads the tokenizer does not unwrap (`python3 -c`, `node -e`, `xargs`). Every `systemctl ... --plain` listing is allowed; this replaces the exact-string exception from #33.
+  - **Names-only environment listing, NUL-record form only.** `env -0` (or `env --null`) piped directly into `cut -z -d= -f1` is allowed: each variable is one record, so a multi-line value cannot spill. The newline form `env | cut -d= -f1` stays denied, with or without `-s`, because `cut` prints a line without `=` in full and base64 lines can contain `=`. Other fields, ranges, `--complement`, other delimiters, and any stage between `env` and `cut` stay denied.
+  - **`docker buildx inspect <builder>` is allowed.** It describes a build instance, not a container. Container, image, and `buildx imagetools` inspect stay denied.
+  - **Tripwire skips DSN template slots.** The "DB URL with password" pattern leaves `%s`, `%(x)s`, `$VAR`, `${VAR}`, `{x}`, `<x>`, and `***` alone. Real passwords are still redacted.
+
 ## 2026-09-19
 
 - Six fixes from the first real Mac run of the paste route (a team member on a Homebrew machine, 09-19). None changes the install flow or a pinned guard file.
