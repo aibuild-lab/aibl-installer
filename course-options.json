@@ -1,8 +1,7 @@
 {
   "schema_version": "aibl.program-registry/v1",
-  "about": "One line per program. Ids are the site ledger's program slugs. The installer builds the hub (Essentials) and never asks which program a student is in; 'menu' is kept for tooling that lists programs but the installer no longer reads it. scripts/enroll.py walks every non-foundation entry later, inside the workbench: 'publisher' is the repository a student must be able to read; 'adopt_skill' is the workbench skill that verifies and applies that program's release (null means no adoption route yet, so the student asks for supported delivery). 'requires' is checked strictly by the installer for the hub; 'includes' is reported softly by enroll (inclusion does not prove invitation state). 'source_repository' is where the release is built and is informational here. 'release_product' is the id the workbench's adoption tool and the publisher's release pins use; where it differs from 'id', the registry is the only place that knows both, so nothing in the release tooling has to rename. Current Git enrollment uses a program enrollment.repository and enrollment.branch, through enrollment.skill. publisher, release_product and adopt_skill remain historical package compatibility fields; do not use them to override Git enrollment.",
+  "about": "One line per program. Ids are the site ledger's program slugs. The installer builds every student the same workbench from hub.public_template and never asks which program a student is in; no route creates a new workbench from the retired private aibuild-lab/agent-essentials template; 'menu' is kept for tooling that lists programs but the installer no longer reads it. scripts/enroll.py walks every non-foundation entry later, inside the workbench: 'publisher' is the repository a student must be able to read; 'adopt_skill' is the workbench skill that verifies and applies that program's release (null means no adoption route yet, so the student asks for supported delivery). 'requires' is checked strictly only by the pinned course-distribution route (PINNED-COURSE-DELIVERY.md); 'includes' is reported softly by enroll (inclusion does not prove invitation state). 'source_repository' is where the release is built and is informational here. 'release_product' is the id the workbench's adoption tool and the publisher's release pins use; where it differs from 'id', the registry is the only place that knows both, so nothing in the release tooling has to rename. Current Git enrollment uses a program enrollment.repository and enrollment.branch, through enrollment.skill. publisher, release_product and adopt_skill remain historical package compatibility fields; do not use them to override Git enrollment.",
   "hub": {
-    "template": "aibuild-lab/agent-essentials",
     "default_name": "my-workbench",
     "public_template": "aibuild-lab/my-workbench-template",
     "candidate_template": "agent-workbench",
@@ -112,7 +111,7 @@
     {
       "id": "legacy-essentials-workbench",
       "repository": "aibuild-lab/agent-essentials",
-      "state": "retained_compatibility"
+      "state": "retired_existing_workbenches_only"
     }
   ],
   "compatibility": {

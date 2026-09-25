@@ -1,7 +1,11 @@
 # Agent family successor candidate
 
 The separate template route is explicit until release and platform qualification.
-The historical default route and frozen distributions remain available unchanged.
+Frozen distributions remain available unchanged. The historical default route,
+which created a workbench from the private `aibuild-lab/agent-essentials`
+template, is retired (09-25-2026); without a lock, setup now builds the
+public-template workbench. Existing Essentials-template workbenches are still
+accepted in place, as below.
 This is source preparation, not activation of an unqualified student route.
 
 The registry lists agent-workbench independently from the agent-essentials course

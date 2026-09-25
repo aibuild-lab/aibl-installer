@@ -14,7 +14,7 @@ if [[ -n "$DISTRIBUTION_LOCK$DISTRIBUTION_SHA256$INSTALLER_COMMIT$LAUNCHER_SHA25
   if [[ "$(shasum -a 256 "$AIBL_BOOTSTRAP_PATH" | cut -d' ' -f1)" != "$LAUNCHER_SHA256" || "$(shasum -a 256 "$DISTRIBUTION_LOCK" | cut -d' ' -f1)" != "$DISTRIBUTION_SHA256" ]]; then echo 'Pinned launcher or distribution lock bytes differ. Download the reviewed files again.'; exit 1; fi
   DISTRIBUTION_LOCK="$(cd "$(dirname "$DISTRIBUTION_LOCK")" && pwd)/$(basename "$DISTRIBUTION_LOCK")"
 fi
-# The installer builds the Essentials hub for everyone; programs join the workbench later through scripts/enroll.py. An explicit course argument is kept for pinned cohort setups.
+# Without a reviewed pin, every student gets the workbench SETUP-PROMPT.md step 8 builds, from the public template; programs join it later through aibl-enroll. An explicit course argument is kept for pinned cohort setups.
 if [[ "$(uname -s)" != Darwin ]]; then echo 'Use start.ps1 on native Windows. This entry supports macOS.'; exit 1; fi
 if [[ "$(sw_vers -productVersion | cut -d. -f1)" -lt 13 ]]; then echo 'macOS 13 or later is required.'; exit 1; fi
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -67,5 +67,10 @@ if [[ "${COURSE:-}" == my-workbench ]]; then
   exec "$PYTHON" "$INSTALLER_DIR/scripts/family_setup_handoff.py" --harness "$HARNESS" --distribution "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"
 fi
 if [[ -n "$INSTALLER_COMMIT" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS" --distribution-lock "$DISTRIBUTION_LOCK" --distribution-sha256 "$DISTRIBUTION_SHA256"; fi
-if [[ -n "$COURSE" ]]; then exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course "$COURSE" --harness "$HARNESS"; fi
-exec "$PYTHON" "$INSTALLER_DIR/scripts/course_setup.py" --course agent-essentials --harness "$HARNESS"
+# No pin: never course_setup.py. A retained installer's own course_setup.py, at any revision before 09-25-2026, still builds the retired private
+# Essentials course from aibuild-lab/agent-essentials; hub_setup.py only ever uses the public template.
+if [[ ! -f "$INSTALLER_DIR/scripts/hub_setup.py" ]]; then echo 'Retained installer predates the public workbench route. Ask for the reviewed installer update; no files were replaced.'; exit 1; fi
+if [[ -n "$COURSE" ]]; then echo "Building your workbench first. $COURSE joins it later from inside the workbench with aibl-enroll."; fi
+set +e; GH_HOST=github.com gh api user >/dev/null 2>&1; GH_SIGNED_IN=$?; set -e
+if [[ "$GH_SIGNED_IN" -eq 4 ]]; then echo 'Sign in to GitHub in the browser. Do not paste account codes into a chat.'; GH_HOST=github.com gh auth login --hostname github.com --git-protocol https --web; fi
+exec "$PYTHON" "$INSTALLER_DIR/scripts/hub_setup.py" --harness "$HARNESS"
