@@ -7,7 +7,7 @@ if ($DistributionLock -or $DistributionSHA256 -or $InstallerCommit -or $Launcher
   $DistributionLock = (Resolve-Path -LiteralPath $DistributionLock).Path
 }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Use start.sh on macOS. This launcher requires native Windows.' }
-# The installer builds the Essentials hub for everyone; programs join the workbench later through scripts\enroll.py. An explicit -Course is kept for pinned cohort setups.
+# Without a reviewed pin, every student gets the workbench SETUP-PROMPT.md step 8 builds, from the public template; programs join it later through aibl-enroll. An explicit -Course is kept for pinned cohort setups.
 function Refresh-ProcessPath {
   $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $HOME '.local\bin')
 }
@@ -101,6 +101,15 @@ if ($InstallerCommit) {
   & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness --distribution-lock $DistributionLock --distribution-sha256 $DistributionSHA256
   exit $LASTEXITCODE
 }
-if ($Course) { & $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course $Course --harness $Harness; exit $LASTEXITCODE }
-& $Python (Join-Path $InstallerDir 'scripts\course_setup.py') --course agent-essentials --harness $Harness
+# No pin: never course_setup.py. A retained installer's own course_setup.py, at any revision before 09-25-2026, still builds the retired private
+# Essentials course from aibuild-lab/agent-essentials; hub_setup.py only ever uses the public template.
+if (-not (Test-Path (Join-Path $InstallerDir 'scripts/hub_setup.py') -PathType Leaf)) { throw 'Retained installer predates the public workbench route. Ask for the reviewed installer update; no files were replaced.' }
+if ($Course) { Write-Output "Building your workbench first. $Course joins it later from inside the workbench with aibl-enroll." }
+cmd /c "set GH_HOST=github.com&& gh api user >nul 2>&1"
+if ($LASTEXITCODE -eq 4) {
+  Write-Output 'Sign in to GitHub in the browser. Do not paste account codes into a chat.'
+  gh auth login --hostname github.com --git-protocol https --web
+  if ($LASTEXITCODE -ne 0) { throw 'GitHub sign-in paused. Finish the browser step and rerun this launcher.' }
+}
+& $Python (Join-Path $InstallerDir 'scripts\hub_setup.py') --harness $Harness
 exit $LASTEXITCODE

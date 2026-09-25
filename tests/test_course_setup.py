@@ -48,10 +48,10 @@ class SetupTests(unittest.TestCase):
  def test_registry_ids_are_the_ledger_slugs_and_resolve(self):
   reg=setup.registry();ids=[p['id'] for p in reg['programs']]
   self.assertEqual(ids,['agent-essentials','agent-workforce','the-lab'])
-  self.assertEqual(reg['hub']['template'],'aibuild-lab/agent-essentials')
+  self.assertNotIn('template',reg['hub']);self.assertEqual(reg['hub']['public_template'],'aibuild-lab/my-workbench-template')
   self.assertEqual({p['id']:p['release_product'] for p in reg['programs']},{'agent-essentials':'agent-essentials','agent-workforce':'agent-native-workforce','the-lab':'the-lab'})
   for p in reg['programs']:
-   r=setup.choose(p['id']);self.assertEqual(r['template'],'aibuild-lab/agent-essentials');self.assertTrue(r['access'])
+   r=setup.choose(p['id']);self.assertEqual(r['template'],'aibuild-lab/my-workbench-template');self.assertTrue(r['access'])
    for ref in (*p['requires'],*p['includes']):self.assertIn(ref,ids)
   w=setup.choose('agent-workforce');self.assertEqual(w['access'],['aibuild-lab/agent-essentials','aibuild-lab/agent-native-workforce']);self.assertEqual([i['id'] for i in w['included']],['the-lab'])
   l=setup.choose('the-lab');self.assertEqual(l['access'],['aibuild-lab/agent-essentials','aibuild-lab/the-lab']);self.assertEqual(l['included'],[])
@@ -215,4 +215,48 @@ class SetupTests(unittest.TestCase):
     return f(args,**kwargs)
    with self.assertRaisesRegex(setup.SetupError,'Network unavailable'):self.run_setup(fail,d)
    self.assertFalse(f.exists)
+class RetiredEssentialsTemplateTests(unittest.TestCase):
+ """No route may create a new workbench from the retired private aibuild-lab/agent-essentials template (09-25-2026)."""
+ def main(self,*argv):
+  out=io.StringIO()
+  with patch.object(sys,'argv',['course_setup.py',*argv]),contextlib.redirect_stdout(out):code=setup.main()
+  return code,out.getvalue()
+ def test_registry_and_every_program_resolve_to_the_public_template(self):
+  reg=setup.registry()
+  self.assertNotIn('aibuild-lab/agent-essentials',json.dumps(reg['hub']))
+  for p in reg['programs']:self.assertNotIn(setup.choose(p['id'])['template'],setup.RETIRED_TEMPLATES)
+ def test_create_step_refuses_a_retired_template_before_anything_is_made(self):
+  with tempfile.TemporaryDirectory() as d:
+   f=Fake();course={**setup.choose('agent-essentials'),'template':'aibuild-lab/agent-essentials'}
+   with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(setup.SetupError,'retired'):setup.setup(course,Path(d)/'local','my-workbench',Path(d)/'state',f,True)
+   self.assertFalse(f.exists);self.assertFalse(any(c[:3]==['gh','repo','create'] for c in f.calls))
+ def test_no_lock_plan_names_the_hub_route_and_has_no_effects(self):
+  for argv in [(),('--course','agent-essentials'),('--course','agent-workforce')]:
+   with self.subTest(argv=argv),patch.object(setup,'setup') as legacy,patch.object(setup,'command') as runner:
+    code,out=self.main('--plan','--workspace',tempfile.gettempdir(),*argv)
+    self.assertEqual(code,0);plan=json.loads(out)
+    self.assertEqual((plan['route'],plan['template'],plan['effects']),('hub_setup','aibuild-lab/my-workbench-template','none'))
+    legacy.assert_not_called();runner.assert_not_called()
+ def test_no_lock_setup_hands_off_to_hub_setup(self):
+  import hub_setup
+  with tempfile.TemporaryDirectory() as d:
+   receipt={'status':'created','repository':'synthetic-student/my-workbench'}
+   with patch.object(hub_setup,'setup',return_value=receipt) as hub,patch.object(setup,'setup') as legacy:
+    code,out=self.main('--course','agent-essentials','--harness','codex','--workspace',d,'--no-launch')
+   self.assertEqual(code,0);self.assertEqual(json.loads(out),receipt);legacy.assert_not_called()
+   hub.assert_called_once_with('codex',d,'my-workbench','aibuild-lab/my-workbench-template')
+ def test_unknown_course_without_lock_still_refused(self):
+  with patch('hub_setup.setup') as hub:code,out=self.main('--course','legacy-workshop','--harness','claude')
+  self.assertEqual(code,1);self.assertIn('Unknown program',out);hub.assert_not_called()
+ def test_launchers_without_a_pin_run_hub_setup_never_course_setup(self):
+  root=Path(__file__).resolve().parents[1]
+  for name in ('start.sh','start.ps1'):
+   code=[line for line in (root/name).read_text(encoding='utf-8').splitlines() if line.strip() and not line.lstrip().startswith('#')]
+   self.assertFalse(any('agent-essentials' in line for line in code),name)
+   # course_setup.py runs only on the pinned route, which always carries the reviewed distribution lock.
+   for line in code:
+    if 'course_setup.py' in line:self.assertIn('--distribution-lock',line,name)
+   python_runs=[line for line in code if ('$PYTHON' in line or '$Python' in line) and '.py' in line and '-c' not in line]
+   self.assertIn('hub_setup.py',python_runs[-1],name)
+   self.assertTrue(any('hub_setup.py' in line and ('-f ' in line or 'Test-Path' in line) for line in code),name)
 if __name__=='__main__':unittest.main()

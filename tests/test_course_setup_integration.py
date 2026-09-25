@@ -48,7 +48,7 @@ class LocalServices:
         if args[:2]==['gh','api']:
             if args[2].startswith('repos/aibuild-lab/'):return json.dumps({'private':True})
             if not self.server.exists():raise setup.SetupError('HTTP 404','not_found')
-            return json.dumps({'private':True,'full_name':'synthetic-student/my-workbench','id':456,'default_branch':'main','template_repository':{'full_name':'aibuild-lab/agent-essentials'}})
+            return json.dumps({'private':True,'full_name':'synthetic-student/my-workbench','id':456,'default_branch':'main','template_repository':{'full_name':setup.registry()['hub']['public_template']}})
         if args[:3]==['gh','repo','create']:
             seed=self.root/'seed';seed.mkdir()
             if self.template:shutil.copytree(self.template,seed,dirs_exist_ok=True,ignore=shutil.ignore_patterns('.git','.aibl-local','__pycache__'))

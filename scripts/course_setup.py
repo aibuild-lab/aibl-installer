@@ -55,12 +55,16 @@ def workbench_template(reg=None):
     matches=[t for t in reg['templates'] if t['id']==selected]
     if len(matches)!=1 or not matches[0].get('requires_family_lock'):raise SetupError('Template registry contract is incomplete')
     return matches[0]['repository']
+# Retired 09-25-2026: Hunter's private in-workbench mission course. Existing workbenches made from it are still
+# recognised (the family route adopts them in place, and pinned releases stay downloadable), but no route may
+# create a new workbench from it.
+RETIRED_TEMPLATES=('aibuild-lab/agent-essentials',)
 def resolve(program,reg):
     # The registry names programs; setup needs repositories. Required access is strict, included access is reported.
     by_id={p['id']:p for p in reg['programs']}
     for ref in (*program['requires'],*program['includes']):
         if ref not in by_id:raise SetupError(f'Program registry names an unknown program: {ref}. Ask the course team to review the installer.')
-    return {**program,'template':reg['hub']['template'],'access':[by_id[r]['publisher'] for r in program['requires']],'included':[{'id':r,'label':by_id[r]['label'],'publisher':by_id[r]['publisher']} for r in program['includes']]}
+    return {**program,'template':reg['hub']['public_template'],'access':[by_id[r]['publisher'] for r in program['requires']],'included':[{'id':r,'label':by_id[r]['label'],'publisher':by_id[r]['publisher']} for r in program['includes']]}
 def choose(course):
     reg=registry();programs=reg['programs']
     if course:
@@ -319,6 +323,7 @@ def _setup(course,workspace,name,state_root,runner,no_launch,distribution=None,d
             meta=existing;template=(meta.get('template_repository') or {}).get('full_name')
             if template!=course['template'] and not (family and template=='aibuild-lab/agent-essentials') and state.get('created_repository_id')!=meta.get('id'):raise SetupError('Repository name collision. This existing repository is not the selected template; choose a different name.')
         else:
+            if course['template'] in RETIRED_TEMPLATES:raise SetupError('That template is retired and no longer makes new workbenches. Run scripts/hub_setup.py (SETUP-PROMPT.md step 8) instead; nothing was created.')
             state['creation_intent']={'repository':full,'template':course['template']};step('repository_creation_planned')
             runner(['gh','repo','create',full,'--private','--template',course['template']]);created_now=True
         meta=json.loads(runner(['gh','api','repos/'+full]))
@@ -421,6 +426,16 @@ def main():
             from pinned_distribution import preview_bundle
             preview_bundle(a.preview_bundle,distribution)
         if a.rehearsal_id and not a.preview_bundle:raise SetupError('Rehearsal setup requires an explicit local candidate bundle.')
+        if not family and not distribution:
+            # No reviewed lock: build the same workbench SETUP-PROMPT.md step 8 builds, from the public template.
+            # This route used to create it from the retired private aibuild-lab/agent-essentials template. A --course
+            # is only checked here; the program joins later from inside the workbench through aibl-enroll.
+            if a.course:choose(a.course)
+            template=registry()['hub']['public_template']
+            if a.plan:print(json.dumps({'route':'hub_setup','template':template,'course':a.course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
+            import hub_setup
+            print(json.dumps(hub_setup.setup(choose_harness(a.harness),a.workspace,a.repo_name or 'my-workbench',template),indent=2))
+            return 0
         course=({'id':'my-workbench','label':'My Workbench'} if family and family.get('schema_version')=='aibl.family-lock/v2' else choose(a.course or (distribution['course_id'] if distribution else None)))
         if a.plan:print(json.dumps({'course':course,'workspace':str(safe_workspace(a.workspace)),'effects':'none','platform':platform.system()},indent=2));return 0
         harness='claude' if a.desktop else choose_harness(a.harness)

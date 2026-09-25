@@ -1,6 +1,8 @@
 # Frozen Workforce setup
 
-The shared launchers retain the existing interactive course selector. A reviewed
+Without a reviewed pin, the shared launchers build the public-template workbench
+(`scripts/hub_setup.py`, the same as SETUP-PROMPT.md step 8); they no longer run
+a course selector or the retired private Essentials template. A reviewed
 Workforce distribution adds a frozen route that pins the AIBL launcher, installer
 revision, setup code/catalog and both private product releases. No release ID or
 private payload is embedded in this public installer repository.

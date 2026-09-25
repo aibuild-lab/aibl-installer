@@ -31,10 +31,15 @@ the existing package engine. An installed result reports native verification
 pending, with the first action and discovery paths. A later update to existing
 package pins requires the student-owned PR flow; enrollment never performs it.
 
-One public entry builds the Essentials hub for every student and does not ask
-which program they are in. The registry in course-options.json lists every
+One public entry builds the same workbench for every student, from the public
+template `hub.public_template` (`aibuild-lab/my-workbench-template`), and does
+not ask which program they are in. SETUP-PROMPT.md step 8 and the shell
+launchers without a reviewed pin both run `scripts/hub_setup.py`; so does
+`scripts/course_setup.py` when it is given no reviewed lock. No route creates a
+new workbench from the retired private `aibuild-lab/agent-essentials` template.
+The registry in course-options.json lists every
 program with the site ledger's ids, its publisher repository, what it requires
-(checked strictly by the installer for the hub), what it includes (checked
+(checked strictly only by the pinned course-distribution route), what it includes (checked
 softly and reported) and its adoption skill. Programs join the hub later from
 inside the workbench through scripts/enroll.py, which reads that registry, asks
 GitHub what the signed-in account can read, confirms with the student, records
