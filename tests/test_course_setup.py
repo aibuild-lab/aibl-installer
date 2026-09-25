@@ -54,7 +54,7 @@ class SetupTests(unittest.TestCase):
    r=setup.choose(p['id']);self.assertEqual(r['template'],'aibuild-lab/agent-essentials');self.assertTrue(r['access'])
    for ref in (*p['requires'],*p['includes']):self.assertIn(ref,ids)
   w=setup.choose('agent-workforce');self.assertEqual(w['access'],['aibuild-lab/agent-essentials','aibuild-lab/agent-native-workforce']);self.assertEqual([i['id'] for i in w['included']],['the-lab'])
-  l=setup.choose('the-lab');self.assertEqual(l['access'],['aibuild-lab/agent-essentials','aibuild-lab/the-lab']);self.assertEqual(l['included'],[])
+  l=setup.choose('the-lab');self.assertEqual(l['access'],['aibuild-lab/the-lab']);self.assertEqual(l['included'],[])
  def test_included_program_access_is_reported_not_required(self):
   with tempfile.TemporaryDirectory() as d:
    f=Fake()

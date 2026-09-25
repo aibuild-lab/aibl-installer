@@ -46,10 +46,10 @@ class EnrollTests(unittest.TestCase):
    wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/agent-workforce'}))
    lab=next(p for p in r['programs'] if p['id']=='the-lab')
    self.assertEqual(lab['access'],'unavailable');self.assertEqual(lab['included_by'],'Agent Workforce');self.assertNotIn('the-lab',r['chosen'])
- def test_joined_lab_without_an_adoption_route_says_so(self):
+ def test_joined_lab_enrolls_through_the_git_route(self):
   with tempfile.TemporaryDirectory() as d:
    wb=workbench(d);r=self.run_enroll(wb,FakeGh(readable={'aibuild-lab/the-lab'}))
-   self.assertEqual(r['chosen'],['the-lab']);self.assertEqual(r['next'][0]['do'],'no verified adoption route yet; ask the course team for supported delivery')
+   self.assertEqual(r['chosen'],['the-lab']);self.assertEqual(r['next'][0]['do'],'run aibl-enroll to join aibuild-lab/the-lab branch student')
  def test_already_installed_program_is_left_alone_and_rerun_is_a_noop(self):
   with tempfile.TemporaryDirectory() as d:
    wb=workbench(d,installed=[('agent-native-workforce','agent-native-workforce-v0.2.1')]);fake=FakeGh(readable={'aibuild-lab/agent-workforce'})
