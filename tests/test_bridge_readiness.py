@@ -29,11 +29,12 @@ class FakeMachine:
     """Builds a br.Machine over a temp home with scripted tools and scripted command results."""
 
     def __init__(self, test, system='mac', tools=('tmux', 'brew', 'claude', 'zsh'), auth=SUBSCRIPTION, auth_raw=None,
-                 brew_exit=0):
+                 brew_exit=0, account='student'):
         self.test = test
         self.dir = tempfile.TemporaryDirectory()
         test.addCleanup(self.dir.cleanup)
-        self.home = Path(self.dir.name).resolve()
+        self.home = Path(self.dir.name).resolve() / account
+        # A workbench exists, as after step 8, only so the tests can prove this step never writes inside it.
         self.workbench = self.home / 'GitHub' / 'my-workbench'
         (self.workbench / '.claude').mkdir(parents=True)
         self.tools = set(tools)
@@ -41,8 +42,8 @@ class FakeMachine:
         self.auth_raw = auth_raw
         self.brew_exit = brew_exit
         self.calls = []
-        self.machine = br.Machine(home=self.home, system=system, workbench=self.workbench,
-                                  which=self.which, run=self.run, env={}, is_file=self.is_file)
+        self.machine = br.Machine(home=self.home, system=system, which=self.which, run=self.run, env={},
+                                  is_file=self.is_file)
 
     def is_file(self, path):
         # Only files inside the synthetic home exist; the real /opt/homebrew and /usr/local are never consulted.
@@ -174,11 +175,9 @@ class Idempotency(unittest.TestCase):
             with self.subTest(system=system):
                 fake = FakeMachine(self, system=system)
                 fake.write_settings(STUDENT_SETTINGS)
-                local = fake.machine.workbench_settings
-                local.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)']}}), encoding='utf-8')
                 first = br.apply(fake.machine, yes=True)
                 self.assertTrue(first['changed'])
-                snapshot = {p: p.read_bytes() for p in (fake.settings, local)}
+                snapshot = {fake.settings: fake.settings.read_bytes()}
                 backups = fake.backups()
                 second = br.apply(fake.machine, yes=True)
                 self.assertEqual(second['changed'], [])
@@ -220,10 +219,12 @@ class ApprovalAndPlan(unittest.TestCase):
         fake = FakeMachine(self, system='windows')
         report = br.plan(fake.machine)
         self.assertFalse(fake.settings.exists())
-        self.assertFalse(fake.machine.workbench_settings.exists())
         text = '\n'.join(report['will_change'])
         self.assertIn(f'"{TEAMS}": "1"', text)
-        self.assertIn('PowerShell(workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)', text)
+        rules = fake.machine.windows_allow_rules()
+        self.assertEqual(len(rules), 2)
+        for rule in rules:
+            self.assertIn(f'allow {rule}', text)
 
     def test_homebrew_missing_is_reported_not_installed(self):
         fake = FakeMachine(self, tools=('claude', 'zsh'))
@@ -241,54 +242,85 @@ class ApprovalAndPlan(unittest.TestCase):
 
 
 class Windows(unittest.TestCase):
-    def test_allow_rules_go_to_the_workbench_local_settings_only(self):
+    def test_allow_rules_go_to_the_user_settings_with_one_backup(self):
         fake = FakeMachine(self, system='windows')
         fake.write_settings(STUDENT_SETTINGS)
-        local = fake.machine.workbench_settings
-        local.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)']}, 'other': 1}), encoding='utf-8')
         report = br.apply(fake.machine, yes=True)
-        rules = json.loads(local.read_text())['permissions']['allow']
-        self.assertEqual(rules[0], 'Bash(ls)')
-        self.assertEqual(rules[1:], fake.machine.windows_allow_rules())
-        self.assertEqual(json.loads(local.read_text())['other'], 1)
-        self.assertEqual(json.loads(fake.settings.read_text())['permissions'], STUDENT_SETTINGS['permissions'],
-                         'the user settings get only the env line')
+        after = json.loads(fake.settings.read_text())
+        self.assertEqual(after['permissions'], {'allow': ['Bash(ls)', *fake.machine.windows_allow_rules()], 'deny': ['WebFetch']},
+                         'the rules are appended; nothing already there moves or goes')
+        self.assertEqual(after['env'], {'FOO': 'bar', TEAMS: '1'})
+        for key in ('model', 'hooks', 'statusLine'):
+            self.assertEqual(after[key], STUDENT_SETTINGS[key], key)
+        self.assertEqual(list(after), list(STUDENT_SETTINGS), 'top-level key order is kept')
+        self.assertEqual(len(fake.backups()), 1, 'one file, one backup, even with two changes in it')
+        self.assertEqual(json.loads(fake.backups()[0].read_text()), STUDENT_SETTINGS)
+        self.assertEqual(len(report['changed']), 1)
+        self.assertTrue(by_item(report)['launcher permission']['pass'])
         self.assertNotIn('tmux', by_item(report))
         self.assertEqual(fake.brew_installs(), [])
         self.assertTrue(report['ready'])
 
-    def rules_for(self, workbench):
-        return br.Machine(home='C:\\Users\\x', system='windows', workbench=workbench, which=lambda n: None, env={},
+    def test_rules_already_there_are_not_added_again(self):
+        fake = FakeMachine(self, system='windows')
+        rules = fake.machine.windows_allow_rules()
+        fake.write_settings({'env': {TEAMS: '1'}, 'permissions': {'allow': [rules[1], 'Bash(ls)']}})
+        br.apply(fake.machine, yes=True)
+        self.assertEqual(json.loads(fake.settings.read_text())['permissions']['allow'], [rules[1], 'Bash(ls)', rules[0]])
+
+    def rules_for(self, home):
+        return br.Machine(home=home, system='windows', which=lambda n: None, env={},
                           is_file=lambda p: False).windows_allow_rules()
 
-    def test_rules_are_exact_with_no_wildcard(self):
-        rules = self.rules_for('C:\\Users\\student\\GitHub\\my-workbench')
+    def test_rules_are_exact_and_match_how_the_skills_run_the_launcher(self):
+        # aibl-bridge runs `<its base directory>/scripts/windows/bridge-go.ps1`; aibl-bridge-setup runs
+        # `<its base directory>/../aibl-bridge/scripts/windows/bridge-go.ps1`. Both skills sit in ~/.claude/skills.
+        rules = self.rules_for('C:\\Users\\student')
         self.assertEqual(rules, [
-            'PowerShell(workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)',
-            'PowerShell(C:/Users/student/GitHub/my-workbench/workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)',
+            'PowerShell(C:/Users/student/.claude/skills/aibl-bridge/scripts/windows/bridge-go.ps1)',
+            'PowerShell(C:/Users/student/.claude/skills/aibl-bridge-setup/../aibl-bridge/scripts/windows/bridge-go.ps1)',
         ])
         self.assertFalse(any('*' in r for r in rules))
+        self.assertFalse(any('workforce/' in r for r in rules), 'no workbench-relative rule')
 
-    def test_absolute_rule_is_dropped_when_the_path_has_a_space(self):
+    def test_no_rule_when_the_account_folder_has_a_space(self):
         # A path with a space must be quoted to run, so the typed command could never equal an unquoted rule.
-        self.assertEqual(self.rules_for('C:\\Users\\Student Name\\GitHub\\my-workbench'),
-                         ['PowerShell(workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1)'])
-
-    def test_no_backup_lands_inside_the_workbench(self):
-        fake = FakeMachine(self, system='windows')
-        local = fake.machine.workbench_settings
-        local.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)']}}), encoding='utf-8')
-        br.apply(fake.machine, yes=True)
-        self.assertEqual(sorted(p.name for p in local.parent.iterdir()), ['settings.local.json'])
-        self.assertEqual([p.name.split('.2')[0] for p in fake.backups()], ['workbench-settings.local.json'])
-        self.assertNotIn(fake.workbench, fake.backups()[0].parents)
-
-    def test_missing_workbench_is_a_fail_not_a_write(self):
-        fake = FakeMachine(self, system='windows')
-        fake.machine.workbench = fake.home / 'GitHub' / 'elsewhere'
+        self.assertEqual(self.rules_for('C:\\Users\\Student Name'), [])
+        fake = FakeMachine(self, system='windows', account='Student Name')
+        fake.write_settings(STUDENT_SETTINGS)
         report = br.apply(fake.machine, yes=True)
-        self.assertFalse(by_item(report)['launcher permission']['pass'])
-        self.assertFalse((fake.home / 'GitHub' / 'elsewhere').exists())
+        self.assertEqual(json.loads(fake.settings.read_text())['permissions'], STUDENT_SETTINGS['permissions'])
+        self.assertNotIn('launcher permission', by_item(report))
+        self.assertTrue(any('has a space in its name' in n for n in report['notes']))
+        self.assertTrue(report['ready'])
+
+    def test_the_workbench_is_never_written(self):
+        fake = FakeMachine(self, system='windows')
+        local = fake.workbench / '.claude' / 'settings.local.json'
+        br.apply(fake.machine, yes=True)
+        self.assertFalse(local.exists(), 'no workbench settings.local.json is created')
+        local.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)']}}), encoding='utf-8')
+        before = local.read_bytes()
+        br.apply(fake.machine, yes=True)
+        self.assertEqual(local.read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in local.parent.iterdir()), ['settings.local.json'])
+        for backup in fake.backups():
+            self.assertNotIn(fake.workbench, backup.parents)
+
+    def test_no_workbench_is_needed(self):
+        fake = FakeMachine(self, system='windows')
+        (fake.workbench / '.claude').rmdir()
+        fake.workbench.rmdir()
+        report = br.apply(fake.machine, yes=True)
+        self.assertTrue(by_item(report)['launcher permission']['pass'])
+        self.assertTrue(report['ready'])
+        self.assertFalse(fake.workbench.exists())
+
+    def test_bridge_note_reads_the_user_skills_folder(self):
+        fake = FakeMachine(self, system='windows')
+        self.assertTrue(any('arrives with the Workforce program' in n for n in br.plan(fake.machine)['notes']))
+        fake.machine.bridge_skill_dir.mkdir(parents=True)
+        self.assertFalse(any('arrives with the Workforce program' in n for n in br.plan(fake.machine)['notes']))
 
     def test_windows_asks_the_cli_directly(self):
         fake = FakeMachine(self, system='windows')

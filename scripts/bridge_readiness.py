@@ -16,10 +16,14 @@ What the bridge needs, and what this script does about each:
                                  never overwritten, backed up first to
                                  ~/.claude/backups/bridge-readiness/)
   Windows  launcher permission   adds the exact allow rules for the bridge's
-                                 zero-argument launcher (bridge-go.ps1) to the
-                                 workbench's own .claude/settings.local.json,
-                                 which Git ignores; the agent cannot add these
-                                 itself, the app treats that as self-modification
+                                 zero-argument launcher (bridge-go.ps1) under
+                                 "permissions" "allow" in the same
+                                 ~/.claude/settings.json, matching the path the
+                                 bridge skills run it by from the user's skills
+                                 folder (~/.claude/skills/aibl-bridge), so it
+                                 holds from any folder; the agent cannot add
+                                 these itself, the app treats that as
+                                 self-modification
   both     terminal Claude       checks it is installed and signed in with a
            signed in             Claude subscription, and that no API key
                                  outranks it; the script never signs in itself
@@ -55,9 +59,13 @@ from pathlib import Path, PureWindowsPath
 
 TEAMS_KEY = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
 TEAMS_VALUE = '1'
-# The path the aibl-bridge skill tells the agent to run, from the workbench root.
-BRIDGE_GO = 'workforce/skills/aibl-bridge/scripts/windows/bridge-go.ps1'
-BRIDGE_SKILL_DIR = ('workforce', 'skills', 'aibl-bridge')
+# The bridge skills live in the user's skills folder (the workbench template copies them there on Windows), so they
+# work from any folder. aibl-bridge tells the agent to run `<this skill's base directory>/scripts/windows/bridge-go.ps1`
+# by its bare path; aibl-bridge-setup runs the same file as `<its base directory>/../aibl-bridge/scripts/windows/...`.
+SKILLS_DIR = ('.claude', 'skills')
+BRIDGE_SKILL = 'aibl-bridge'
+SETUP_SKILL = 'aibl-bridge-setup'
+BRIDGE_GO = 'scripts/windows/bridge-go.ps1'
 TMUX_FALLBACKS = ('/opt/homebrew/bin/tmux', '/usr/local/bin/tmux')
 BREW_FALLBACKS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')
 # Backups live outside every repository (the workbench's .gitignore does not cover backup names), beside the
@@ -89,11 +97,10 @@ def system_name(override=None):
 class Machine:
     """Everything the checks read from the computer, injectable for tests."""
 
-    def __init__(self, home=None, system=None, workbench=None, which=shutil.which, run=run_command, env=None,
+    def __init__(self, home=None, system=None, which=shutil.which, run=run_command, env=None,
                  is_file=lambda path: Path(path).is_file()):
         self.home = Path(home) if home else Path.home()
         self.system = system_name(system)
-        self.workbench = Path(workbench) if workbench else self.home / 'GitHub' / 'my-workbench'
         self.which = which
         self.run = run
         self.env = os.environ if env is None else env
@@ -104,8 +111,8 @@ class Machine:
         return self.home / '.claude' / 'settings.json'
 
     @property
-    def workbench_settings(self):
-        return self.workbench / '.claude' / 'settings.local.json'
+    def bridge_skill_dir(self):
+        return self.home.joinpath(*SKILLS_DIR, BRIDGE_SKILL)
 
     @property
     def backup_dir(self):
@@ -114,15 +121,16 @@ class Machine:
     def windows_allow_rules(self):
         """Exact rules, no wildcard (auto mode drops wildcarded interpreter rules).
 
-        The relative rule matches the path the aibl-bridge skill tells the agent to type from the workbench root.
-        The absolute rule is the form Wade's allow-rule receipts proved (09-20). It is kept only when the path has
-        no space: a path with a space has to be quoted to run, so the typed command could never equal the rule.
+        One rule per way the bridge skills run the launcher from the user's skills folder: aibl-bridge's
+        `<base>/scripts/windows/bridge-go.ps1` and aibl-bridge-setup's `<base>/../aibl-bridge/scripts/windows/...`.
+        Absolute, with forward slashes, the form Wade's allow-rule receipts proved (09-20). Empty when the account
+        folder has a space: that path has to be quoted to run, so the typed command could never equal a rule.
         """
-        rules = [f'PowerShell({BRIDGE_GO})']
-        absolute = PureWindowsPath(str(self.workbench)).as_posix().rstrip('/')
-        if not any(ch.isspace() for ch in absolute):
-            rules.append(f'PowerShell({absolute}/{BRIDGE_GO})')
-        return rules
+        skills = PureWindowsPath(str(self.home.joinpath(*SKILLS_DIR))).as_posix().rstrip('/')
+        if any(ch.isspace() for ch in skills):
+            return []
+        return [f'PowerShell({skills}/{BRIDGE_SKILL}/{BRIDGE_GO})',
+                f'PowerShell({skills}/{SETUP_SKILL}/../{BRIDGE_SKILL}/{BRIDGE_GO})']
 
 
 # ---------------------------------------------------------------- settings merge
@@ -295,24 +303,21 @@ def check_teams(machine):
 
 
 def check_allow_rule(machine):
-    if machine.system != 'windows':
+    rules = machine.windows_allow_rules() if machine.system == 'windows' else []
+    if not rules:
         return None
-    if not machine.workbench.is_dir():
-        return item('launcher permission', False, f'the workbench is not at {machine.workbench}',
-                    fix='Run step 8 first, or pass --workbench with the folder step 8 printed.')
-    rules = machine.windows_allow_rules()
     try:
-        data = read_settings(machine.workbench_settings)
+        data = read_settings(machine.user_settings)
         new, changes = merge(data, allow=rules)
     except Paused as exc:
         return item('launcher permission', False, str(exc), fix='Fix the settings file with the student, then run this step again.')
     if not changes:
-        return item('launcher permission', True, f'the bridge launcher is allowed in {display(machine.workbench_settings)}')
+        return item('launcher permission', True, f'the bridge launcher is allowed in {display(machine.user_settings)}')
     return item('launcher permission', False, 'the bridge launcher is not allowed yet, so the agent could be stopped from starting the bridge',
-                fix='(Agent: rerun this script with --apply --yes after the student\'s yes; it adds the launcher\'s exact allow rules to the workbench\'s local settings.)',
-                change={'kind': 'settings', 'path': str(machine.workbench_settings), 'allow': rules,
-                        'label': 'workbench-settings.local.json',
-                        'text': f'in {display(machine.workbench_settings)}: ' + '; '.join(changes)})
+                fix='(Agent: rerun this script with --apply --yes after the student\'s yes; it adds the launcher\'s exact allow rules to that settings file.)',
+                change={'kind': 'settings', 'path': str(machine.user_settings), 'allow': rules,
+                        'label': 'settings.json',
+                        'text': f'in {display(machine.user_settings)}: ' + '; '.join(changes)})
 
 
 def find_claude(machine):
@@ -427,7 +432,11 @@ def notes(machine):
         out.append('Windows opens a small console window for the bridge instead of tmux, so tmux is not needed here.')
         out.append('The Windows bridge has a round-trip receipt with VS Code as the receiving thread. With the Claude desktop app '
                    'as the receiver it is not proven yet; say so plainly.')
-    if not machine.workbench.joinpath(*BRIDGE_SKILL_DIR).is_dir():
+        if not machine.windows_allow_rules():
+            out.append('This Windows account folder has a space in its name, so no exact allow rule can match the bridge '
+                       'launcher (its path has to be quoted to run). Nothing was added for it. The app will ask before the '
+                       'first bridge launch, and the student can allow it from then on.')
+    if not machine.bridge_skill_dir.is_dir():
         out.append('The bridge itself arrives with the Workforce program. Once it is there, the aibl-bridge-setup skill proves a round trip.')
     return out
 
@@ -445,6 +454,7 @@ def apply(machine, yes=False, stamp=None):
         return {'mode': 'apply', 'refused': True,
                 'message': 'Nothing was changed. Show the student the plan (--plan) and run again with --apply --yes only after they say yes.'}
     changed, skipped, backups = [], [], []
+    pending = {}  # settings path -> everything to merge into it, so each file is backed up and written once
     for entry in check_all(machine):
         change = entry.get('change')
         if not change:
@@ -459,14 +469,18 @@ def apply(machine, yes=False, stamp=None):
             else:
                 changed.append('installed tmux with Homebrew')
         elif change['kind'] == 'settings':
-            path = Path(change['path'])
-            data = read_settings(path)
-            new, changes = merge(data, env=change.get('env'), allow=change.get('allow', ()))
-            if changes:
-                backup = write_settings(path, data, new, machine.backup_dir, change['label'], stamp=stamp)
-                if backup:
-                    backups.append(str(backup))
-                changed.append(f'{display(path)}: ' + '; '.join(changes))
+            want = pending.setdefault(change['path'], {'env': {}, 'allow': [], 'label': change['label']})
+            want['env'].update(change.get('env') or {})
+            want['allow'].extend(change.get('allow', ()))
+    for path, want in pending.items():
+        path = Path(path)
+        data = read_settings(path)
+        new, changes = merge(data, env=want['env'], allow=want['allow'])
+        if changes:
+            backup = write_settings(path, data, new, machine.backup_dir, want['label'], stamp=stamp)
+            if backup:
+                backups.append(str(backup))
+            changed.append(f'{display(path)}: ' + '; '.join(changes))
     report = verify(machine)
     report.update({'mode': 'apply', 'changed': changed, 'skipped': skipped, 'backups': backups})
     return report
@@ -519,11 +533,10 @@ def main(argv=None, machine=None):
     mode.add_argument('--apply', action='store_true', help='Make the changes. Needs --yes.')
     mode.add_argument('--verify', action='store_true', help='PASS or FAIL per item.')
     p.add_argument('--yes', action='store_true', help='The student said yes to the plan.')
-    p.add_argument('--workbench', help='The workbench folder from step 8. Default: ~/GitHub/my-workbench')
     p.add_argument('--json', action='store_true', help='Print JSON instead of plain lines.')
     p.add_argument('--system', choices=('mac', 'windows', 'other'), help=argparse.SUPPRESS)
     a = p.parse_args(argv)
-    machine = machine or Machine(system=a.system, workbench=Path(a.workbench).expanduser() if a.workbench else None)
+    machine = machine or Machine(system=a.system)
     try:
         if a.apply:
             report = apply(machine, yes=a.yes)

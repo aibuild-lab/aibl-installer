@@ -16,7 +16,7 @@ Read the whole file before you begin. Follow it in order. Do not summarize it to
 8. **The two-shell gotcha on a Mac.** This app runs your commands in a bash shell that does not read the student's `~/.zshrc`. Their real Terminal is zsh and does. Tools that work in their Terminal can look missing to you. When that happens, say so plainly ("your tools are fine in your Terminal; they are invisible to me here because of a shell config difference; I will write the config to both files") and fix both startup files in step 4.
 9. **Pause for system popups and explain them.** "Trust this folder?" means: this app can read and edit files in the folder you picked, with your permission; it does not reach the rest of your computer. Mac file-access popups: Allow for Documents, Downloads, Desktop, Applications; Deny for Photos, Music, Calendar, Contacts. Windows "allow this app to make changes?": click Yes, no password. When a student mentions a popup, stop, explain, and resume after they answer it.
 10. **Never paste Claude slash commands into Codex, or Codex commands into Claude.** Where this file says "in Claude" or "in Codex," use only that app's block. Where a course file mentions a `/command`, Codex treats that as "use the named method" and reads the file instead.
-11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer`, the empty `aibl-guard-test` folder that step 7's Codex proof runs in, and the workbench folder. On the Claude route, step 8.5 (bridge readiness) adds three more, each shown to the student and approved first: tmux on a Mac (through Homebrew), one `env` line (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) merged into `~/.claude/settings.json`, and on Windows the bridge launcher's exact allow rules (one or two; one when the workbench path has a space) merged into the workbench's own `.claude/settings.local.json`. Only `scripts/bridge_readiness.py` makes those writes; never hand-edit either settings file. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not named here. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
+11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer`, the empty `aibl-guard-test` folder that step 7's Codex proof runs in, and the workbench folder. On the Claude route, step 8.5 (bridge readiness) adds three more, each shown to the student and approved first: tmux on a Mac (through Homebrew), one `env` line (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) merged into `~/.claude/settings.json`, and on Windows the bridge launcher's two exact allow rules merged into `permissions.allow` in that same file (none when the Windows account folder has a space in its name). Only `scripts/bridge_readiness.py` makes those writes; never hand-edit that settings file. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not named here. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
 
 ## Step 1: Greet, and detect the operating system and which app you are
 
@@ -354,16 +354,16 @@ Read the result:
 What the bridge needs underneath it, which the script checks and prepares:
 - **Both:** the agent-teams setting switched on in this app's settings file, and the command-line twin installed and signed in with the student's Claude subscription.
 - **Mac:** tmux, a small tool that keeps that hidden Claude running. Installed through Homebrew, only if missing; no password.
-- **Windows:** no tmux; the bridge opens its own small window instead. It needs the bridge launcher's exact permission lines in the workbench's local settings, because the app will not let an agent add those for itself.
+- **Windows:** no tmux; the bridge opens its own small window instead. It needs the bridge launcher's exact permission lines in this app's settings file, because the app will not let an agent add those for itself. They name the launcher inside the bridge skill in the student's skills folder, so they hold from any folder.
 
-Use the `workspace` folder from step 8's result as `<workbench>`. The script is the only thing that makes these changes; never edit either settings file by hand.
+The script is the only thing that makes these changes; never edit the settings file by hand.
 
 1. **See what is needed (changes nothing):**
-   - Mac: `python3 ~/GitHub/aibl-installer/scripts/bridge_readiness.py --plan --workbench "<workbench>"`
-   - Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\bridge_readiness.py --plan --workbench "<workbench>"` (or `python` if `py` is absent)
+   - Mac: `python3 ~/GitHub/aibl-installer/scripts/bridge_readiness.py --plan`
+   - Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\bridge_readiness.py --plan` (or `python` if `py` is absent)
 2. **Ask once, for these settings.** If it prints `Nothing to change`, go to 4. Otherwise show the student every line under `Will change`, exactly as printed, and ask:
 
-   > "To get the bridge ready I will: <the Will change lines, in plain words>. I back up each settings file first and change nothing else in it. OK?"
+   > "To get the bridge ready I will: <the Will change lines, in plain words>. I back up the settings file first and change nothing else in it. OK?"
 
    This gets its own yes, even after step 3, because it changes this app's own settings.
 3. **On a yes:** run the same command with `--apply --yes` in place of `--plan`. It prints what it changed and where the backup is, then the same PASS/FAIL list as step 4; tell the student in plain words. On a no: change nothing, say you can run this step again any time they want the bridge ready, and go to 4 anyway. Never pass `--yes` without the student's yes; the script refuses `--apply` without it.
@@ -374,9 +374,9 @@ Use the `workspace` folder from step 8's result as `<workbench>`. The script is 
    - A settings file that is not valid JSON: stop, as in step 7; fix it with the student and never delete it.
    - Anything else: rule 5.
 
-   Backups of each settings file as it was go to `~/.claude/backups/bridge-readiness/`, outside every repository.
+   A backup of the settings file as it was goes to `~/.claude/backups/bridge-readiness/`, outside every repository.
 
-   Read out any `Note:` lines too. On Windows one of them says the bridge has a round-trip receipt with VS Code as the receiving thread, and with the Claude app as the receiver it is not proven yet; say that plainly. Safe to re-run: when everything is in place, `--apply --yes` changes nothing and makes no backup.
+   Read out any `Note:` lines too. On Windows one of them says the bridge has a round-trip receipt with VS Code as the receiving thread, and with the Claude app as the receiver it is not proven yet; say that plainly. If the Windows account folder has a space in its name, another says no allow rule could be added, so the app will ask before the first bridge launch and the student can allow it from then on. Safe to re-run: when everything is in place, `--apply --yes` changes nothing and makes no backup.
 
 ## Step 9: Open the workbench in this app
 
