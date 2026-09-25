@@ -67,11 +67,10 @@
       "publisher": "aibuild-lab/the-lab",
       "release_product": "the-lab",
       "adopt_skill": null,
-      "source_repository": null,
+      "source_repository": "aibuild-lab/the-lab",
       "teams": "students-the-lab-*",
       "menu": true,
       "requires": [
-        "agent-essentials",
         "the-lab"
       ],
       "includes": [],
@@ -81,7 +80,12 @@
         "python",
         "node"
       ],
-      "start_skill": "aibl-setup"
+      "start_skill": "aibl-setup",
+      "enrollment": {
+        "repository": "aibuild-lab/the-lab",
+        "branch": "student",
+        "skill": "aibl-enroll"
+      }
     }
   ],
   "templates": [

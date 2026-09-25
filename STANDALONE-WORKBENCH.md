@@ -100,7 +100,8 @@ admission, not a digest inferred from an installed marker.
 
 The optional free lesson-8 support uses `--program agent-essentials` with its
 publicly admitted package. It is absent from day-one setup and supplies only
-its declared support files. The Lab has no installation route in this release.
+its declared support files. The Lab has no package route; it joins through Git
+like Workforce: `aibl-enroll` merges `aibuild-lab/the-lab` branch `student`.
 
 A confirmed apply can be retried with the same plan. If a package transaction
 was interrupted, run the retained package engine's `recover --root PATH`, then
