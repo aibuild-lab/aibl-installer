@@ -45,7 +45,9 @@ const codexHooksPath = path.join(codexDir, "hooks.json");
 const codexConfigPath = path.join(codexDir, "config.toml");
 const codexRequirementsPath = path.join(codexDir, "requirements.toml");
 const hooksSourceDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(hooksSourceDir, "..");
 const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
+const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
 const GUARD_MATCHER = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit";
 const SHELL_MATCHER = "Bash|PowerShell";
 const SUPPLEMENT_PRE_MATCHER = "*";
@@ -148,7 +150,7 @@ async function main() {
       return;
     }
     if (args.has("--json")) {
-      process.stdout.write(`${JSON.stringify(jsonStatus(status), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(jsonStatus(status, manifest), null, 2)}\n`);
     } else {
       printStatus(status);
     }
@@ -284,6 +286,7 @@ async function main() {
       "Run node hooks/refresh-guard.mjs again after fixing the listed issue. Do not bypass this check.",
     ].join("\n"));
   }
+  writeOwnershipReceipt(manifest);
 
   console.log("");
   console.log(`Hook commands run Node from ${hookNode}.`);
@@ -778,7 +781,8 @@ function printStatus(status) {
   console.log("Manual proof required: restart both clients, inspect /hooks, trust the exact Codex hooks, and run synthetic canaries.");
 }
 
-function jsonStatus(status) {
+function jsonStatus(status, manifest) {
+  const ownership = inspectOwnership(manifest);
   return {
     schemaVersion: 1,
     scope: "user-global",
@@ -798,7 +802,51 @@ function jsonStatus(status) {
       observableFromInstaller: false,
       requiredSteps: ["restart", "inspect-hooks", "trust-exact-hooks", "synthetic-canaries"],
     },
+    ownership,
   };
+}
+
+function receiptFor(manifest) {
+  const managedFiles = {
+    claude: APPS.claude ? [...FILES, ...CLAUDE_SUPPLEMENTAL_FILES] : [],
+    codex: APPS.codex ? ["secrets-guard.js", "secrets-tripwire.js", ...CODEX_LOCAL_FILES] : [],
+  };
+  return {
+    schemaVersion: 1,
+    owner: "aibl-installer",
+    source: { location: normalizePath(repoRoot) },
+    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(manifestPath))) },
+    managedFiles,
+    clients: Object.entries(managedFiles).filter(([, files]) => files.length > 0).map(([client]) => client),
+  };
+}
+
+function inspectOwnership(manifest) {
+  if (!fs.existsSync(ownershipReceiptPath)) return { status: "absent", receiptPath: normalizePath(ownershipReceiptPath) };
+  let receipt;
+  try {
+    receipt = JSON.parse(fs.readFileSync(ownershipReceiptPath, "utf8"));
+  } catch {
+    return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: ["receipt is not valid JSON"] };
+  }
+  const expected = receiptFor(manifest);
+  const fields = ["schemaVersion", "owner", "source", "manifest", "managedFiles", "clients"];
+  const issues = fields.filter((field) => JSON.stringify(receipt?.[field]) !== JSON.stringify(expected[field]));
+  if (issues.length > 0) return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: issues.map((field) => `receipt ${field} does not match this installer`) };
+  return { status: "installer-managed", receiptPath: normalizePath(ownershipReceiptPath), receipt };
+}
+
+function writeOwnershipReceipt(manifest) {
+  const receipt = JSON.stringify(receiptFor(manifest), null, 2) + "\n";
+  fs.mkdirSync(path.dirname(ownershipReceiptPath), { recursive: true });
+  const temp = `${ownershipReceiptPath}.tmp.${process.pid}`;
+  try {
+    fs.writeFileSync(temp, receipt, { mode: 0o600 });
+    fs.chmodSync(temp, 0o600);
+    fs.renameSync(temp, ownershipReceiptPath);
+  } finally {
+    if (fs.existsSync(temp)) fs.rmSync(temp, { force: true });
+  }
 }
 
 function loadManifest() {

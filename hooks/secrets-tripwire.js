@@ -37,12 +37,7 @@ const PATTERNS = [
   },
   {
     name: 'DB URL with password',
-    re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:@/\s]+:([^@/\s]+)@/g,
-    // A template slot is not a credential: printf `%s`, `%(pw)s`, shell `$VAR`/`${VAR}`,
-    // `{password}`, `<password>`, or a run of asterisks. Leaving these alone stops a script
-    // that BUILDS a DSN from being reported as a leaked one.
-    isPlaceholder: password =>
-      /^(?:%[-+ 0#]*\d*s|%\([A-Za-z_][A-Za-z0-9_]*\)s|\$[A-Z_][A-Z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_:-]*\}|\{[A-Za-z_][A-Za-z0-9_]*\}|<[A-Za-z_][A-Za-z0-9_ -]*>|\*+)$/.test(password),
+    re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:@/\s]+:([^@/\s]+)@/gi,
   },
   { name: 'Bearer token', re: /\bBearer\s+[A-Za-z0-9._-]{20,}/g },
   { name: 'JWT', re: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g },
@@ -55,7 +50,6 @@ function redactText(value) {
   for (const pattern of PATTERNS) {
     pattern.re.lastIndex = 0;
     redacted = redacted.replace(pattern.re, (match, group) => {
-      if (pattern.isPlaceholder && pattern.isPlaceholder(group)) return match;
       hits.add(pattern.name);
       return `[REDACTED: ${pattern.name}]`;
     });

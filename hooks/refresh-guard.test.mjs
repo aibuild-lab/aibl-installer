@@ -244,7 +244,16 @@ check("JSON check reports deterministic per-client disk health",
   && parsedHealthyJson.onDisk.claude.status === "healthy"
   && parsedHealthyJson.onDisk.codex.status === "healthy"
   && parsedHealthyJson.runtime.status === "manual-proof-required"
-  && parsedHealthyJson.runtime.observableFromInstaller === false);
+  && parsedHealthyJson.runtime.observableFromInstaller === false
+  && parsedHealthyJson.ownership.status === "installer-managed"
+  && parsedHealthyJson.ownership.receipt.owner === "aibl-installer"
+  && parsedHealthyJson.ownership.receipt.source.location === fs.realpathSync(repo).replaceAll("\\", "/")
+  && parsedHealthyJson.ownership.receipt.clients.join(",") === "claude,codex");
+const receiptPath = path.join(home, ".claude", "hooks", "aibl-installer-guard-receipt.json");
+fs.writeFileSync(receiptPath, "{broken");
+const damagedReceipt = run(["--check", "--json"]);
+check("damaged ownership receipt is reported without hiding healthy guard files",
+  damagedReceipt.status === 0 && JSON.parse(damagedReceipt.stdout).ownership.status === "invalid");
 const badJsonMode = run(["--json"]);
 check("--json is accepted only with --check", badJsonMode.status !== 0 && /Use --json with --check/.test(badJsonMode.stderr));
 const healthySession = run(["--session-check"]);
