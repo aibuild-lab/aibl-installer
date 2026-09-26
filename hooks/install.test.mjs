@@ -28,7 +28,8 @@ const SHELL_MATCHER = 'Bash|PowerShell';
 function commandRunsScript(command, script) {
   if (typeof command !== 'string') return false;
   const normalized = command.replaceAll('\\', '/');
-  const escaped = script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const target = path.join(hooksDir, script).replaceAll('\\', '/');
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(?:^|[\\s"'/])${escaped}(?=$|[\\s"';&|])`).test(normalized);
 }
 
@@ -73,6 +74,9 @@ function assertSiblingPreserved(settings) {
   assert.deepEqual(pre.hooks, [
     { type: 'command', command: 'node "/keep/unrelated-pre.js"' },
     { type: 'command', command: 'node "/keep/secrets-guard.js-helper"' },
+  ]);
+  assert.deepEqual(settings.hooks.PreToolUse.find((group) => group.matcher === 'Bash|PowerShell')?.hooks, [
+    { type: 'command', command: 'node "/stale/secrets-guard.js"' },
   ]);
 
   const post = settings.hooks.PostToolUse.find((group) => group.tag === 'shared-post');
@@ -180,7 +184,7 @@ try {
     (group) => !group.hooks?.some((hook) => commandRunsScript(hook.command, 'secrets-guard.js')),
   );
   drifted.hooks.PreToolUse.find((group) => group.tag === 'shared-pre').hooks.unshift(
-    { type: 'command', command: 'node "/stale/secrets-guard.js"' },
+    { type: 'command', command: 'node "~/.claude/hooks/secrets-guard.js"' },
   );
   drifted.hooks.PostToolUse.find(
     (group) => group.hooks?.some((hook) => commandRunsScript(hook.command, 'secrets-tripwire.js')),
