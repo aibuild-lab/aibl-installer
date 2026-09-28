@@ -2,7 +2,7 @@
 
 **One installer, every program, your own workbench.** You will end with one
 private repository on your GitHub account, called `my-workbench`, open in the
-app you chose, with three skills already inside it. No invitation, no
+app you chose, with its starter skills already inside it. No invitation, no
 membership, nothing to accept. Your program joins that same workbench later,
 from inside it, with one command.
 
@@ -68,7 +68,7 @@ what it will do, and asks once before it starts. Then it installs only what is
 missing, explains every system prompt before it appears, sends you to your
 browser for the two sign-ins, installs the secrets guard and proves it works,
 creates your private workbench from the public AI Build Lab template with its
-three skills, and tells you how to open it. Expect 30 to 60 minutes, longer on
+starter skills, and tells you how to open it. Expect 30 to 60 minutes, longer on
 a brand-new Mac.
 
 If the app says it cannot open the link: open the URL above in your browser,
@@ -98,6 +98,30 @@ workbench has the `aibl-update` skill, brings every program you have joined up
 to date, showing you what changes before anything lands. A minute or two.
 Do not re-run the setup prompt to get updates; setup never rewrites a workbench
 that already exists.
+
+## Set up between 14 and 16 September? Start fresh
+
+Workbenches made in those three days came from the retired Essentials course:
+the app points you to `/aibl-teach`, and the skills the course uses now are
+missing. Updating cannot fix that, so start fresh. Open the app on your **home
+folder** (not on `my-workbench`) and paste this:
+
+```text
+You are the AI Build Lab fresh-start assistant. I am a student and this session is open on my home folder.
+
+Fetch the fresh-start procedure from this URL and follow it from the beginning, step by step, without summarizing:
+
+https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/FRESH-START-PROMPT.md
+
+Say what you are about to do before each step. Do not delete anything.
+
+If you cannot fetch the URL, say so and I will paste the procedure into chat.
+```
+
+Your old workbench is kept under a new name (`my-workbench-old`), a fresh
+`my-workbench` is built from the current template, and you choose which of
+your files to bring across. If your workbench is already current, it tells you
+so and stops.
 
 ## Connect Workforce after Essentials
 
@@ -130,9 +154,9 @@ projects separate. See [the complete handoff](WORKFORCE-HANDOFF.md).
   online, marked Private. Only you can see it.
 - Inside it: `context/` (what the agent knows about you), `library/` (what you
   hand it to read), `work/` (what it makes), `blueprints/` (plans it can
-  follow), and three skills under `.claude/skills/` and `.agents/skills/`:
-  `aibl-personalize`, `aibl-checkpoint`, `aibl-enroll`.
-- Type `/` in Claude, or `$` in Codex, and the three skills are listed. That
+  follow), and its `aibl-` skills under `.claude/skills/` and `.agents/skills/`:
+  `aibl-personalize`, `aibl-checkpoint`, `aibl-enroll`, `aibl-update`.
+- Type `/` in Claude, or `$` in Codex, and the `aibl-` skills are listed. That
   is your proof that everything landed.
 
 Your workbench is ready even if your course access has not opened. Check your
@@ -157,7 +181,7 @@ python3 ~/GitHub/aibl-installer/scripts/hub_setup.py --harness claude
 ```
 
 (Windows: PowerShell, `$HOME\GitHub\aibl-installer` and `py -3`; `--harness codex`
-if you chose Codex.) Same tools, same workbench, same three skills.
+if you chose Codex.) Same tools, same workbench, same skills.
 
 ## Verification status
 

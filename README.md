@@ -10,8 +10,8 @@ paste one prompt. The app checks your machine, installs only what is missing,
 guides the two browser sign-ins, switches on the secrets guard and proves it
 works, and creates your own private `my-workbench` on GitHub from the public
 [AI Build Lab template](https://github.com/aibuild-lab/my-workbench-template),
-with three skills already inside it: `aibl-personalize`, `aibl-checkpoint`,
-`aibl-enroll`. Then you open that folder in the app and the course begins.
+with its starter skills already inside it: `aibl-personalize`, `aibl-checkpoint`,
+`aibl-enroll` and `aibl-update`. Then you open that folder in the app and the course begins.
 
 No invitation. No membership. Nothing to accept. The template is public and the
 workbench is yours.
