@@ -453,7 +453,7 @@ function inspectClaudeGuard(manifest) {
   try {
     settings = JSON.parse(fs.readFileSync(claudeSettingsPath, "utf8"));
   } catch (error) {
-    issues.push(`~/.claude/settings.json is not valid JSON. (${error.message})`);
+    issues.push("~/.claude/settings.json is not valid JSON.");
     return { healthy: false, issues };
   }
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
@@ -506,7 +506,7 @@ function inspectCodexGuard(manifest) {
   try {
     settings = JSON.parse(fs.readFileSync(codexHooksPath, "utf8"));
   } catch (error) {
-    issues.push(`~/.codex/hooks.json is not valid JSON. (${error.message})`);
+    issues.push("~/.codex/hooks.json is not valid JSON.");
     return { healthy: false, issues };
   }
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
@@ -807,7 +807,7 @@ function readJsonObjectIfExists(file, display) {
   try {
     value = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
-    fail(`${display} is not valid JSON. Fix it, then re-run; it was not overwritten. (${error.message})`);
+    fail(`${display} is not valid JSON. Fix it, then re-run; it was not overwritten.`);
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail(`${display} must contain a JSON object. Fix it, then re-run; it was not overwritten.`);
@@ -897,13 +897,24 @@ function printStatus(status) {
 function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
   const selected = Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client);
   const ownershipBindingFailed = ownership.status === "invalid"
-    && !ownership.issues?.every((issue) => issue.endsWith("installed binding"));
+    && !ownership.issues?.every((issue) => /^receipt (claude|codex) installed binding does not match this installer$/.test(issue));
   const healthy = status.healthy && ownership.status !== "invalid";
   const failure = healthy ? null : ownershipBindingFailed ? "OWNER_BINDING" : "INSTALLED_INSPECTION";
   const ids = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
     "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
   const failureIndex = failure ? ids.indexOf(failure) : -1;
   const mutationStages = new Set(["APPROVAL", "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT"]);
+  const issueText = status.issues.join(" ");
+  const failureClass = healthy ? "NONE" : ownershipBindingFailed ? "OWNERSHIP_INVALID"
+    : /disableAllHooks|disabled|managed.only/i.test(issueText) ? "CLIENT_POLICY_DISABLED"
+      : /runtime|Node path|node executable/i.test(issueText) ? "RUNTIME_PATH_INVALID"
+        : /settings.json.*JSON|hooks.json.*JSON|read deny/i.test(issueText) ? "SETTINGS_INVALID"
+          : /matcher|User.level|registration/i.test(issueText) ? "REGISTRATION_INVALID" : "INSTALLED_BYTES";
+  const nextAction = ownershipBindingFailed ? "review-installer-receipt"
+    : failureClass === "SETTINGS_INVALID" ? "review-private-settings"
+      : failureClass === "CLIENT_POLICY_DISABLED" ? "review-hook-policy"
+        : failureClass === "RUNTIME_PATH_INVALID" ? "review-runtime-executable"
+          : "run-approved-installer-repair";
   const stages = ids.map((id, index) => ({
     id,
     status: failure && index === failureIndex ? "FAIL"
@@ -923,12 +934,8 @@ function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
     stages,
     lastGoodStage: failure ? ids[failureIndex - 1] : "FINAL_REPORT",
     firstFailedStage: failure,
-    failureClass: healthy ? "NONE" : ownershipBindingFailed ? "OWNERSHIP_INVALID"
-      : /disableAllHooks|disabled|managed.only/i.test(status.issues.join(" ")) ? "CLIENT_POLICY_DISABLED"
-        : /runtime|Node path|node executable/i.test(status.issues.join(" ")) ? "RUNTIME_PATH_INVALID"
-          : /settings.json.*JSON|hooks.json.*JSON|read deny/i.test(status.issues.join(" ")) ? "SETTINGS_INVALID"
-            : /matcher|User.level|registration/i.test(status.issues.join(" ")) ? "REGISTRATION_INVALID" : "INSTALLED_BYTES",
-    nextSafeAction: healthy ? null : { action: ownershipBindingFailed ? "review-installer-receipt" : "run-approved-installer-repair", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true },
+    failureClass,
+    nextSafeAction: healthy ? null : { action: nextAction, owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: nextAction === "run-approved-installer-repair" },
     approvalState: "NOT_REQUIRED_READ_ONLY",
     writesAttempted: false,
     writesCommitted: false,
@@ -951,7 +958,11 @@ function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
       observableFromInstaller: false,
       requiredSteps: ["restart", "inspect-hooks", "trust-exact-hooks", "synthetic-canaries"],
     },
-    ownership,
+    ownership: {
+      status: ownership.status,
+      clients: Array.isArray(ownership.receipt?.clients) ? ownership.receipt.clients : [],
+      issues: Array.isArray(ownership.issues) ? ownership.issues : [],
+    },
   };
 }
 

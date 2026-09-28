@@ -247,9 +247,13 @@ check("JSON check reports deterministic per-client disk health",
   && parsedHealthyJson.runtime.status === "manual-proof-required"
   && parsedHealthyJson.runtime.observableFromInstaller === false
   && parsedHealthyJson.ownership.status === "installer-managed"
-  && parsedHealthyJson.ownership.receipt.owner === "aibl-installer"
-  && parsedHealthyJson.ownership.receipt.source.location === fs.realpathSync(repo).replaceAll("\\", "/")
-  && parsedHealthyJson.ownership.receipt.clients.join(",") === "claude,codex");
+  && Array.isArray(parsedHealthyJson.ownership.clients)
+  && parsedHealthyJson.ownership.clients.join(",") === "claude,codex");
+check("shareable JSON check excludes private receipt paths and source location",
+  !healthyJson.stdout.includes(home)
+  && !healthyJson.stdout.includes(repo)
+  && !healthyJson.stdout.includes("receiptPath")
+  && !healthyJson.stdout.includes("\"location\""));
 check("healthy installer check has ordered read-only stage proof",
   parsedHealthyJson.firstFailedStage === null && parsedHealthyJson.lastGoodStage === "FINAL_REPORT"
   && parsedHealthyJson.writesAttempted === false && parsedHealthyJson.rollback === "NOT_NEEDED");
@@ -409,9 +413,18 @@ check("stale guard bytes are unhealthy", staleGuard.status !== 0 && /does not ma
 check("refresh restores stale guard bytes", run().status === 0);
 
 const validSettings = fs.readFileSync(settingsPath, "utf8");
-fs.writeFileSync(settingsPath, "{ not json");
+fs.writeFileSync(settingsPath, "SYNTHETIC_PRIVATE_SETTINGS_BODY");
 const malformed = run(["--check"]);
 check("malformed user settings fail closed", malformed.status !== 0 && /not valid JSON/.test(malformed.stdout));
+const malformedJson = run(["--check", "--json"]);
+check("malformed settings JSON omits source body and parser exception text",
+  malformedJson.status !== 0
+  && !malformedJson.stdout.includes("SYNTHETIC_PRIVATE_SETTINGS_BODY")
+  && !malformedJson.stdout.includes("Unexpected token"));
+check("malformed settings report points to private inspection before another install",
+  JSON.parse(malformedJson.stdout).failureClass === "SETTINGS_INVALID"
+  && JSON.parse(malformedJson.stdout).nextSafeAction.action === "review-private-settings"
+  && JSON.parse(malformedJson.stdout).nextSafeAction.approvalRequired === false);
 const malformedRepair = run();
 check("refresh does not overwrite malformed user settings", malformedRepair.status !== 0);
 fs.writeFileSync(settingsPath, validSettings);
@@ -543,7 +556,8 @@ check("unavailable source still returns one structured failure result", (() => {
   const bothReport = JSON.parse(both.stdout);
   check("after both opt-ins, ownership includes both verified clients",
     both.status === 0 && bothReport.ownership.status === "installer-managed"
-      && bothReport.ownership.receipt.clients.join(",") === "claude,codex");
+      && Array.isArray(bothReport.ownership.clients)
+      && bothReport.ownership.clients.join(",") === "claude,codex");
 }
 
 // A child installer can fail after the hook bytes are committed. The complete managed changed
