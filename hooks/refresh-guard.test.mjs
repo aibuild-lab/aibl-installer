@@ -259,6 +259,43 @@ check("healthy installer check has ordered read-only stage proof",
   && parsedHealthyJson.writesAttempted === false && parsedHealthyJson.rollback === "NOT_NEEDED");
 const receiptPath = path.join(home, ".claude", "hooks", "aibl-installer-guard-receipt.json");
 const validReceipt = fs.readFileSync(receiptPath);
+// A textual reference is not an invocation. Neither inspection nor its diagnostic may execute
+// arbitrary launcher bytes to decide whether they are safe.
+{
+  const target = path.join(home, ".codex", "hooks", codexLauncher("codex-secrets-guard"));
+  const original = fs.readFileSync(target);
+  const noop = process.platform === "win32"
+    ? "@echo off\r\nrem codex-secrets-guard.mjs\r\nexit /b 0\r\n"
+    : "#!/bin/sh\n# codex-secrets-guard.mjs\nexit 0\n";
+  fs.writeFileSync(target, noop);
+  const result = run(["--check", "--json"]);
+  const report = JSON.parse(result.stdout);
+  check("comment-only no-op launcher fails closed without downstream writes",
+    result.status !== 0 && report.onDisk.codex.status === "incomplete"
+    && report.writesAttempted === false && report.firstFailedStage !== null);
+  fs.writeFileSync(target, original);
+  const wrongTarget = original.toString("utf8").replace("codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs");
+  for (const [name, body] of [
+    ["wrong-adapter", wrongTarget],
+    ["extra-command", original.toString("utf8") + (process.platform === "win32" ? "echo extra\r\n" : "echo extra\n")],
+    ["missing-node", original.toString("utf8").replace(/"[^"]+"/, `"${path.join(root, "missing", "node")}"`)],
+  ]) {
+    fs.writeFileSync(target, body);
+    const failed = run(["--check", "--json"]);
+    const failedReport = JSON.parse(failed.stdout);
+    check(`${name} launcher fails at inspection and exposes no private bytes`,
+      failed.status !== 0 && failedReport.onDisk.codex.status === "incomplete"
+      && failedReport.writesAttempted === false && !failed.stdout.includes(home)
+      && !failed.stdout.includes(root));
+  }
+  fs.writeFileSync(target, original);
+  if (process.platform !== "win32") {
+    fs.chmodSync(target, 0o600);
+    check("non-executable launcher cannot earn healthy", run(["--check", "--json"]).status !== 0);
+    fs.chmodSync(target, 0o700);
+  }
+  check("restored canonical launcher remains healthy", run(["--check", "--json"]).status === 0);
+}
 const movedReceipt = JSON.parse(validReceipt);
 movedReceipt.source.location = "/previous-installer-checkout";
 fs.writeFileSync(receiptPath, JSON.stringify(movedReceipt));
@@ -545,12 +582,24 @@ check("unavailable source still returns one structured failure result", (() => {
   const runOnly = (flags) => spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), ...flags], {
     env: { ...process.env, HOME: only, USERPROFILE: only, GUARD_SOURCE_DIR: src }, encoding: "utf8",
   });
-  const c = runOnly(["--claude"]);
+  const c = runOnly(["--claude", "--diagnostic-json"]);
+  const cReport = JSON.parse(c.stdout);
+  check("Claude-only install diagnostic cannot certify absent Codex",
+    cReport.perClient.claude.protection === "healthy"
+    && cReport.perClient.codex.protection === "not selected"
+    && cReport.perClient.codex.ownership === "unverified");
   check("--claude installs the Claude guard", c.status === 0 && fs.existsSync(path.join(only, ".claude", "hooks", "secrets-guard.js")));
   check("--claude leaves ~/.codex untouched", !fs.existsSync(path.join(only, ".codex")));
   const cc = runOnly(["--check", "--claude", "--json"]);
   check("--check --claude is healthy and reports Codex as not selected", cc.status === 0 && /"status": "not selected"/.test(cc.stdout));
-  const x = runOnly(["--codex"]);
+  check("read-only Claude-only report cannot claim Codex ownership",
+    JSON.parse(cc.stdout).perClient.codex.ownership === "unverified");
+  const x = runOnly(["--codex", "--diagnostic-json"]);
+  const xReport = JSON.parse(x.stdout);
+  check("sequential opt-in diagnostic proves retained and selected clients separately",
+    xReport.perClient.claude.protection === "healthy"
+    && xReport.perClient.claude.ownership === "installer-managed"
+    && xReport.perClient.codex.protection === "healthy");
   check("--codex installs the Codex guard", x.status === 0 && fs.existsSync(path.join(only, ".codex", "hooks.json")));
   const both = runOnly(["--check", "--json"]);
   const bothReport = JSON.parse(both.stdout);
@@ -558,6 +607,16 @@ check("unavailable source still returns one structured failure result", (() => {
     both.status === 0 && bothReport.ownership.status === "installer-managed"
       && Array.isArray(bothReport.ownership.clients)
       && bothReport.ownership.clients.join(",") === "claude,codex");
+  const codexOnly = path.join(root, "codex-only");
+  fs.mkdirSync(codexOnly);
+  const codexResult = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), "--codex", "--diagnostic-json"], {
+    env: { ...process.env, HOME: codexOnly, USERPROFILE: codexOnly, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  const codexReport = JSON.parse(codexResult.stdout);
+  check("Codex-only diagnostic cannot certify absent Claude",
+    codexResult.status === 0 && codexReport.perClient.codex.protection === "healthy"
+    && codexReport.perClient.claude.protection === "not selected"
+    && codexReport.perClient.claude.ownership === "unverified");
 }
 
 // A child installer can fail after the hook bytes are committed. The complete managed changed
@@ -623,6 +682,7 @@ if (process.platform !== "win32") {
         && report.lastGoodStage === (ids.slice(0, index).filter((stage) => stage !== "APPROVAL").at(-1) ?? null)
         && (index === ids.length - 1 || report.stages[index + 1].status === "NOT_RUN")
         && report.writesCommitted === (id === "FINAL_REPORT")
+        && (id === "FINAL_REPORT" || Object.values(report.perClient).every((client) => client.protection !== "healthy"))
         && (index < ids.indexOf("COMMIT_FILES") || id === "FINAL_REPORT" || report.rollback === "RESTORED"));
   }
   const successHome = path.join(root, "stage-success");

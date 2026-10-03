@@ -69,6 +69,7 @@ let writesAttempted = false;
 let writesCommitted = false;
 let diagnosticSourceIdentity = null;
 let diagnosticProtection = null;
+let diagnosticClients = [];
 function enterStage(id) {
   if (!diagnosticMode) return;
   if (activeStage) passedStages.push(activeStage);
@@ -97,9 +98,11 @@ function diagnosticReport(failed) {
     requiredClients: Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client),
     approvedClients: [],
     perClient: Object.fromEntries(["claude", "codex"].map((client) => [client, {
-      owner: writesCommitted ? "aibl-installer" : "unverified",
-      protection: diagnosticProtection?.[client]?.healthy ? "healthy" : "unverified",
-      ownership: writesCommitted ? "installer-managed" : "unverified",
+      owner: writesCommitted && diagnosticClients.includes(client) ? "aibl-installer" : "unverified",
+      protection: writesCommitted && diagnosticClients.includes(client)
+        ? diagnosticProtection?.[client]?.healthy ? "healthy" : "incomplete"
+        : APPS[client] ? "unverified" : "not selected",
+      ownership: writesCommitted && diagnosticClients.includes(client) ? "installer-managed" : "unverified",
     }])),
     stages,
     lastGoodStage: completed.filter((id) => id !== "APPROVAL").at(-1) || null,
@@ -385,9 +388,14 @@ async function main() {
   }
   enterStage("RECEIPT_COMMIT");
   writeOwnershipReceipt(manifest, existingOwnership);
-  if (inspectOwnership(manifest).status !== "installer-managed") {
+  const committedOwnership = inspectOwnership(manifest);
+  if (committedOwnership.status !== "installer-managed") {
     fail("The committed receipt did not verify against both requested client bindings.");
   }
+  diagnosticClients = committedOwnership.receipt.clients;
+  diagnosticProtection = Object.fromEntries(diagnosticClients.map((client) => [
+    client, client === "claude" ? inspectClaudeGuard(manifest) : inspectCodexGuard(manifest),
+  ]));
   writesCommitted = true;
   transaction.commit();
   } catch (error) {
@@ -772,8 +780,31 @@ function verifyCodexHook(settings, event, script, matcher, issues) {
     issues.push(`${launcherName} is missing from ~/.codex/hooks.`);
     return;
   }
-  if (!onDisk.toString("utf8").includes(script)) {
-    issues.push(`${launcherName} does not invoke ${script}.`);
+  const bindingIssue = codexLauncherIssue(path.join(codexHooksDir, launcherName), script);
+  if (bindingIssue) issues.push(`${launcherName} ${bindingIssue}.`);
+}
+
+function codexLauncherIssue(launcher, script) {
+  try {
+    const stat = fs.lstatSync(launcher);
+    if (!stat.isFile() || stat.isSymbolicLink()) return "is not a regular launcher";
+    if (process.platform !== "win32" && (stat.mode & 0o100) === 0) return "is not executable";
+    const body = fs.readFileSync(launcher, "utf8").replaceAll("\r\n", "\n");
+    // Parse the complete supported wrapper, never a comment/substring, and never execute it.
+    // Shell expansion characters are excluded from quoted paths in the supported contract.
+    const match = process.platform === "win32"
+      ? body.match(/^@echo off\n"([^"%\r\n]+)" "([^"%\r\n]+)" %\*\n$/)
+      : body.match(/^#!\/bin\/sh\nexec "([^"$`\\\r\n]+)" "([^"$`\\\r\n]+)" "\$@"\n$/);
+    if (!match) return "does not have the supported invoking structure";
+    const [, nodeBin, adapter] = match;
+    if (!isAbsolutePortable(adapter)
+      || normalizePath(adapter) !== normalizePath(path.join(codexHooksDir, script))) return "points to the wrong adapter";
+    if (!isAbsolutePortable(nodeBin) || !/^node(?:\.exe)?$/i.test(path.win32.basename(nodeBin))
+      || !fs.statSync(nodeBin).isFile()) return "has no supported Node executable";
+    fs.accessSync(nodeBin, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+    return null;
+  } catch {
+    return "has an unavailable or unsafe launcher binding";
   }
 }
 
@@ -927,10 +958,15 @@ function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
     operation: "check",
     requiredClients: selected,
     approvedClients: [],
-    perClient: {
-      claude: { owner: ownership.status, protection: status.claude.skipped ? "not selected" : status.claude.healthy ? "healthy" : "incomplete", ownership: ownership.status },
-      codex: { owner: ownership.status, protection: status.codex.skipped ? "not selected" : status.codex.healthy ? "healthy" : "incomplete", ownership: ownership.status },
-    },
+    perClient: Object.fromEntries(["claude", "codex"].map((client) => {
+      const clientOwner = ownership.status === "installer-managed" && ownership.receipt.clients.includes(client)
+        ? "installer-managed" : "unverified";
+      return [client, {
+        owner: clientOwner,
+        protection: status[client].skipped ? "not selected" : status[client].healthy ? "healthy" : "incomplete",
+        ownership: clientOwner,
+      }];
+    })),
     stages,
     lastGoodStage: failure ? ids[failureIndex - 1] : "FINAL_REPORT",
     firstFailedStage: failure,
