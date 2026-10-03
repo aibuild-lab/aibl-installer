@@ -789,7 +789,9 @@ function codexLauncherIssue(launcher, script) {
     const stat = fs.lstatSync(launcher);
     if (!stat.isFile() || stat.isSymbolicLink()) return "is not a regular launcher";
     if (process.platform !== "win32" && (stat.mode & 0o100) === 0) return "is not executable";
-    const body = fs.readFileSync(launcher, "utf8").replaceAll("\r\n", "\n");
+    const rawBody = fs.readFileSync(launcher, "utf8");
+    if (process.platform !== "win32" && rawBody.includes("\r")) return "has invalid Unix launcher line endings";
+    const body = process.platform === "win32" ? rawBody.replaceAll("\r\n", "\n") : rawBody;
     // Parse the complete supported wrapper, never a comment/substring, and never execute it.
     // Shell expansion characters are excluded from quoted paths in the supported contract.
     const match = process.platform === "win32"
@@ -937,11 +939,13 @@ function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
   const mutationStages = new Set(["APPROVAL", "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT"]);
   const issueText = status.issues.join(" ");
   const failureClass = healthy ? "NONE" : ownershipBindingFailed ? "OWNERSHIP_INVALID"
+    : /invalid Unix launcher line endings/i.test(issueText) ? "LAUNCHER_LINE_ENDINGS_INVALID"
     : /disableAllHooks|disabled|managed.only/i.test(issueText) ? "CLIENT_POLICY_DISABLED"
       : /runtime|Node path|node executable/i.test(issueText) ? "RUNTIME_PATH_INVALID"
         : /settings.json.*JSON|hooks.json.*JSON|read deny/i.test(issueText) ? "SETTINGS_INVALID"
           : /matcher|User.level|registration/i.test(issueText) ? "REGISTRATION_INVALID" : "INSTALLED_BYTES";
   const nextAction = ownershipBindingFailed ? "review-installer-receipt"
+    : failureClass === "LAUNCHER_LINE_ENDINGS_INVALID" ? "inspect-private-launcher-line-endings"
     : failureClass === "SETTINGS_INVALID" ? "review-private-settings"
       : failureClass === "CLIENT_POLICY_DISABLED" ? "review-hook-policy"
         : failureClass === "RUNTIME_PATH_INVALID" ? "review-runtime-executable"

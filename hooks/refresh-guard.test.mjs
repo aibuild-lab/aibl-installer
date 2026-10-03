@@ -273,6 +273,13 @@ const validReceipt = fs.readFileSync(receiptPath);
   check("comment-only no-op launcher fails closed without downstream writes",
     result.status !== 0 && report.onDisk.codex.status === "incomplete"
     && report.writesAttempted === false && report.firstFailedStage !== null);
+  const marker = path.join(root, "inspection-executed");
+  fs.writeFileSync(target, process.platform === "win32"
+    ? `@echo off\r\necho invoked > "${marker}"\r\n`
+    : `#!/bin/sh\nprintf invoked > "${marker}"\n`);
+  const staticInspection = run(["--check", "--json"]);
+  check("static inspection never invokes installed launcher bytes",
+    staticInspection.status !== 0 && !fs.existsSync(marker));
   fs.writeFileSync(target, original);
   const wrongTarget = original.toString("utf8").replace("codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs");
   for (const [name, body] of [
@@ -290,6 +297,48 @@ const validReceipt = fs.readFileSync(receiptPath);
   }
   fs.writeFileSync(target, original);
   if (process.platform !== "win32") {
+    const execute = () => spawnSync(target, [], {
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home },
+      input: '{}', encoding: "utf8", timeout: 5000,
+    });
+    check("Unix LF registered launcher executes the disposable guard route", execute().status === 0);
+    fs.writeFileSync(target, original.toString("utf8").replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"));
+    const bytesBefore = fs.readFileSync(target);
+    const execution = execute();
+    check("Unix CRLF negative control cannot execute its shebang", execution.status !== 0);
+    const inspected = run(["--check", "--json"]);
+    const observed = JSON.parse(inspected.stdout);
+    const discriminator = JSON.stringify({ lineEndings: "CRLF", executionCompleted: execution.status === 0,
+      inspectorHealthy: observed.onDisk.codex.status === "healthy", firstFailedStage: observed.firstFailedStage,
+      lastGoodStage: observed.lastGoodStage, failureClass: observed.failureClass,
+      writesAttempted: observed.writesAttempted, nextSafeAction: "reject Unix CRLF at launcher inspection" });
+    check(`Unix CRLF inspection must reject a proven non-executable route: ${discriminator}`,
+      inspected.status !== 0 && observed.firstFailedStage === "INSTALLED_INSPECTION"
+      && observed.lastGoodStage === "OWNER_BINDING" && observed.onDisk.codex.status === "incomplete"
+      && observed.failureClass === "LAUNCHER_LINE_ENDINGS_INVALID"
+      && observed.nextSafeAction?.action === "inspect-private-launcher-line-endings"
+      && observed.nextSafeAction.approvalRequired === false);
+    check("Unix CRLF read-only inspection preserves bytes and runs no write stages",
+      bytesBefore.equals(fs.readFileSync(target)) && observed.writesAttempted === false
+      && observed.writesCommitted === false);
+    fs.writeFileSync(target, original);
+    for (const name of ["codex-secrets-guard", "codex-secrets-tripwire"]) {
+      const launcher = path.join(home, ".codex", "hooks", codexLauncher(name));
+      const canonical = fs.readFileSync(launcher);
+      const lf = canonical.toString("utf8").replaceAll("\r\n", "\n");
+      for (const [kind, body] of [["CRLF", lf.replaceAll("\n", "\r\n")],
+        ["mixed", lf.replace("\n", "\r\n")]]) {
+        fs.writeFileSync(launcher, body);
+        const checked = run(["--check", "--json"]);
+        const report = JSON.parse(checked.stdout);
+        check(`${name} ${kind} line endings fail closed at inspection`,
+          checked.status !== 0 && report.failureClass === "LAUNCHER_LINE_ENDINGS_INVALID"
+          && report.firstFailedStage === "INSTALLED_INSPECTION"
+          && report.lastGoodStage === "OWNER_BINDING" && report.writesAttempted === false
+          && report.stages.find(stage => stage.id === "SOURCE_VERIFY")?.status === "NOT_RUN");
+      }
+      fs.writeFileSync(launcher, canonical);
+    }
     fs.chmodSync(target, 0o600);
     check("non-executable launcher cannot earn healthy", run(["--check", "--json"]).status !== 0);
     fs.chmodSync(target, 0o700);

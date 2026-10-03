@@ -2,6 +2,8 @@
 
 ## Unreleased: Guard ownership and scoped repair
 
+- Unix launcher inspection now rejects CRLF or mixed line endings before reporting guard health. Read-only diagnostics name `LAUNCHER_LINE_ENDINGS_INVALID` and direct private inspection; an approved installer repair remains a separate effectful step. Disposable LF, CRLF, and mixed controls cover both Codex launchers. Windows command normalization is retained.
+
 - Launcher health now checks the complete invoking wrapper, adapter target, Node availability, and executable mode rather than a filename mention. Installation diagnostics certify only selected or independently verified retained clients; a skipped client is not protected. Disk health still does not prove client activation.
 
 - User-level guard installs now retain verified ownership for Claude Code and Codex across separate app installs. The receipt records the pinned manifest identity and managed files; a source path cannot authorize a verifier. Incomplete ownership fails the disk check. A scoped transaction restores managed files, settings, launchers, and receipt after a failed late step. Custom hooks with the same script name outside managed paths are preserved. Read-only checks and diagnostic stage reports distinguish disk health from runtime activation; restart, review trust, and run synthetic canaries after an approved install.
