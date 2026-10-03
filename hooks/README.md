@@ -16,6 +16,24 @@ app must then be fully quit and reopened, and Codex trusted once (below), before
 actually running. The installer prompt passes the student's app and offers the other; a student
 who chose one app never gets the other app's files unless they ask.
 
+The installer owns current user-level installations. Each successful install writes an ownership
+receipt under `~/.claude/hooks`; a Codex-only run uses that location for metadata but does not
+configure Claude Code. Sequential `--claude` and `--codex` installs retain verified ownership for
+both clients. The receipt records the reviewed manifest identity and managed file names, not user
+settings or secret values. `--check --json` reports protection and ownership separately for each
+selected client. Damaged or unsupported ownership is an incomplete result even when the hook files
+look healthy; review it before installing again. A local source path in a receipt is recovery
+metadata and does not grant authority to execute that checkout.
+
+Installation snapshots its managed files, settings, backups, launchers, and receipt under a shared
+writer lock. A failed late step restores and reads back that scoped snapshot. `--diagnostic-json`
+reports ordered stages for a local installation attempt; its approval field is explicitly
+unverified because the script cannot observe a human decision. Run installation only after approval
+for the selected client scope. The Agent Native OS updater performs a read-only guard postcheck;
+use this installer for a separately approved installer-managed repair. No command here removes a
+project-level hook. Retire a redundant project hook only after separate approval and a fresh client
+session proves installed, trusted, permitted, denied, and post-use behavior.
+
 The installer never touches a student's own global instruction files (`~/.claude/CLAUDE.md`,
 `~/.codex/AGENTS.md`) or any settings key it does not own; `refresh-guard.test.mjs` proves it with
 pre-existing files that must be byte-identical afterward.
@@ -63,7 +81,8 @@ class deterministically, whether or not the model "remembers." (Anthropic issue 
 - **`install.mjs`** - idempotent Claude installer. Merges the hooks + `permissions.deny` block into
   `~/.claude/settings.json` without clobbering existing keys; backs the file up first. Each managed
   hook gets its own dedicated matcher group, so repairing our matcher never widens or narrows an
-  unrelated sibling hook's matcher; only whole-token copies of our own script are removed. Settings
+  unrelated sibling hook's matcher; only entries at the managed path or its known legacy tilde
+  path are removed. A same-named custom script elsewhere is preserved. Settings
   are written atomically (temp + rename) at mode `0600`, and the hook scripts are set to `0700`.
 - **`refresh-guard.mjs`** - the installer for **both** apps. Reads the canonical files beside it,
   verifies every one against `secrets-guard.manifest.json` (LF-normalized sha256), stages and

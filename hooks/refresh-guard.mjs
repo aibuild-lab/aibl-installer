@@ -45,7 +45,9 @@ const codexHooksPath = path.join(codexDir, "hooks.json");
 const codexConfigPath = path.join(codexDir, "config.toml");
 const codexRequirementsPath = path.join(codexDir, "requirements.toml");
 const hooksSourceDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(hooksSourceDir, "..");
 const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
+const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
 const GUARD_MATCHER = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit";
 const SHELL_MATCHER = "Bash|PowerShell";
 const SUPPLEMENT_PRE_MATCHER = "*";
@@ -57,6 +59,62 @@ const REQUIRED_DENY = [
   "Read(**/.env.*)", "Read(**/secrets/**)",
 ];
 const args = new Set(process.argv.slice(2));
+const diagnosticMode = args.has("--diagnostic-json");
+const stageIds = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
+  "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+let activeStage = null;
+let passedStages = [];
+let rollbackState = "NOT_NEEDED";
+let writesAttempted = false;
+let writesCommitted = false;
+let diagnosticSourceIdentity = null;
+let diagnosticProtection = null;
+let diagnosticClients = [];
+function enterStage(id) {
+  if (!diagnosticMode) return;
+  if (activeStage) passedStages.push(activeStage);
+  activeStage = id;
+  const requested = process.env.AIBL_GUARD_TEST_FAIL_STAGE;
+  const home = path.resolve(os.homedir());
+  if (requested === id && process.env.AIBL_GUARD_TEST_HOME === home
+    && (home === path.resolve(os.tmpdir()) || home.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`))) {
+    throw new Error("Synthetic stage failure in disposable home");
+  }
+}
+function diagnosticReport(failed) {
+  const completed = failed ? passedStages : [...passedStages, activeStage].filter(Boolean);
+  const firstFailedStage = failed ? activeStage || "INPUT_SCOPE" : null;
+  const failedIndex = firstFailedStage ? stageIds.indexOf(firstFailedStage) : -1;
+  const stages = stageIds.map((id) => ({ id, status: firstFailedStage && id === firstFailedStage ? "FAIL"
+    : completed.includes(id) ? id === "APPROVAL" ? "NOT_APPLICABLE" : "PASS" : "NOT_RUN",
+    ...(id === "APPROVAL" && completed.includes(id) ? { reason: "Caller authorization is outside this script." } : {}) }));
+  const failureClass = !failed ? "NONE" : ({ INPUT_SCOPE: "INPUT_INVALID", OWNER_DISCOVERY: "OWNER_AMBIGUOUS",
+    OWNER_BINDING: "OWNERSHIP_INVALID", INSTALLED_INSPECTION: "INSTALLED_BYTES", APPROVAL: "APPROVAL_REQUIRED",
+    SOURCE_VERIFY: "SOURCE_INTEGRITY", STAGE_WRITES: "CONCURRENT_CHANGE", COMMIT_FILES: "WRITE_FAILED",
+    REGISTER_HOOKS: "REGISTRATION_INVALID", POST_VERIFY: "POSTCHECK_FAILED", RECEIPT_COMMIT: "RECEIPT_WRITE_FAILED",
+    FINAL_REPORT: "INTERNAL_ERROR" })[firstFailedStage] || "INTERNAL_ERROR";
+  return {
+    schemaVersion: 1, operation: "install", scope: "user-global",
+    requiredClients: Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client),
+    approvedClients: [],
+    perClient: Object.fromEntries(["claude", "codex"].map((client) => [client, {
+      owner: writesCommitted && diagnosticClients.includes(client) ? "aibl-installer" : "unverified",
+      protection: writesCommitted && diagnosticClients.includes(client)
+        ? diagnosticProtection?.[client]?.healthy ? "healthy" : "incomplete"
+        : APPS[client] ? "unverified" : "not selected",
+      ownership: writesCommitted && diagnosticClients.includes(client) ? "installer-managed" : "unverified",
+    }])),
+    stages,
+    lastGoodStage: completed.filter((id) => id !== "APPROVAL").at(-1) || null,
+    firstFailedStage,
+    failureClass,
+    nextSafeAction: failed ? { action: rollbackState === "FAILED" ? "manual-recovery" : "review-and-retry", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true } : null,
+    approvalState: "EXTERNAL_AUTHORIZATION_UNVERIFIED",
+    writesAttempted, writesCommitted, rollback: rollbackState,
+    sourceIdentity: diagnosticSourceIdentity,
+    testIdentity: process.env.AIBL_GUARD_TEST_FAIL_STAGE ? "disposable-fault-fixture" : null,
+  };
+}
 // Which app to protect. A student who chose one app should not have the other app's
 // configuration written for them; the installer prompt passes the chosen flag and offers the
 // other. With neither flag, both (the original Camp behavior, where everyone had both).
@@ -110,7 +168,35 @@ function hookNodePath() {
 // Run only when invoked as a script. Importing the module (the test suite does, for pickStableNode)
 // must not install anything. When the comparison itself cannot be made, run: this file's job is to
 // install a guard, and a guard that quietly does nothing is the failure mode everything here avoids.
-if (isMainModule()) main().catch((error) => fail(error.message || String(error)));
+if (isMainModule()) {
+  if (diagnosticMode) console.log = (...parts) => process.stderr.write(`${parts.join(" ")}\n`);
+  main().then(() => { if (diagnosticMode) process.stdout.write(`${JSON.stringify(diagnosticReport(false))}\n`); }).catch((error) => {
+  if (diagnosticMode) {
+    process.stdout.write(`${JSON.stringify(diagnosticReport(true))}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (args.has("--check") && args.has("--json")) {
+    const ids = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
+      "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+    process.stdout.write(`${JSON.stringify({
+      schemaVersion: 1, operation: "check", scope: "user-global",
+      requiredClients: Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client), approvedClients: [],
+      onDisk: { status: "incomplete", claude: { status: APPS.claude ? "incomplete" : "not selected", issues: [] }, codex: { status: APPS.codex ? "incomplete" : "not selected", issues: [] } },
+      ownership: { status: "unknown" },
+      stages: ids.map((id) => ({ id, status: id === "SOURCE_VERIFY" ? "FAIL" : id === "INPUT_SCOPE" ? "PASS" : "NOT_RUN" })),
+      lastGoodStage: "INPUT_SCOPE", firstFailedStage: "SOURCE_VERIFY",
+      failureClass: /manifest|pinned|hash/i.test(error.message || "") ? "SOURCE_INTEGRITY" : "INTERNAL_ERROR",
+      nextSafeAction: { action: "review-installer-source", owner: "aibl-installer", targetClass: "source", approvalRequired: false },
+      approvalState: "NOT_REQUIRED_READ_ONLY", writesAttempted: false, writesCommitted: false, rollback: "NOT_NEEDED", sourceIdentity: null,
+    })}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  console.error(`Guard refresh failed: ${error.message || String(error)}`);
+  process.exitCode = 1;
+});
+}
 
 function isMainModule() {
   const entry = process.argv[1];
@@ -123,23 +209,29 @@ function isMainModule() {
 }
 
 async function main() {
+  enterStage("INPUT_SCOPE");
   const manifest = loadManifest();
+  diagnosticSourceIdentity = manifest.ref;
 
   if (args.has("--check") && args.has("--session-check")) {
     fail("Use either --check or --session-check, not both.");
   }
-  const unknown = [...args].filter((arg) => !["--check", "--session-check", "--json", "--claude", "--codex"].includes(arg));
+  const unknown = [...args].filter((arg) => !["--check", "--session-check", "--json", "--claude", "--codex", "--diagnostic-json"].includes(arg));
   if (unknown.length > 0) fail(`Unknown option: ${unknown.join(", ")}`);
+  if (diagnosticMode && (args.has("--check") || args.has("--session-check") || args.has("--json"))) fail("Use --diagnostic-json only for an installation attempt.");
   if (args.has("--json") && !args.has("--check")) {
     fail("Use --json with --check.");
   }
+  assertGlobalTargetsSafe();
 
   if (args.has("--check") || args.has("--session-check")) {
     const status = inspectInstalledGuard(manifest);
+    const ownership = inspectOwnership(manifest);
+    const ownershipHealthy = ownership.status === "absent" || ownership.status === "installer-managed";
     if (args.has("--session-check")) {
-      if (!status.healthy) {
+      if (!status.healthy || !ownershipHealthy) {
         console.log([
-          "The user-global Claude Code and Codex secrets guards are missing, stale, or incompletely wired.",
+          "The user-global secrets guard or its installer ownership is missing, stale, or incompletely wired.",
           "Before secret-bearing work, run node hooks/refresh-guard.mjs from your aibl-installer clone,",
           "fully quit and reopen both clients, then confirm /hooks lists the user-level guards.",
           "The project guard is only bootstrap protection for this repository.",
@@ -148,16 +240,24 @@ async function main() {
       return;
     }
     if (args.has("--json")) {
-      process.stdout.write(`${JSON.stringify(jsonStatus(status), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(jsonStatus(status, manifest, ownership), null, 2)}\n`);
     } else {
       printStatus(status);
+      if (!ownershipHealthy) console.log("Installer ownership: invalid; repair the receipt before relying on this check.");
     }
-    if (!status.healthy) process.exitCode = 1;
+    if (!status.healthy || !ownershipHealthy) process.exitCode = 1;
     return;
   }
 
-  const hookNode = hookNodePath();
+  enterStage("OWNER_DISCOVERY");
+  const existingOwnership = inspectOwnership(manifest, { requireSelected: false, verifySelectedBinding: false });
+  enterStage("OWNER_BINDING");
+  if (existingOwnership.status === "invalid") fail("Installer ownership receipt is invalid. No guard files were changed; review it before repair.");
+  enterStage("INSTALLED_INSPECTION");
   const before = inspectInstalledGuard(manifest);
+  enterStage("APPROVAL");
+  enterStage("SOURCE_VERIFY");
+  const hookNode = hookNodePath();
 
   // 1. Fetch every file and verify hash + syntax IN MEMORY before touching disk.
   const fetched = {};
@@ -211,6 +311,7 @@ async function main() {
   if (APPS.claude) validateClaudeHooksMergeTarget(readJsonObjectIfExists(claudeSettingsPath, "~/.claude/settings.json"));
   if (APPS.codex) validateCodexHooksMergeTarget(readJsonObjectIfExists(codexHooksPath, "~/.codex/hooks.json"));
 
+  enterStage("STAGE_WRITES");
   // 2. Stage + atomically swap only the files that differ. Both clients use the same pinned
   // canonical bytes plus narrowly scoped, checksum-pinned local supplements/adapters.
   const desired = [
@@ -230,43 +331,42 @@ async function main() {
     return current === null || !current.equals(bytes);
   });
 
-  // 3. Stage + atomic swap with backup/rollback. All-or-nothing across both clients' changed set.
-  if (changed.length > 0) {
-    const backups = [];
-    const created = [];
-    try {
-      for (const { target, bytes } of changed) {
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        if (fs.existsSync(target)) {
-          const backup = `${target}.bak`;
-          fs.copyFileSync(target, backup);
-          backups.push([backup, target]);
-        } else created.push(target);
-        const tmp = `${target}.tmp`;               // same dir => rename is atomic on one filesystem
-        fs.writeFileSync(tmp, bytes, { mode: 0o700 });
-        fs.chmodSync(tmp, 0o700);
-        fs.renameSync(tmp, target);
+  const launchers = ["codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs"]
+    .map((script) => path.join(codexHooksDir, codexLauncherName(script)));
+  const transaction = beginGuardTransaction([
+    ...desired.map(({ target }) => target),
+    claudeSettingsPath, `${claudeSettingsPath}.backup.secrets-guard`,
+    `${claudeSettingsPath}.backup.aws-credential-supplement`,
+    codexHooksPath, `${codexHooksPath}.backup.secrets-guard`,
+    ...launchers, ownershipReceiptPath,
+  ]);
+  try {
+    enterStage("COMMIT_FILES");
+    writesAttempted = true;
+    // 3. Replace reviewed bytes; the transaction below also covers settings, launchers and receipt.
+    for (const { target, bytes } of changed) {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      const temp = `${target}.tmp.${process.pid}`;
+      try {
+        fs.writeFileSync(temp, bytes, { mode: 0o700 });
+        fs.chmodSync(temp, 0o700);
+        fs.renameSync(temp, target);
+      } finally {
+        if (fs.existsSync(temp)) fs.rmSync(temp, { force: true });
       }
-    } catch (error) {
-      for (const [backup, target] of backups) { try { fs.copyFileSync(backup, target); } catch (_) {} }
-      for (const target of created) { try { fs.rmSync(target, { force: true }); } catch (_) {} }
-      cleanupBackups(backups);
-      fail(`Update failed while writing the guard; restored the previous version. (${error.message || error})`);
     }
-    cleanupBackups(backups);
-    console.log(`Secrets guard updated: ${changed.map(({ label }) => label).join(", ")}`);
-  } else {
-    console.log("Secrets guard files already current.");
-  }
+    if (changed.length > 0) console.log(`Secrets guard updated: ${changed.map(({ label }) => label).join(", ")}`);
+    else console.log("Secrets guard files already current.");
 
   // 4. ALWAYS validate/repair the settings wiring — even when nothing downloaded. A guard whose
   //    PreToolUse hook is missing from settings.json is silently inactive; the installer is
   //    idempotent, so this is a quiet no-op when everything is already correct.
+  enterStage("REGISTER_HOOKS");
   if (APPS.claude) {
     // The installer runs on the Node that is running now; CLAUDE_HOOK_NODE tells it which Node
     // path to WRITE into the hook commands (the stable launcher, see pickStableNode).
     const result = spawnSync(process.execPath, [path.join(claudeHooksDir, "install.mjs")], {
-      stdio: "inherit",
+      stdio: diagnosticMode ? "pipe" : "inherit",
       env: { ...process.env, CLAUDE_HOOK_NODE: hookNode },
     });
     if (result.status !== 0) {
@@ -276,7 +376,9 @@ async function main() {
   }
   if (APPS.codex) installCodexHooks(hookNode);
 
+  enterStage("POST_VERIFY");
   const after = inspectInstalledGuard(manifest);
+  diagnosticProtection = after;
   if (!after.healthy) {
     fail([
       "The guard files were processed, but the user-global installation did not pass verification.",
@@ -284,6 +386,26 @@ async function main() {
       "Run node hooks/refresh-guard.mjs again after fixing the listed issue. Do not bypass this check.",
     ].join("\n"));
   }
+  enterStage("RECEIPT_COMMIT");
+  writeOwnershipReceipt(manifest, existingOwnership);
+  const committedOwnership = inspectOwnership(manifest);
+  if (committedOwnership.status !== "installer-managed") {
+    fail("The committed receipt did not verify against both requested client bindings.");
+  }
+  diagnosticClients = committedOwnership.receipt.clients;
+  diagnosticProtection = Object.fromEntries(diagnosticClients.map((client) => [
+    client, client === "claude" ? inspectClaudeGuard(manifest) : inspectCodexGuard(manifest),
+  ]));
+  writesCommitted = true;
+  transaction.commit();
+  } catch (error) {
+    rollbackState = transaction.rollback();
+    writesCommitted = false;
+    throw new Error(`${error.message || String(error)} Scoped rollback: ${rollbackState}.`);
+  } finally {
+    transaction.release();
+  }
+  enterStage("FINAL_REPORT");
 
   console.log("");
   console.log(`Hook commands run Node from ${hookNode}.`);
@@ -339,7 +461,7 @@ function inspectClaudeGuard(manifest) {
   try {
     settings = JSON.parse(fs.readFileSync(claudeSettingsPath, "utf8"));
   } catch (error) {
-    issues.push(`~/.claude/settings.json is not valid JSON. (${error.message})`);
+    issues.push("~/.claude/settings.json is not valid JSON.");
     return { healthy: false, issues };
   }
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
@@ -392,7 +514,7 @@ function inspectCodexGuard(manifest) {
   try {
     settings = JSON.parse(fs.readFileSync(codexHooksPath, "utf8"));
   } catch (error) {
-    issues.push(`~/.codex/hooks.json is not valid JSON. (${error.message})`);
+    issues.push("~/.codex/hooks.json is not valid JSON.");
     return { healthy: false, issues };
   }
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
@@ -658,8 +780,33 @@ function verifyCodexHook(settings, event, script, matcher, issues) {
     issues.push(`${launcherName} is missing from ~/.codex/hooks.`);
     return;
   }
-  if (!onDisk.toString("utf8").includes(script)) {
-    issues.push(`${launcherName} does not invoke ${script}.`);
+  const bindingIssue = codexLauncherIssue(path.join(codexHooksDir, launcherName), script);
+  if (bindingIssue) issues.push(`${launcherName} ${bindingIssue}.`);
+}
+
+function codexLauncherIssue(launcher, script) {
+  try {
+    const stat = fs.lstatSync(launcher);
+    if (!stat.isFile() || stat.isSymbolicLink()) return "is not a regular launcher";
+    if (process.platform !== "win32" && (stat.mode & 0o100) === 0) return "is not executable";
+    const rawBody = fs.readFileSync(launcher, "utf8");
+    if (process.platform !== "win32" && rawBody.includes("\r")) return "has invalid Unix launcher line endings";
+    const body = process.platform === "win32" ? rawBody.replaceAll("\r\n", "\n") : rawBody;
+    // Parse the complete supported wrapper, never a comment/substring, and never execute it.
+    // Shell expansion characters are excluded from quoted paths in the supported contract.
+    const match = process.platform === "win32"
+      ? body.match(/^@echo off\n"([^"%\r\n]+)" "([^"%\r\n]+)" %\*\n$/)
+      : body.match(/^#!\/bin\/sh\nexec "([^"$`\\\r\n]+)" "([^"$`\\\r\n]+)" "\$@"\n$/);
+    if (!match) return "does not have the supported invoking structure";
+    const [, nodeBin, adapter] = match;
+    if (!isAbsolutePortable(adapter)
+      || normalizePath(adapter) !== normalizePath(path.join(codexHooksDir, script))) return "points to the wrong adapter";
+    if (!isAbsolutePortable(nodeBin) || !/^node(?:\.exe)?$/i.test(path.win32.basename(nodeBin))
+      || !fs.statSync(nodeBin).isFile()) return "has no supported Node executable";
+    fs.accessSync(nodeBin, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+    return null;
+  } catch {
+    return "has an unavailable or unsafe launcher binding";
   }
 }
 
@@ -693,7 +840,7 @@ function readJsonObjectIfExists(file, display) {
   try {
     value = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
-    fail(`${display} is not valid JSON. Fix it, then re-run; it was not overwritten. (${error.message})`);
+    fail(`${display} is not valid JSON. Fix it, then re-run; it was not overwritten.`);
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail(`${display} must contain a JSON object. Fix it, then re-run; it was not overwritten.`);
@@ -760,8 +907,10 @@ function inspectCodexRequirements(file, issues) {
 function hookRunsScript(hook, script) {
   if (!hook || typeof hook.command !== "string") return false;
   const normalized = normalizePath(hook.command);
-  const escaped = script.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[\\s"'/])${escaped}(?=$|[\\s"';&|])`).test(normalized);
+  return [normalizePath(path.join(claudeHooksDir, script)), normalizePath(path.join(codexHooksDir, script)), `~/.claude/hooks/${script}`].some((target) => {
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[\\s"'])${escaped}(?=$|[\\s"';&|])`, process.platform === "win32" ? "i" : "").test(normalized);
+  });
 }
 
 function normalizePath(value) { return value.replaceAll("\\", "/"); }
@@ -778,9 +927,60 @@ function printStatus(status) {
   console.log("Manual proof required: restart both clients, inspect /hooks, trust the exact Codex hooks, and run synthetic canaries.");
 }
 
-function jsonStatus(status) {
+function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
+  const selected = Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client);
+  const ownershipBindingFailed = ownership.status === "invalid"
+    && !ownership.issues?.every((issue) => /^receipt (claude|codex) installed binding does not match this installer$/.test(issue));
+  const healthy = status.healthy && ownership.status !== "invalid";
+  const failure = healthy ? null : ownershipBindingFailed ? "OWNER_BINDING" : "INSTALLED_INSPECTION";
+  const ids = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
+    "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+  const failureIndex = failure ? ids.indexOf(failure) : -1;
+  const mutationStages = new Set(["APPROVAL", "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT"]);
+  const issueText = status.issues.join(" ");
+  const failureClass = healthy ? "NONE" : ownershipBindingFailed ? "OWNERSHIP_INVALID"
+    : /invalid Unix launcher line endings/i.test(issueText) ? "LAUNCHER_LINE_ENDINGS_INVALID"
+    : /disableAllHooks|disabled|managed.only/i.test(issueText) ? "CLIENT_POLICY_DISABLED"
+      : /runtime|Node path|node executable/i.test(issueText) ? "RUNTIME_PATH_INVALID"
+        : /settings.json.*JSON|hooks.json.*JSON|read deny/i.test(issueText) ? "SETTINGS_INVALID"
+          : /matcher|User.level|registration/i.test(issueText) ? "REGISTRATION_INVALID" : "INSTALLED_BYTES";
+  const nextAction = ownershipBindingFailed ? "review-installer-receipt"
+    : failureClass === "LAUNCHER_LINE_ENDINGS_INVALID" ? "inspect-private-launcher-line-endings"
+    : failureClass === "SETTINGS_INVALID" ? "review-private-settings"
+      : failureClass === "CLIENT_POLICY_DISABLED" ? "review-hook-policy"
+        : failureClass === "RUNTIME_PATH_INVALID" ? "review-runtime-executable"
+          : "run-approved-installer-repair";
+  const stages = ids.map((id, index) => ({
+    id,
+    status: failure && index === failureIndex ? "FAIL"
+      : failure && index > failureIndex ? "NOT_RUN"
+        : mutationStages.has(id) ? "NOT_APPLICABLE" : "PASS",
+    reason: mutationStages.has(id) ? "read-only inspection" : null,
+  }));
   return {
     schemaVersion: 1,
+    operation: "check",
+    requiredClients: selected,
+    approvedClients: [],
+    perClient: Object.fromEntries(["claude", "codex"].map((client) => {
+      const clientOwner = ownership.status === "installer-managed" && ownership.receipt.clients.includes(client)
+        ? "installer-managed" : "unverified";
+      return [client, {
+        owner: clientOwner,
+        protection: status[client].skipped ? "not selected" : status[client].healthy ? "healthy" : "incomplete",
+        ownership: clientOwner,
+      }];
+    })),
+    stages,
+    lastGoodStage: failure ? ids[failureIndex - 1] : "FINAL_REPORT",
+    firstFailedStage: failure,
+    failureClass,
+    nextSafeAction: healthy ? null : { action: nextAction, owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: nextAction === "run-approved-installer-repair" },
+    approvalState: "NOT_REQUIRED_READ_ONLY",
+    writesAttempted: false,
+    writesCommitted: false,
+    rollback: "NOT_NEEDED",
+    sourceIdentity: manifest.ref,
     scope: "user-global",
     onDisk: {
       status: status.healthy ? "healthy" : "incomplete",
@@ -798,7 +998,77 @@ function jsonStatus(status) {
       observableFromInstaller: false,
       requiredSteps: ["restart", "inspect-hooks", "trust-exact-hooks", "synthetic-canaries"],
     },
+    ownership: {
+      status: ownership.status,
+      clients: Array.isArray(ownership.receipt?.clients) ? ownership.receipt.clients : [],
+      issues: Array.isArray(ownership.issues) ? ownership.issues : [],
+    },
   };
+}
+
+function receiptFor(manifest, clients = Object.entries(APPS).filter(([, selected]) => selected).map(([client]) => client)) {
+  const managedFiles = {
+    claude: clients.includes("claude") ? [...FILES, ...CLAUDE_SUPPLEMENTAL_FILES] : [],
+    codex: clients.includes("codex") ? ["secrets-guard.js", "secrets-tripwire.js", ...CODEX_LOCAL_FILES] : [],
+  };
+  return {
+    schemaVersion: 1,
+    owner: "aibl-installer",
+    source: { location: normalizePath(repoRoot) },
+    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(manifestPath))) },
+    managedFiles,
+    clients: Object.entries(managedFiles).filter(([, files]) => files.length > 0).map(([client]) => client),
+  };
+}
+
+function inspectOwnership(manifest, { requireSelected = true, verifySelectedBinding = true } = {}) {
+  if (!fs.existsSync(ownershipReceiptPath)) return { status: "absent", receiptPath: normalizePath(ownershipReceiptPath) };
+  let receipt;
+  try {
+    receipt = JSON.parse(fs.readFileSync(ownershipReceiptPath, "utf8"));
+  } catch {
+    return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: ["receipt is not valid JSON"] };
+  }
+  if (!Array.isArray(receipt?.clients) || receipt.clients.length === 0
+    || receipt.clients.some((client) => !["claude", "codex"].includes(client))
+    || new Set(receipt.clients).size !== receipt.clients.length) {
+    return { status: "invalid", issues: ["receipt clients are invalid"] };
+  }
+  const expected = receiptFor(manifest, receipt.clients);
+  // The checkout can move after installation. Its recorded path is recovery metadata, not a
+  // trust input; ownership comes from the pinned manifest and independently inspected bindings.
+  const fields = ["schemaVersion", "owner", "manifest", "managedFiles", "clients"];
+  const issues = fields.filter((field) => JSON.stringify(receipt?.[field]) !== JSON.stringify(expected[field]));
+  if (typeof receipt?.source?.location !== "string") issues.push("source metadata");
+  for (const client of receipt.clients) {
+    if (!verifySelectedBinding && APPS[client]) continue;
+    const inspection = client === "claude" ? inspectClaudeGuard(manifest) : inspectCodexGuard(manifest);
+    if (!inspection.healthy) issues.push(`${client} installed binding`);
+  }
+  if (requireSelected) for (const client of Object.keys(APPS)) {
+    if (APPS[client] && !receipt.clients.includes(client)) issues.push(`${client} required ownership`);
+  }
+  if (issues.length > 0) return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: issues.map((field) => `receipt ${field} does not match this installer`) };
+  return { status: "installer-managed", receiptPath: normalizePath(ownershipReceiptPath), receipt };
+}
+
+function writeOwnershipReceipt(manifest, previous) {
+  const selected = Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client);
+  const clients = ["claude", "codex"].filter((client) => selected.includes(client) || previous.receipt?.clients?.includes(client));
+  for (const client of clients) {
+    const inspection = client === "claude" ? inspectClaudeGuard(manifest) : inspectCodexGuard(manifest);
+    if (!inspection.healthy) fail(`Installer ownership cannot be committed: ${client} binding is incomplete.`);
+  }
+  const receipt = JSON.stringify(receiptFor(manifest, clients), null, 2) + "\n";
+  fs.mkdirSync(path.dirname(ownershipReceiptPath), { recursive: true });
+  const temp = `${ownershipReceiptPath}.tmp.${process.pid}`;
+  try {
+    fs.writeFileSync(temp, receipt, { mode: 0o600 });
+    fs.chmodSync(temp, 0o600);
+    fs.renameSync(temp, ownershipReceiptPath);
+  } finally {
+    if (fs.existsSync(temp)) fs.rmSync(temp, { force: true });
+  }
 }
 
 function loadManifest() {
@@ -848,8 +1118,90 @@ function syntaxOk(file, bytes) {
   }
 }
 
-function cleanupBackups(backups) {
-  for (const [backup] of backups) { try { fs.rmSync(backup); } catch (_) {} }
+function beginGuardTransaction(targets) {
+  const lock = path.join(claudeHooksDir, ".aibl-guard-writer.lock");
+  const directories = [claudeHooksDir, path.dirname(claudeHooksDir), codexHooksDir, codexDir];
+  const existingDirectories = new Set(directories.filter((directory) => fs.existsSync(directory)));
+  statWithoutSymlink(claudeHooksDir);
+  fs.mkdirSync(claudeHooksDir, { recursive: true });
+  let fd;
+  try { fd = fs.openSync(lock, "wx", 0o600); }
+  catch { throw new Error("Another guard writer holds the user-global lock; no files were changed."); }
+  const lockIdentity = fs.fstatSync(fd).ino;
+  let snapshots;
+  try {
+    snapshots = [...new Set(targets)].map((target) => {
+      const stat = statWithoutSymlink(target);
+      return { target, exists: Boolean(stat), bytes: stat ? fs.readFileSync(target) : null, mode: stat ? stat.mode & 0o777 : null };
+    });
+  } catch (error) {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+    throw error;
+  }
+  let released = false;
+  return {
+    commit() { /* The receipt is verified by the caller before success is reported. */ },
+    rollback() {
+      let restored = true;
+      for (const item of snapshots.reverse()) {
+        try {
+          const current = statWithoutSymlink(item.target);
+          if (!item.exists) {
+            if (current) fs.rmSync(item.target);
+          } else {
+            fs.mkdirSync(path.dirname(item.target), { recursive: true });
+            const temp = `${item.target}.rollback.${process.pid}`;
+            try {
+              fs.writeFileSync(temp, item.bytes, { mode: item.mode });
+              fs.chmodSync(temp, item.mode);
+              fs.renameSync(temp, item.target);
+            } finally { if (fs.existsSync(temp)) fs.rmSync(temp, { force: true }); }
+          }
+        } catch { restored = false; }
+      }
+      for (const directory of directories) {
+        if (existingDirectories.has(directory)) continue;
+        try { fs.rmdirSync(directory); } catch { /* only remove an empty directory we created */ }
+      }
+      for (const item of snapshots) {
+        try {
+          const stat = statWithoutSymlink(item.target);
+          if (Boolean(stat) !== item.exists) restored = false;
+          if (item.exists && (!fs.readFileSync(item.target).equals(item.bytes) || (stat.mode & 0o777) !== item.mode)) restored = false;
+        } catch { restored = false; }
+      }
+      return restored ? "RESTORED" : "FAILED";
+    },
+    release() {
+      if (released) return;
+      released = true;
+      fs.closeSync(fd);
+      try { if (fs.lstatSync(lock).ino === lockIdentity) fs.rmSync(lock); } catch { /* do not clear another writer's lock */ }
+    },
+  };
+}
+
+function assertGlobalTargetsSafe() {
+  const targets = [claudeHooksDir, codexHooksDir, claudeSettingsPath, codexHooksPath, ownershipReceiptPath,
+    ...[...FILES, ...CLAUDE_SUPPLEMENTAL_FILES].map((name) => path.join(claudeHooksDir, name)),
+    ...["secrets-guard.js", "secrets-tripwire.js", ...CODEX_LOCAL_FILES].map((name) => path.join(codexHooksDir, name)),
+    ...["codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs"].map((name) => path.join(codexHooksDir, codexLauncherName(name)))];
+  for (const target of targets) statWithoutSymlink(target);
+}
+
+function statWithoutSymlink(target) {
+  const homeRoot = os.homedir();
+  const relative = path.relative(homeRoot, target);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Guard target is outside the selected home.");
+  let cursor = target;
+  while (cursor !== path.dirname(homeRoot)) {
+    try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error("A managed guard target or parent is a symlink; no files were changed."); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    cursor = path.dirname(cursor);
+  }
+  try { return fs.lstatSync(target); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
 function readIfExists(p) { return fs.existsSync(p) ? fs.readFileSync(p) : null; }
@@ -876,8 +1228,5 @@ function matchesReviewedHash(buf, expected) {
 }
 
 function fail(message) {
-  console.error("");
-  console.error(message);
-  console.error("");
-  process.exit(1);
+  throw new Error(message);
 }

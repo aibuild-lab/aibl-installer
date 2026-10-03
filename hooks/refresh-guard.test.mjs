@@ -137,6 +137,7 @@ const missingSession = run(["--session-check"]);
 check("session check reports missing protection without blocking startup", missingSession.status === 0 && /run node hooks\/refresh-guard\.mjs/.test(missingSession.stdout));
 
 const a1 = run();
+if (a1.status !== 0) console.error(`[first-run fixture] ${a1.stderr}`);
 check("first run succeeds", a1.status === 0);
 check("all three hooks installed", STUB["secrets-guard.js"] === installed("secrets-guard.js")
   && STUB["install.mjs"] === installed("install.mjs")
@@ -244,15 +245,148 @@ check("JSON check reports deterministic per-client disk health",
   && parsedHealthyJson.onDisk.claude.status === "healthy"
   && parsedHealthyJson.onDisk.codex.status === "healthy"
   && parsedHealthyJson.runtime.status === "manual-proof-required"
-  && parsedHealthyJson.runtime.observableFromInstaller === false);
+  && parsedHealthyJson.runtime.observableFromInstaller === false
+  && parsedHealthyJson.ownership.status === "installer-managed"
+  && Array.isArray(parsedHealthyJson.ownership.clients)
+  && parsedHealthyJson.ownership.clients.join(",") === "claude,codex");
+check("shareable JSON check excludes private receipt paths and source location",
+  !healthyJson.stdout.includes(home)
+  && !healthyJson.stdout.includes(repo)
+  && !healthyJson.stdout.includes("receiptPath")
+  && !healthyJson.stdout.includes("\"location\""));
+check("healthy installer check has ordered read-only stage proof",
+  parsedHealthyJson.firstFailedStage === null && parsedHealthyJson.lastGoodStage === "FINAL_REPORT"
+  && parsedHealthyJson.writesAttempted === false && parsedHealthyJson.rollback === "NOT_NEEDED");
+const receiptPath = path.join(home, ".claude", "hooks", "aibl-installer-guard-receipt.json");
+const validReceipt = fs.readFileSync(receiptPath);
+// A textual reference is not an invocation. Neither inspection nor its diagnostic may execute
+// arbitrary launcher bytes to decide whether they are safe.
+{
+  const target = path.join(home, ".codex", "hooks", codexLauncher("codex-secrets-guard"));
+  const original = fs.readFileSync(target);
+  const noop = process.platform === "win32"
+    ? "@echo off\r\nrem codex-secrets-guard.mjs\r\nexit /b 0\r\n"
+    : "#!/bin/sh\n# codex-secrets-guard.mjs\nexit 0\n";
+  fs.writeFileSync(target, noop);
+  const result = run(["--check", "--json"]);
+  const report = JSON.parse(result.stdout);
+  check("comment-only no-op launcher fails closed without downstream writes",
+    result.status !== 0 && report.onDisk.codex.status === "incomplete"
+    && report.writesAttempted === false && report.firstFailedStage !== null);
+  const marker = path.join(root, "inspection-executed");
+  fs.writeFileSync(target, process.platform === "win32"
+    ? `@echo off\r\necho invoked > "${marker}"\r\n`
+    : `#!/bin/sh\nprintf invoked > "${marker}"\n`);
+  const staticInspection = run(["--check", "--json"]);
+  check("static inspection never invokes installed launcher bytes",
+    staticInspection.status !== 0 && !fs.existsSync(marker));
+  fs.writeFileSync(target, original);
+  const wrongTarget = original.toString("utf8").replace("codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs");
+  for (const [name, body] of [
+    ["wrong-adapter", wrongTarget],
+    ["extra-command", original.toString("utf8") + (process.platform === "win32" ? "echo extra\r\n" : "echo extra\n")],
+    ["missing-node", original.toString("utf8").replace(/"[^"]+"/, `"${path.join(root, "missing", "node")}"`)],
+  ]) {
+    fs.writeFileSync(target, body);
+    const failed = run(["--check", "--json"]);
+    const failedReport = JSON.parse(failed.stdout);
+    check(`${name} launcher fails at inspection and exposes no private bytes`,
+      failed.status !== 0 && failedReport.onDisk.codex.status === "incomplete"
+      && failedReport.writesAttempted === false && !failed.stdout.includes(home)
+      && !failed.stdout.includes(root));
+  }
+  fs.writeFileSync(target, original);
+  if (process.platform !== "win32") {
+    const execute = () => spawnSync(target, [], {
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home },
+      input: '{}', encoding: "utf8", timeout: 5000,
+    });
+    check("Unix LF registered launcher executes the disposable guard route", execute().status === 0);
+    fs.writeFileSync(target, original.toString("utf8").replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"));
+    const bytesBefore = fs.readFileSync(target);
+    const execution = execute();
+    check("Unix CRLF negative control cannot execute its shebang", execution.status !== 0);
+    const inspected = run(["--check", "--json"]);
+    const observed = JSON.parse(inspected.stdout);
+    const discriminator = JSON.stringify({ lineEndings: "CRLF", executionCompleted: execution.status === 0,
+      inspectorHealthy: observed.onDisk.codex.status === "healthy", firstFailedStage: observed.firstFailedStage,
+      lastGoodStage: observed.lastGoodStage, failureClass: observed.failureClass,
+      writesAttempted: observed.writesAttempted, nextSafeAction: "reject Unix CRLF at launcher inspection" });
+    check(`Unix CRLF inspection must reject a proven non-executable route: ${discriminator}`,
+      inspected.status !== 0 && observed.firstFailedStage === "INSTALLED_INSPECTION"
+      && observed.lastGoodStage === "OWNER_BINDING" && observed.onDisk.codex.status === "incomplete"
+      && observed.failureClass === "LAUNCHER_LINE_ENDINGS_INVALID"
+      && observed.nextSafeAction?.action === "inspect-private-launcher-line-endings"
+      && observed.nextSafeAction.approvalRequired === false);
+    check("Unix CRLF read-only inspection preserves bytes and runs no write stages",
+      bytesBefore.equals(fs.readFileSync(target)) && observed.writesAttempted === false
+      && observed.writesCommitted === false);
+    fs.writeFileSync(target, original);
+    for (const name of ["codex-secrets-guard", "codex-secrets-tripwire"]) {
+      const launcher = path.join(home, ".codex", "hooks", codexLauncher(name));
+      const canonical = fs.readFileSync(launcher);
+      const lf = canonical.toString("utf8").replaceAll("\r\n", "\n");
+      for (const [kind, body] of [["CRLF", lf.replaceAll("\n", "\r\n")],
+        ["mixed", lf.replace("\n", "\r\n")]]) {
+        fs.writeFileSync(launcher, body);
+        const checked = run(["--check", "--json"]);
+        const report = JSON.parse(checked.stdout);
+        check(`${name} ${kind} line endings fail closed at inspection`,
+          checked.status !== 0 && report.failureClass === "LAUNCHER_LINE_ENDINGS_INVALID"
+          && report.firstFailedStage === "INSTALLED_INSPECTION"
+          && report.lastGoodStage === "OWNER_BINDING" && report.writesAttempted === false
+          && report.stages.find(stage => stage.id === "SOURCE_VERIFY")?.status === "NOT_RUN");
+      }
+      fs.writeFileSync(launcher, canonical);
+    }
+    fs.chmodSync(target, 0o600);
+    check("non-executable launcher cannot earn healthy", run(["--check", "--json"]).status !== 0);
+    fs.chmodSync(target, 0o700);
+  }
+  check("restored canonical launcher remains healthy", run(["--check", "--json"]).status === 0);
+}
+const movedReceipt = JSON.parse(validReceipt);
+movedReceipt.source.location = "/previous-installer-checkout";
+fs.writeFileSync(receiptPath, JSON.stringify(movedReceipt));
+const movedSourceCheck = run(["--check", "--json"]);
+check("moving the source clone does not invalidate independently verified ownership",
+  movedSourceCheck.status === 0 && JSON.parse(movedSourceCheck.stdout).ownership.status === "installer-managed");
+fs.writeFileSync(receiptPath, validReceipt);
+fs.writeFileSync(receiptPath, "{broken");
+const damagedReceipt = run(["--check", "--json"]);
+check("damaged ownership receipt is reported without hiding healthy guard files",
+  damagedReceipt.status !== 0 && JSON.parse(damagedReceipt.stdout).ownership.status === "invalid");
+check("damaged receipt fails OWNER_BINDING with downstream NOT_RUN", (() => {
+  const report = JSON.parse(damagedReceipt.stdout);
+  return report.firstFailedStage === "OWNER_BINDING" && report.lastGoodStage === "OWNER_DISCOVERY"
+    && report.failureClass === "OWNERSHIP_INVALID"
+    && report.stages.find((stage) => stage.id === "INSTALLED_INSPECTION")?.status === "NOT_RUN";
+})());
 const badJsonMode = run(["--json"]);
 check("--json is accepted only with --check", badJsonMode.status !== 0 && /Use --json with --check/.test(badJsonMode.stderr));
 const healthySession = run(["--session-check"]);
-check("healthy session check is silent", healthySession.status === 0 && healthySession.stdout === "");
+check("invalid ownership warns during nonblocking session check", healthySession.status === 0 && /ownership/i.test(healthySession.stdout));
+fs.writeFileSync(receiptPath, validReceipt);
 
 const a2 = run();
 check("second run succeeds with nothing changed", a2.status === 0 && /already current/.test(a2.stdout));
 check("installer ALWAYS re-runs to repair settings even when no file changed", installerRuns() === 2);
+
+{
+  const custom = path.join(root, "custom-hooks");
+  fs.mkdirSync(custom);
+  const customCodex = path.join(custom, codexLauncher("codex-secrets-guard"));
+  const priorCodex = fs.readFileSync(codexHooksPath);
+  const codex = JSON.parse(priorCodex);
+  codex.hooks.PreToolUse.push({ matcher: "*", hooks: [{ type: "command", command: customCodex }] });
+  fs.writeFileSync(codexHooksPath, JSON.stringify(codex));
+  const preserve = run();
+  const afterCodex = JSON.parse(fs.readFileSync(codexHooksPath, "utf8"));
+  check("same-basename custom Codex hooks outside managed directories survive refresh",
+    preserve.status === 0
+      && afterCodex.hooks.PreToolUse.some((group) => group.hooks.some((hook) => hook.command === customCodex)));
+  fs.writeFileSync(codexHooksPath, priorCodex);
+}
 
 // === Phase B: stale wiring, missing files, stale files, and malformed settings are diagnosed ===
 const settingsPath = path.join(home, ".claude", "settings.json");
@@ -365,9 +499,18 @@ check("stale guard bytes are unhealthy", staleGuard.status !== 0 && /does not ma
 check("refresh restores stale guard bytes", run().status === 0);
 
 const validSettings = fs.readFileSync(settingsPath, "utf8");
-fs.writeFileSync(settingsPath, "{ not json");
+fs.writeFileSync(settingsPath, "SYNTHETIC_PRIVATE_SETTINGS_BODY");
 const malformed = run(["--check"]);
 check("malformed user settings fail closed", malformed.status !== 0 && /not valid JSON/.test(malformed.stdout));
+const malformedJson = run(["--check", "--json"]);
+check("malformed settings JSON omits source body and parser exception text",
+  malformedJson.status !== 0
+  && !malformedJson.stdout.includes("SYNTHETIC_PRIVATE_SETTINGS_BODY")
+  && !malformedJson.stdout.includes("Unexpected token"));
+check("malformed settings report points to private inspection before another install",
+  JSON.parse(malformedJson.stdout).failureClass === "SETTINGS_INVALID"
+  && JSON.parse(malformedJson.stdout).nextSafeAction.action === "review-private-settings"
+  && JSON.parse(malformedJson.stdout).nextSafeAction.approvalRequired === false);
 const malformedRepair = run();
 check("refresh does not overwrite malformed user settings", malformedRepair.status !== 0);
 fs.writeFileSync(settingsPath, validSettings);
@@ -448,6 +591,15 @@ check("restored LF supplement installs cleanly after the CRLF cases", run().stat
 writeManifest("REPLACE_AT_RELEASE", STUB);
 const c = run();
 check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
+const unavailableJson = run(["--check", "--json"]);
+check("unavailable source still returns one structured failure result", (() => {
+  if (unavailableJson.status === 0) return false;
+  try {
+    const report = JSON.parse(unavailableJson.stdout);
+    return report.schemaVersion === 1 && report.firstFailedStage === "SOURCE_VERIFY"
+      && report.failureClass === "SOURCE_INTEGRITY" && report.writesAttempted === false;
+  } catch { return false; }
+})());
 // --- a student's own global instruction files are never touched ---
 {
   const mine = path.join(root, "mine");
@@ -479,15 +631,121 @@ check("unpinned manifest fails safe (non-zero exit)", c.status !== 0);
   const runOnly = (flags) => spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), ...flags], {
     env: { ...process.env, HOME: only, USERPROFILE: only, GUARD_SOURCE_DIR: src }, encoding: "utf8",
   });
-  const c = runOnly(["--claude"]);
+  const c = runOnly(["--claude", "--diagnostic-json"]);
+  const cReport = JSON.parse(c.stdout);
+  check("Claude-only install diagnostic cannot certify absent Codex",
+    cReport.perClient.claude.protection === "healthy"
+    && cReport.perClient.codex.protection === "not selected"
+    && cReport.perClient.codex.ownership === "unverified");
   check("--claude installs the Claude guard", c.status === 0 && fs.existsSync(path.join(only, ".claude", "hooks", "secrets-guard.js")));
   check("--claude leaves ~/.codex untouched", !fs.existsSync(path.join(only, ".codex")));
   const cc = runOnly(["--check", "--claude", "--json"]);
   check("--check --claude is healthy and reports Codex as not selected", cc.status === 0 && /"status": "not selected"/.test(cc.stdout));
-  const x = runOnly(["--codex"]);
+  check("read-only Claude-only report cannot claim Codex ownership",
+    JSON.parse(cc.stdout).perClient.codex.ownership === "unverified");
+  const x = runOnly(["--codex", "--diagnostic-json"]);
+  const xReport = JSON.parse(x.stdout);
+  check("sequential opt-in diagnostic proves retained and selected clients separately",
+    xReport.perClient.claude.protection === "healthy"
+    && xReport.perClient.claude.ownership === "installer-managed"
+    && xReport.perClient.codex.protection === "healthy");
   check("--codex installs the Codex guard", x.status === 0 && fs.existsSync(path.join(only, ".codex", "hooks.json")));
   const both = runOnly(["--check", "--json"]);
-  check("after both opt-ins, the no-flag check sees both as healthy", both.status === 0 && !/not selected|incomplete/.test(both.stdout));
+  const bothReport = JSON.parse(both.stdout);
+  check("after both opt-ins, ownership includes both verified clients",
+    both.status === 0 && bothReport.ownership.status === "installer-managed"
+      && Array.isArray(bothReport.ownership.clients)
+      && bothReport.ownership.clients.join(",") === "claude,codex");
+  const codexOnly = path.join(root, "codex-only");
+  fs.mkdirSync(codexOnly);
+  const codexResult = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), "--codex", "--diagnostic-json"], {
+    env: { ...process.env, HOME: codexOnly, USERPROFILE: codexOnly, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  const codexReport = JSON.parse(codexResult.stdout);
+  check("Codex-only diagnostic cannot certify absent Claude",
+    codexResult.status === 0 && codexReport.perClient.codex.protection === "healthy"
+    && codexReport.perClient.claude.protection === "not selected"
+    && codexReport.perClient.claude.ownership === "unverified");
+}
+
+// A child installer can fail after the hook bytes are committed. The complete managed changed
+// set, including settings and the receipt, must then return to its pre-run state.
+{
+  const faultHome = path.join(root, "late-failure");
+  fs.mkdirSync(path.join(faultHome, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(faultHome, ".claude", "settings.json"), JSON.stringify({ theme: "dark" }) + "\n");
+  const snapshot = () => {
+    const entries = [];
+    const visit = (directory) => {
+      for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+        const target = path.join(directory, item.name);
+        if (item.isDirectory()) visit(target);
+        else entries.push([path.relative(faultHome, target), fs.statSync(target).mode & 0o777, fs.readFileSync(target).toString("base64")]);
+      }
+    };
+    visit(faultHome);
+    return entries.sort((a, b) => a[0].localeCompare(b[0]));
+  };
+  const before = snapshot();
+  const faultyInstall = "import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';\n" +
+    "fs.writeFileSync(path.join(os.homedir(), '.claude', 'settings.json'), JSON.stringify({ theme: 'changed' }));\nprocess.exit(7);\n";
+  fs.writeFileSync(path.join(src, "install.mjs"), faultyInstall);
+  writeManifest("late-failure", { ...STUB, "install.mjs": faultyInstall });
+  const failed = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs")], {
+    env: { ...process.env, HOME: faultHome, USERPROFILE: faultHome, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  check("late child failure returns nonzero", failed.status !== 0);
+  check("late child failure restores the entire managed file and settings snapshot", JSON.stringify(snapshot()) === JSON.stringify(before));
+  fs.writeFileSync(path.join(src, "install.mjs"), STUB["install.mjs"]);
+  writeManifest("good", STUB);
+}
+
+if (process.platform !== "win32") {
+  const linkedHome = path.join(root, "linked-home");
+  const outside = path.join(root, "outside");
+  fs.mkdirSync(path.join(linkedHome, ".claude"), { recursive: true });
+  fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(linkedHome, ".claude", "hooks"));
+  const linked = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs")], {
+    env: { ...process.env, HOME: linkedHome, USERPROFILE: linkedHome, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  check("a symlinked guard directory is held before any write", linked.status !== 0 && fs.readdirSync(outside).length === 0);
+}
+
+// Inject a failure at each ordered boundary. These are disposable homes only; every result must
+// name the first failed stage and whether the managed changed set was restored.
+{
+  const ids = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
+    "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+  for (const [index, id] of ids.entries()) {
+    const stageHome = path.join(root, `stage-${id}`);
+    fs.mkdirSync(stageHome);
+    const result = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), "--diagnostic-json"], {
+      env: { ...process.env, HOME: stageHome, USERPROFILE: stageHome, GUARD_SOURCE_DIR: src,
+        AIBL_GUARD_TEST_HOME: stageHome, AIBL_GUARD_TEST_FAIL_STAGE: id }, encoding: "utf8",
+    });
+    let report;
+    try { report = JSON.parse(result.stdout); } catch { report = null; }
+    check(`${id} reports the exact first failure, prior success and downstream NOT_RUN`,
+      result.status !== 0 && report?.firstFailedStage === id
+        && report.lastGoodStage === (ids.slice(0, index).filter((stage) => stage !== "APPROVAL").at(-1) ?? null)
+        && (index === ids.length - 1 || report.stages[index + 1].status === "NOT_RUN")
+        && report.writesCommitted === (id === "FINAL_REPORT")
+        && (id === "FINAL_REPORT" || Object.values(report.perClient).every((client) => client.protection !== "healthy"))
+        && (index < ids.indexOf("COMMIT_FILES") || id === "FINAL_REPORT" || report.rollback === "RESTORED"));
+  }
+  const successHome = path.join(root, "stage-success");
+  fs.mkdirSync(successHome);
+  const success = spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), "--diagnostic-json"], {
+    env: { ...process.env, HOME: successHome, USERPROFILE: successHome, GUARD_SOURCE_DIR: src }, encoding: "utf8",
+  });
+  const successReport = JSON.parse(success.stdout);
+  check("complete installation reports all executable stages PASS and receipt committed",
+    success.status === 0 && successReport.stages.every((stage) => stage.status === (stage.id === "APPROVAL" ? "NOT_APPLICABLE" : "PASS"))
+    && successReport.firstFailedStage === null && successReport.lastGoodStage === "FINAL_REPORT"
+    && successReport.writesCommitted === true && successReport.rollback === "NOT_NEEDED"
+    && successReport.approvalState === "EXTERNAL_AUTHORIZATION_UNVERIFIED"
+    && successReport.approvedClients.length === 0);
 }
 
 // --- a Windows account folder whose name has a space (student report 09-24-2026) ---

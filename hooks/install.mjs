@@ -87,13 +87,15 @@ if (!path.isAbsolute(requestedNode) || !fs.existsSync(requestedNode)) {
 }
 const nodeBin = requestedNode.split(path.sep).join('/');
 
-// Match the hook by its script name as a WHOLE path token, not a substring. `.includes(script)`
-// would wrongly treat a sibling like `secrets-guard.js-helper` as a stale copy and delete it.
+// Only our current path and the literal legacy tilde path are installer-owned.
+// A same-named script elsewhere may belong to the user.
 function hookRunsScript(hook, script) {
   if (!hook || typeof hook.command !== 'string') return false;
   const normalized = hook.command.replaceAll('\\', '/');
-  const escaped = script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|[\\s"'/])${escaped}(?=$|[\\s"';&|])`).test(normalized);
+  return [path.join(hooksDir, script).replaceAll('\\', '/'), `~/.claude/hooks/${script}`].some((target) => {
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[\\s"'])${escaped}(?=$|[\\s"';&|])`, process.platform === 'win32' ? 'i' : '').test(normalized);
+  });
 }
 
 function ensureHook(event, script, matcher) {

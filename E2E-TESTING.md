@@ -5,6 +5,12 @@ Source: repository-owned tests and observed local runs, 2026-09-04.
 
 ## Automated checks
 
+The source suite includes disposable LF, CRLF, and mixed Unix launcher controls
+for both Codex hook launchers. A read-only `--check --json` must report
+`LAUNCHER_LINE_ENDINGS_INVALID` at `INSTALLED_INSPECTION` for CRLF or mixed
+bytes, with no launcher invocation or write. That check is separate from client
+activation and does not replace the real-device walkthrough below.
+
 Run `scripts/validate-course-setup`. It includes unit tests, real local Git/Python
 integration, lost creation-response recovery, interrupted-clone recovery,
 student-work preservation and process-termination/duplicate-writer tests, plus
