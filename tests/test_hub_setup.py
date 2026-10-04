@@ -174,7 +174,8 @@ class HubSetupTests(unittest.TestCase):
             (Path(d) / 'GitHub' / 'class-workbench-demo').mkdir(parents=True)
             f = Fake(); f.forward_to = 'synthetic-student/class-workbench-demo'
             r = run(f, d)
-            self.assertEqual(r['existing_folder'], str(Path(d) / 'GitHub' / 'class-workbench-demo'))
+            # resolved: on a Mac the temp folder is reached through a link (/var is /private/var)
+            self.assertEqual(Path(r['existing_folder']).resolve(), (Path(d) / 'GitHub' / 'class-workbench-demo').resolve())
 
     def test_letter_case_alone_is_not_a_forward(self):
         with tempfile.TemporaryDirectory() as d:
