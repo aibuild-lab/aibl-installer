@@ -407,15 +407,17 @@ async function main() {
   }
   enterStage("FINAL_REPORT");
 
+  // What the student reads (WF-7, decision 42): plain words, no staff steps. The detail a helper
+  // needs stays one line above it.
   console.log("");
   console.log(`Hook commands run Node from ${hookNode}.`);
+  const apps = APPS.claude && APPS.codex ? "both apps" : "the app";
   if (changed.length > 0 || !before.healthy) {
-    console.log(`User-global secrets guard on-disk installation verified for ${appsLabel}.`);
-    console.log("Runtime activation is not observable from this installer.");
-    console.log(`Manual proof required: fully quit and reopen ${APPS.claude && APPS.codex ? "both apps" : "the app"}${APPS.codex ? ", trust the Codex hooks on the review screen," : ""} and run the synthetic canaries.`);
+    console.log(`Your secrets guard is installed and checked for ${appsLabel}. It protects every folder you open in ${apps}.`);
+    console.log(`It switches on the next time ${apps} start${APPS.claude && APPS.codex ? "" : "s"}: fully quit ${apps} and open ${APPS.claude && APPS.codex ? "them" : "it"} again.` +
+      (APPS.codex ? " Codex then asks you once to review the changed safety hooks: choose \"Trust all and continue\"." : ""));
   } else {
-    console.log(`User-global ${appsLabel} secrets guard on-disk installation is healthy and already current.`);
-    console.log("Runtime activation is not observable from this installer; restart, inspect /hooks, trust, and run synthetic canaries to prove it.");
+    console.log(`Your secrets guard for ${appsLabel} is already up to date. Nothing was changed.`);
   }
 }
 
@@ -921,10 +923,12 @@ function printStatus(status) {
   console.log(`On-disk status: ${status.healthy ? "healthy" : "incomplete"}`);
   if (!status.healthy) {
     for (const issue of status.issues) console.log(`- ${issue}`);
-    console.log("Repair: run node hooks/refresh-guard.mjs from your aibl-installer clone, restart both apps, and review Codex /hooks trust.");
+    console.log(`Your secrets guard for ${appsLabel} is missing or older than the course's version. ` +
+      "Your assistant refreshes it from the course's installer folder (node hooks/refresh-guard.mjs); setup and the course update both offer it.");
+  } else {
+    console.log(`Your secrets guard for ${appsLabel} is up to date on this computer.`);
   }
-  console.log("Runtime activation: not observable from the installer");
-  console.log("Manual proof required: restart both clients, inspect /hooks, trust the exact Codex hooks, and run synthetic canaries.");
+  console.log("This check reads the files only. A guard starts working after a full quit and reopen of the app.");
 }
 
 function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {

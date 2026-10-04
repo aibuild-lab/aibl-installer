@@ -7,12 +7,23 @@ tools, signed the student in to GitHub and the app's command-line twin, and
 installed the secrets guard. This script does the one part that should never
 be improvised: it creates the private repository <user>/my-workbench from the
 public template, clones it to ~/GitHub/my-workbench, sets a repo-local Git
-identity, checks that the three starter skills landed, and prints JSON.
+identity, checks that the starter skills landed (the four aibl- skills; the
+check itself looks for the three every template has shipped, so a workbench
+made before aibl-update joined is not reported as broken), and prints JSON.
 
 No invitation, no course package, no release pin. The template is public, so
 any signed-in GitHub account can use it. A folder or repository from an earlier
 attempt is reused when it is the student's own workbench, and never replaced.
 Nothing here deletes anything.
+
+A renamed workbench: GitHub keeps an old repository name forwarding to the new
+one, so asking for <user>/my-workbench can answer with <user>/class-workbench.
+That is not the repository that was asked for, so setup stops with the result
+"forwarded_name" (nothing cloned, nothing created) and the prompt asks the
+student which they want. --forwards-to <user>/<repo> is the one way to make a
+fresh workbench at a forwarding name: it is for the fresh-start prompt, which
+renamed the old workbench itself a moment earlier, and it acts only when the
+name forwards to exactly that repository.
 
 The frozen cohort route (family_setup_handoff.py) is separate and unchanged.
 """
@@ -24,6 +35,9 @@ from course_setup import (HARNESSES, SetupError, check_tools, command, registry,
                           safe_workspace, verify_existing, write)
 
 SKILLS = ('aibl-personalize', 'aibl-checkpoint', 'aibl-enroll')
+# What the student is told is there. aibl-update ships too (since 09-21) but stays out of the check
+# above, so a workbench made before it joined is not reported as missing a skill (decision 43).
+ANNOUNCED_SKILLS = SKILLS + ('aibl-update',)
 
 
 def public_template(reg=None):
@@ -68,6 +82,35 @@ def existing_repository(runner, full):
         if exc.reason == 'not_found':
             return None
         raise
+
+
+def forwarded(existing, full):
+    """The repository GitHub answered with, when it is not the one asked for (an old name forwarding after a
+    rename), else None. GitHub names are case-insensitive, so a difference in letter case alone is not a forward."""
+    if not existing:
+        return None
+    got = existing.get('full_name')
+    if isinstance(got, str) and got and got.casefold() != full.casefold():
+        return got
+    return None
+
+
+def forwarded_result(full, target, folder):
+    owner, _, requested_name = full.partition('/')
+    target_name = target.partition('/')[2]
+    return {
+        'status': 'forwarded_name',
+        'repository': full,
+        'requested_name': requested_name,
+        'forwards_to': target,
+        'forwards_to_name': target_name,
+        'existing_folder': str(folder.parent / target_name) if (folder.parent / target_name).is_dir() else None,
+        'changed': False,
+        'note': (f'On GitHub, {full} now forwards to {target}: that workbench was renamed, and GitHub keeps the old '
+                 f'name pointing at the new one. Nothing was cloned or created. Ask the student which they want '
+                 f'(SETUP-PROMPT.md step 8): keep using {target_name} (run this again with --repo-name {target_name}), '
+                 f'or make a new workbench with a different name (--repo-name <new name>).'),
+    }
 
 
 def wait_for_first_commit(runner, full, branch, tries=12, pause=2.5, sleep=time.sleep):
@@ -141,7 +184,8 @@ def twin_signed_in(runner, harness):
     return 'logged in' in out.lower() or 'signed in' in out.lower()
 
 
-def setup(harness, workspace=None, name='my-workbench', template=None, runner=command, sleep=time.sleep, home=None):
+def setup(harness, workspace=None, name='my-workbench', template=None, runner=command, sleep=time.sleep, home=None,
+          forwards_to=None):
     if harness not in HARNESSES:
         raise SetupError('Unknown app. Use claude or codex.')
     home = Path(home) if home else Path.home()
@@ -166,6 +210,14 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
         status = 'already_initialized'
     else:
         existing = existing_repository(runner, full)
+        target = forwarded(existing, full)
+        if target:
+            # The name asked for forwards to a renamed workbench. Cloning it would quietly hand the student a
+            # second copy of that workbench under the name they asked for (WF-5). Only the fresh-start prompt,
+            # which renamed it to exactly forwards_to a moment ago, may make a new workbench at the name.
+            if not (forwards_to and forwards_to.casefold() == target.casefold()):
+                return forwarded_result(full, target, folder)
+            existing = None
         if existing is None:
             runner(['gh', 'repo', 'create', full, '--private', '--template', template])
             created = True
@@ -204,7 +256,8 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
     if missing:
         receipt['note'] = ('This workbench was made before the starter skills shipped in the template, or from a different template. '
                            'Nothing was changed. Ask in your program channel with this message.')
-    receipt['next'] = ('Open ' + str(folder) + ' in the app you chose (step 9). Type / in Claude or $ in Codex; the three aibl- skills are there.')
+    receipt['next'] = ('Open ' + str(folder) + ' in the app you chose (step 9). Type / in Claude or $ in Codex; the four aibl- skills are there: '
+                       + ', '.join(ANNOUNCED_SKILLS) + '.')
     return receipt
 
 
@@ -215,9 +268,11 @@ def main():
     p.add_argument('--workspace', help='Parent folder for the workbench. Default: ~/GitHub')
     p.add_argument('--template', help='Override the public template from course-options.json (testing only).')
     p.add_argument('--no-launch', action='store_true', help='Accepted for symmetry with course_setup.py; this script never launches an app.')
+    p.add_argument('--forwards-to', metavar='OWNER/REPO',
+                   help='Fresh start only: the name forwards to this renamed workbench on purpose; make a new workbench at the name.')
     a = p.parse_args()
     try:
-        print(json.dumps(setup(a.harness, a.workspace, a.repo_name, a.template), indent=2))
+        print(json.dumps(setup(a.harness, a.workspace, a.repo_name, a.template, forwards_to=a.forwards_to), indent=2))
     except SetupError as exc:
         print('Setup paused: ' + str(exc))
         return 1

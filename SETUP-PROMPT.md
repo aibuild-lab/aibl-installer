@@ -17,6 +17,11 @@ Read the whole file before you begin. Follow it in order. Do not summarize it to
 9. **Pause for system popups and explain them.** "Trust this folder?" means: this app can read and edit files in the folder you picked, with your permission; it does not reach the rest of your computer. Mac file-access popups: Allow for Documents, Downloads, Desktop, Applications; Deny for Photos, Music, Calendar, Contacts. Windows "allow this app to make changes?": click Yes, no password. When a student mentions a popup, stop, explain, and resume after they answer it.
 10. **Never paste Claude slash commands into Codex, or Codex commands into Claude.** Where this file says "in Claude" or "in Codex," use only that app's block. Where a course file mentions a `/command`, Codex treats that as "use the named method" and reads the file instead.
 11. **Change only what this file names.** Two shell startup lines, the user PATH on Windows, the secrets guard's own files and its merge into the app's settings, the installer's own folder at `~/GitHub/aibl-installer` (and, in step 2 only, moving an out-of-date copy aside to `~/GitHub/aibl-installer-old-<date>`), the empty `aibl-guard-test` folder that step 7's Codex proof runs in, and the workbench folder. Never read, edit, or replace a student's own global instruction files: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or anything else in `~/.claude` or `~/.codex` that is not the guard's. If one exists, it stays exactly as it is; the workbench has its own project-level files and both load together.
+12. **Before a step the app may stop, say so first; never hand out a command instead.** In Auto mode, the Claude app's safety reviewer stops scripts downloaded from the internet ("Code from External"), and that includes this installer's own scripts in step 7 and step 8. Codex's "Approve for me" mode may do the same. Right before step 7's guard command, say this, in these words:
+
+    > "Next I'll run the course's setup script. Your app's Auto mode has a safety reviewer that stops scripts downloaded from the internet. **That's a good thing:** scripts, skills and tools from the internet can carry hidden instructions (called prompt injection) or do things you didn't intend, so the reviewer makes you choose. Only continue for sources you trust. This one is the course's own installer, from AI Build Lab. To continue: **Claude:** switch the mode next to the chat box from **Auto** to **Accept edits**, then click **Allow once** when the app asks. Switch back to **Auto** when it's done. **Codex:** switch from **Approve for me** to **Ask for approval**, then click **Approve**. Switch back when it's done."
+
+    Say it once. If a later step is stopped too (step 8), repeat only the "To continue" part. A plain "yes" in the chat does not clear this stop (tested 10-03 in Claude Code's Auto mode: the reviewer refused the same command again after the reply), so the mode switch is the way through. If the step is still stopped after the switch, follow rule 5. Never hand the student the command to run themselves: that teaches clicking past a safety check instead of choosing a trusted source.
 
 ## Step 1: Greet, and detect the operating system and which app you are
 
@@ -257,7 +262,9 @@ Say why once, in these four parts, in your own words but keeping every part:
 >
 > **Why it matters.** It only takes one time. One key printed to the screen, pasted into a chat, or written into a file that gets pushed, and it is exposed. Then you are rotating keys, checking what had access, and telling people. This guard is the seatbelt: you will not need keys in this course, but you will someday, and it should already be on."
 
-**One command, for the app the student is in:** run `node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --claude` in Claude, or `--codex` in Codex (Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs --claude` or `--codex`). It installs the guard for that app at the user level, verifies every file against a pinned hash first, and ends with "on-disk installation verified for" that app. It does not touch the other app's settings. If the student says they also use the other app, run it again with the other flag; never assume, since they may not have an account there and it is their choice. If it says a settings file is not valid JSON, stop and fix that file with the student; never delete it. If it says a file does not match its pinned hash, stop; that is not a student mistake, and the student should tell their program's channel.
+**Before you run it, give rule 12's message** (Auto mode may stop this script; the student switches mode for this step).
+
+**One command, for the app the student is in:** run `node ~/GitHub/aibl-installer/hooks/refresh-guard.mjs --claude` in Claude, or `--codex` in Codex (Windows: `node $HOME\GitHub\aibl-installer\hooks\refresh-guard.mjs --claude` or `--codex`). It installs the guard for that app at the user level, verifies every file against a pinned hash first, and ends with "Your secrets guard is installed and checked for" that app (or "is already up to date" when nothing needed changing). Its closing lines are written for the student; read them out in your own words. It does not touch the other app's settings. If the student says they also use the other app, run it again with the other flag; never assume, since they may not have an account there and it is their choice. If it says a settings file is not valid JSON, stop and fix that file with the student; never delete it. If it says a file does not match its pinned hash, stop; that is not a student mistake, and the student should tell their program's channel.
 
 Installed is not the same as running. Prove it, in the app the student chose:
 
@@ -323,7 +330,7 @@ Note for the student, either way: a future guard update will ask for trust once 
 
 ## Step 8: Create the workbench
 
-This is the one step that runs a tested script rather than you improvising, so every student's workbench is made the same way. Run, with `<harness>` as `claude` or `codex`:
+This is the one step that runs a tested script rather than you improvising, so every student's workbench is made the same way. If the app stops it, repeat the "To continue" part of rule 12's message. Run, with `<harness>` as `claude` or `codex`:
 
 - Mac: `python3 ~/GitHub/aibl-installer/scripts/hub_setup.py --harness <harness> --no-launch`
 - Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\hub_setup.py --harness <harness> --no-launch` (or `python` if `py` is absent)
@@ -334,6 +341,14 @@ Read the result:
 - `"status": "created"`: new repository, new folder. Continue to step 9.
 - `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 9.
 - `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Continue to step 9.
+- `"status": "forwarded_name"`: the name the student asked for (`requested_name`) now forwards to a workbench they renamed on GitHub (`forwards_to_name`). Nothing was cloned or created. Tell the student, in these words, with the real names filled in:
+
+  > "Heads up before I continue. You asked for a workbench called **<requested_name>**. On GitHub, that name now points to your workbench **<forwards_to_name>**: it looks like you renamed it at some point, and GitHub keeps the old name forwarding to the new one. If I carried on, I'd download a second copy of that existing workbench instead of making a fresh one, and two copies of the same workbench are easy to mix up later. **My recommendation: keep using <forwards_to_name>,** the one you already have. It holds your work and history, and one workbench is simpler to keep track of.
+  > 1. Use my existing workbench, <forwards_to_name> (recommended)
+  > 2. Make a new, separate workbench with a different name
+  > 3. I'm not sure: explain more"
+
+  On 1, run the same command again with `--repo-name <forwards_to_name>`: it reuses the folder when `existing_folder` names one (`already_initialized`), or downloads it there (`cloned_existing`). Use `~/GitHub/<forwards_to_name>` as the workbench in steps 9 and 10, in place of `my-workbench`. On 2, ask what to call it (letters, numbers and dashes; not `<requested_name>`, which belongs to the forward), then run the same command with `--repo-name <their name>`. On 3, explain in two or three plain sentences that a GitHub rename keeps the old name pointing at the new one, so the old name is not free for a new workbench; then ask the three choices again. Never pass `--forwards-to`: it is only for the fresh-start prompt.
 - `"skills_missing"` is not empty: the workbench was made from an older template. Nothing was changed. Tell the student to ask in their program's channel with that message, and continue; the workbench still works.
 - `"template": { ..., "version": "0.0.12" }`: the template version you report in step 10. If it is `null`, the template ships no version stamp; say "the current template" and do not go looking for a number elsewhere.
 - `Setup paused: GitHub is not signed in yet`: step 6.1 did not finish. Do it, then run the same command again.

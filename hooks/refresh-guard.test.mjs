@@ -228,14 +228,21 @@ for (const [shell, launch] of Object.entries(CODEX_HOOK_SHELLS)) {
   check(`leak payload through the registered hook command is DENIED under ${shell} (end-to-end chain)`, deniedThrough(probe));
 }
 check("installer ran once", installerRuns() === 1);
-check("first run verifies user-global on-disk scope", /on-disk installation verified/.test(a1.stdout));
-check("installer distinguishes runtime activation from disk health",
-  /Runtime activation is not observable/.test(a1.stdout) && /Manual proof required/.test(a1.stdout));
+check("first run verifies the user-global install, in words a student reads",
+  /Your secrets guard is installed and checked for Claude Code and Codex\. It protects every folder you open in both apps\./.test(a1.stdout));
+check("installer says the guard switches on only after a full restart, and how to trust it in Codex",
+  /switches on the next time both apps start: fully quit both apps and open them again/.test(a1.stdout)
+  && /choose "Trust all and continue"/.test(a1.stdout));
+// decision 42 (WF-7): the closing lines are for students, so no staff-only wording reaches them
+check("closing lines carry no staff-only wording",
+  !/Runtime activation|Manual proof required|synthetic canaries|on-disk installation/.test(a1.stdout));
 
 const healthy = run(["--check"]);
 check("healthy user-global installation passes check mode", healthy.status === 0 && /On-disk status: healthy/.test(healthy.stdout));
-check("human check requires manual runtime proof",
-  /Runtime activation: not observable/.test(healthy.stdout) && /Manual proof required/.test(healthy.stdout));
+check("human check says it reads the files only, and that a restart switches a guard on",
+  /up to date on this computer/.test(healthy.stdout)
+  && /This check reads the files only\. A guard starts working after a full quit and reopen of the app\./.test(healthy.stdout)
+  && !/synthetic canaries|Manual proof required/.test(healthy.stdout));
 const healthyJson = run(["--check", "--json"]);
 const parsedHealthyJson = JSON.parse(healthyJson.stdout);
 check("JSON check reports deterministic per-client disk health",
@@ -397,7 +404,7 @@ fs.writeFileSync(settingsPath, JSON.stringify(staleSettings, null, 2));
 const staleMatcher = run(["--check"]);
 check("old narrow matcher is unhealthy", staleMatcher.status !== 0 && /canonical matcher group/.test(staleMatcher.stdout));
 const repairedMatcher = run();
-check("normal refresh repairs stale settings wiring", repairedMatcher.status === 0 && /on-disk installation verified/.test(repairedMatcher.stdout));
+check("normal refresh repairs stale settings wiring", repairedMatcher.status === 0 && /Your secrets guard is installed and checked/.test(repairedMatcher.stdout));
 
 const disabledSettings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
 disabledSettings.disableAllHooks = true;

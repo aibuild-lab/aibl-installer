@@ -88,5 +88,58 @@ class StaleShallowCloneRefresh(unittest.TestCase):
         self.assertEqual(self.git('branch', '--show-current', cwd=student), '')
 
 
+FLAT = re.sub(r'\s+', ' ', TEXT)
+STEP7 = TEXT.split('## Step 7:', 1)[1].split('## Step 8:', 1)[0]
+STEP8 = TEXT.split('## Step 8:', 1)[1].split('## Step 9:', 1)[0]
+
+
+class AutoModeBeforeTheInstallerScripts(unittest.TestCase):
+    """Decision 42 (WF-7): Auto mode stopped steps 7 and 8, and the agent handed Wade PowerShell commands."""
+
+    def test_rule_twelve_says_what_happens_why_it_is_good_and_how_to_continue(self):
+        rule = re.sub(r'\s+', ' ', RULES.split('12. **', 1)[1])
+        for words in ("Next I'll run the course's setup script.", 'stops scripts downloaded from the internet',
+                      "**That's a good thing:**", 'prompt injection', 'Only continue for sources you trust.',
+                      "This one is the course's own installer, from AI Build Lab.",
+                      '**Claude:** switch the mode next to the chat box from **Auto** to **Accept edits**, then click **Allow once**',
+                      'Switch back to **Auto** when it\'s done.',
+                      '**Codex:** switch from **Approve for me** to **Ask for approval**, then click **Approve**.'):
+            with self.subTest(words=words):
+                self.assertIn(words, rule)
+        self.assertIn('Never hand the student the command to run themselves', rule)
+
+    def test_rules_are_numbered_in_order(self):
+        numbers = [int(n) for n in re.findall(r'^(\d+)\. \*\*', RULES, flags=re.M)]
+        self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
+
+    def test_said_before_step_seven_and_recalled_at_step_eight(self):
+        self.assertLess(STEP7.index("give rule 12's message"), STEP7.index('refresh-guard.mjs --claude'))
+        self.assertIn('"To continue" part of rule 12', STEP8)
+
+    def test_step_seven_quotes_the_guards_new_closing_line(self):
+        self.assertIn('"Your secrets guard is installed and checked for"', STEP7)
+        self.assertNotIn('on-disk installation verified', TEXT)
+
+
+class ForwardedName(unittest.TestCase):
+    """Decision 43 (WF-5): a renamed workbench's old name forwards; setup asks instead of cloning it."""
+
+    def test_step_eight_explains_recommends_and_offers_three_choices(self):
+        for words in ('`"status": "forwarded_name"`', 'Heads up before I continue.',
+                      'GitHub keeps the old name forwarding to the new one',
+                      "I'd download a second copy of that existing workbench instead of making a fresh one",
+                      '**My recommendation: keep using <forwards_to_name>,**',
+                      '1. Use my existing workbench, <forwards_to_name> (recommended)',
+                      '2. Make a new, separate workbench with a different name',
+                      "3. I'm not sure: explain more"):
+            with self.subTest(words=words):
+                self.assertIn(words, STEP8)
+
+    def test_each_choice_has_its_action_and_never_the_fresh_start_flag(self):
+        self.assertIn('--repo-name <forwards_to_name>', STEP8)
+        self.assertIn('--repo-name <their name>', STEP8)
+        self.assertIn('Never pass `--forwards-to`', STEP8)
+
+
 if __name__ == '__main__':
     unittest.main()

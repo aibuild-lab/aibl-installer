@@ -34,6 +34,17 @@ class FreshStartPrompt(unittest.TestCase):
         self.assertIn('library/from-old-workbench/', PROMPT)
         self.assertIn('never overwrite a file', PROMPT)
 
+    def test_the_rename_it_makes_is_expected_to_forward(self):
+        # GitHub forwards an old name after a rename (gh api and gh repo view both follow it, checked 10-03),
+        # so "now fails with not found" could never come true and the prompt stopped at its own rename.
+        self.assertNotIn('now fails with "not found", and', PROMPT)
+        self.assertIn('now prints `<login>/<old>`', PROMPT)
+
+    def test_setup_step_eight_is_told_the_forward_is_this_rename(self):
+        self.assertIn('add `--forwards-to <login>/<old>` to step 8', PROMPT)
+        self.assertIn('Do not show the student those choices here.', PROMPT)
+        self.assertIn("Its rule 12 applies here too", PROMPT)
+
     def test_start_here_links_it(self):
         self.assertIn('https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/FRESH-START-PROMPT.md', START)
 

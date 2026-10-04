@@ -55,13 +55,15 @@ Run each of these yourself, in order, and stop at the first one that does not co
 1. If the repository exists: `gh repo rename <old> --repo <login>/my-workbench --yes`. Then `gh repo view <login>/<old> --json visibility --jq .visibility` prints `PRIVATE`.
 2. If the folder exists, rename it. Mac: `mv ~/GitHub/my-workbench ~/GitHub/<old>`. Windows (PowerShell): `Move-Item "$HOME\GitHub\my-workbench" "$HOME\GitHub\<old>"`. If Windows says the folder is in use, ask the student to close any session or window that has `my-workbench` open, then try once more.
 3. If both exist, point the folder at the renamed repository: `git -C ~/GitHub/<old> remote set-url origin https://github.com/<login>/<old>.git`, then `git -C ~/GitHub/<old> remote get-url origin` names `<login>/<old>`.
-4. `gh repo view <login>/my-workbench` now fails with "not found", and `~/GitHub/my-workbench` no longer exists.
+4. `gh api repos/<login>/my-workbench --jq .full_name` now prints `<login>/<old>` (GitHub keeps the old name forwarding to the renamed repository; that is expected here, and step 6 relies on it), or fails with "not found" when there was no repository. `~/GitHub/my-workbench` no longer exists.
 
 Say: "Your old workbench is safe at `~/GitHub/<old>` and `github.com/<login>/<old>`."
 
 ## Step 6: build the fresh workbench
 
-Fetch `https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/SETUP-PROMPT.md` and follow it from its first step **through its step 8**, where the workbench is created. Most steps find everything already installed and move quickly; say so to the student. Step 8 must report `"status": "created"`. If it reports anything else, stop.
+Fetch `https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/SETUP-PROMPT.md` and follow it from its first step **through its step 8**, where the workbench is created. Most steps find everything already installed and move quickly; say so to the student. Its rule 12 applies here too: say its Auto mode message before its first script.
+
+When step 5 renamed a repository, `my-workbench` now forwards to `<login>/<old>`, so add `--forwards-to <login>/<old>` to step 8's command. That tells the setup script the forward is the rename you just made and that a fresh workbench belongs at the name; without it, setup stops with `"status": "forwarded_name"` and the three choices meant for a student who renamed their workbench themselves. Do not show the student those choices here. Step 8 must report `"status": "created"`. If it reports anything else, including `forwarded_name` naming a repository other than `<login>/<old>`, stop.
 
 Then come back here for step 7 before you give the setup prompt's closing instructions.
 

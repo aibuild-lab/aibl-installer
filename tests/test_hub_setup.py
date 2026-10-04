@@ -22,6 +22,8 @@ class Fake:
         self.claude = True
         self.with_skills = True
         self.template_version = '0.0.12'   # .aibl/template.json in the template; None means the template ships no stamp
+        self.forward_to = None        # the workbench was renamed: GitHub answers <user>/my-workbench with this repository
+        self.answered_name = FULL     # what GitHub calls it (letter case may differ from what was asked)
 
     def __call__(self, args, cwd=None, interactive=False):
         self.calls.append(args)
@@ -43,11 +45,16 @@ class Fake:
                 raise SetupError('HTTP 404', 'not_found')
             return json.dumps({'sha': 'b' * 40})
         if args[:2] == ['gh', 'api'] and args[2] == 'repos/' + FULL:
+            if self.forward_to:
+                # GitHub follows the rename: the old name answers with the renamed repository
+                return json.dumps({'private': True, 'full_name': self.forward_to, 'id': 99,
+                                   'template_repository': {'full_name': TEMPLATE}})
             if not self.exists:
                 raise SetupError('HTTP 404', 'not_found')
-            return json.dumps({'private': self.private, 'full_name': FULL, 'id': 100, 'template_repository': {'full_name': self.made_from}})
+            return json.dumps({'private': self.private, 'full_name': self.answered_name, 'id': 100, 'template_repository': {'full_name': self.made_from}})
         if args[:3] == ['gh', 'repo', 'create']:
             self.exists = True
+            self.forward_to = None    # a new repository at the old name ends GitHub's forward
             return ''
         if args[:3] == ['gh', 'repo', 'clone']:
             p = Path(args[-1]); p.mkdir(); (p / '.git').mkdir()
@@ -145,6 +152,62 @@ class HubSetupTests(unittest.TestCase):
             r = run(f, d)
             self.assertEqual(r['status'], 'cloned_existing')
             self.assertFalse(any(c[:3] == ['gh', 'repo', 'create'] for c in f.calls))
+
+    def test_a_renamed_workbench_forwarding_the_name_is_named_not_cloned(self):
+        # WF-5: Wade's my-workbench was renamed class-workbench-demo; GitHub forwards the old name, and setup
+        # used to clone the renamed workbench as `cloned_existing` under the name the student asked for.
+        with tempfile.TemporaryDirectory() as d:
+            f = Fake(); f.forward_to = 'synthetic-student/class-workbench-demo'
+            r = run(f, d)
+            self.assertEqual(r['status'], 'forwarded_name')
+            self.assertEqual(r['repository'], FULL)
+            self.assertEqual(r['forwards_to'], 'synthetic-student/class-workbench-demo')
+            self.assertEqual(r['forwards_to_name'], 'class-workbench-demo')
+            self.assertIsNone(r['existing_folder'])
+            self.assertFalse(r['changed'])
+            self.assertIn('--repo-name class-workbench-demo', r['note'])
+            self.assertFalse(any(c[:3] in (['gh', 'repo', 'clone'], ['gh', 'repo', 'create']) for c in f.calls))
+            self.assertFalse((Path(d) / 'GitHub' / 'my-workbench').exists())
+
+    def test_forwarded_name_points_at_the_renamed_folder_when_it_is_on_this_computer(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'GitHub' / 'class-workbench-demo').mkdir(parents=True)
+            f = Fake(); f.forward_to = 'synthetic-student/class-workbench-demo'
+            r = run(f, d)
+            self.assertEqual(r['existing_folder'], str(Path(d) / 'GitHub' / 'class-workbench-demo'))
+
+    def test_letter_case_alone_is_not_a_forward(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Fake(); f.exists = True; f.answered_name = 'Synthetic-Student/My-Workbench'
+            r = run(f, d)
+            self.assertEqual(r['status'], 'cloned_existing')
+
+    def test_fresh_start_makes_a_new_workbench_at_the_name_it_just_freed(self):
+        # FRESH-START-PROMPT.md renames the old workbench to my-workbench-old, so the name forwards there.
+        with tempfile.TemporaryDirectory() as d:
+            f = Fake(); f.forward_to = 'synthetic-student/my-workbench-old'
+            r = hub.setup('claude', Path(d) / 'GitHub', 'my-workbench', TEMPLATE, f, sleep=lambda s: None, home=Path(d),
+                          forwards_to='synthetic-student/my-workbench-old')
+            self.assertEqual(r['status'], 'created')
+            self.assertIn(['gh', 'repo', 'create', FULL, '--private', '--template', TEMPLATE], f.calls)
+
+    def test_fresh_start_opt_in_names_the_exact_forward(self):
+        # a forward somewhere else is still stopped, whatever --forwards-to says
+        with tempfile.TemporaryDirectory() as d:
+            f = Fake(); f.forward_to = 'synthetic-student/class-workbench-demo'
+            r = hub.setup('claude', Path(d) / 'GitHub', 'my-workbench', TEMPLATE, f, sleep=lambda s: None, home=Path(d),
+                          forwards_to='synthetic-student/my-workbench-old')
+            self.assertEqual(r['status'], 'forwarded_name')
+            self.assertFalse(any(c[:3] == ['gh', 'repo', 'create'] for c in f.calls))
+
+    def test_next_line_names_all_four_skills_but_the_check_stays_at_three(self):
+        # decision 43 (WF-9): say four and list them; adding aibl-update to the check would flag pre-09-21 workbenches
+        self.assertEqual(hub.SKILLS, ('aibl-personalize', 'aibl-checkpoint', 'aibl-enroll'))
+        with tempfile.TemporaryDirectory() as d:
+            r = run(Fake(), d)
+            self.assertIn('the four aibl- skills are there: aibl-personalize, aibl-checkpoint, aibl-enroll, aibl-update', r['next'])
+            self.assertNotIn('three', r['next'])
+            self.assertEqual(r['skills_missing'], [])
 
     def test_foreign_repo_with_the_same_name_is_kept_and_setup_stops(self):
         with tempfile.TemporaryDirectory() as d:
