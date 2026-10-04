@@ -204,7 +204,14 @@ class SecretsGuardRefresh(unittest.TestCase):
         self.assertIn('~/.codex/hooks/codex-secrets-guard.mjs', GUARD)
 
     def test_failure_and_rollback_are_told_plainly(self):
-        self.assertIn('restored the previous version', GUARD)
+        # the wording refresh-guard.mjs prints since #34's scoped transaction
+        guard_script = (ROOT / 'hooks' / 'refresh-guard.mjs').read_text(encoding='utf-8')
+        self.assertIn('Guard refresh failed: ', guard_script)
+        self.assertIn('Scoped rollback: ${rollbackState}.', guard_script)
+        self.assertIn('return restored ? "RESTORED" : "FAILED";', guard_script)
+        self.assertIn('"Guard refresh failed"', GUARD)
+        self.assertIn('"Scoped rollback: RESTORED"', GUARD)
+        self.assertIn('"Scoped rollback: FAILED"', GUARD)
         self.assertIn('your previous guard is back in place', GUARD)
 
     def test_codex_retrust_line(self):
