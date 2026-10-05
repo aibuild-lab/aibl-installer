@@ -47,8 +47,11 @@ const codexRequirementsPath = path.join(codexDir, "requirements.toml");
 const hooksSourceDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(hooksSourceDir, "..");
 const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
+const priorManifestPath = path.join(hooksSourceDir, "secrets-guard.r774.manifest.json");
+let priorManifest;
+let legacyIdentities;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
-const GUARD_MATCHER = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit";
+const GUARD_MATCHER = "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit";
 const SHELL_MATCHER = "Bash|PowerShell";
 const SUPPLEMENT_PRE_MATCHER = "*";
 const CODEX_POST_MATCHER = "*";
@@ -62,6 +65,13 @@ const args = new Set(process.argv.slice(2));
 const diagnosticMode = args.has("--diagnostic-json");
 const stageIds = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
   "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+const previewStageIds = ["INPUT_SCOPE", "SOURCE_VERIFY", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION",
+  "APPROVAL", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+function previewStages(firstFailedStage) {
+  const boundary = firstFailedStage ? previewStageIds.indexOf(firstFailedStage) : previewStageIds.indexOf("APPROVAL");
+  return previewStageIds.map((id, index) => ({ id, status: id === firstFailedStage ? "FAIL"
+    : index < boundary ? "PASS" : id === "APPROVAL" && !firstFailedStage ? "NOT_APPLICABLE" : "NOT_RUN" }));
+}
 let activeStage = null;
 let passedStages = [];
 let rollbackState = "NOT_NEEDED";
@@ -176,6 +186,23 @@ if (isMainModule()) {
     process.exitCode = 1;
     return;
   }
+  if (args.has("--migration-preview") && args.has("--json")) {
+    const unsafe = /symlink|outside the selected home/i.test(error.message || "");
+    const invalidSettings = /not valid JSON|must contain a JSON object/i.test(error.message || "");
+    const sourceIntegrity = /compatibility identity|manifest hash|pinned/i.test(error.message || "");
+    const firstFailedStage = sourceIntegrity ? "SOURCE_VERIFY" : unsafe ? "INPUT_SCOPE" : "OWNER_DISCOVERY";
+    const lastGoodStage = firstFailedStage === "INPUT_SCOPE" ? null : firstFailedStage === "SOURCE_VERIFY" ? "INPUT_SCOPE" : "SOURCE_VERIFY";
+    process.stdout.write(`${JSON.stringify({ schemaVersion: 1, operation: "migration-preview", scope: "user-global",
+      eligibility: "hold", ownership: "unknown", proposedSource: null, approvalClass: "facilitator-review",
+      lastGoodStage, firstFailedStage, stages: previewStages(firstFailedStage),
+      failureClass: sourceIntegrity ? "SOURCE_INTEGRITY" : unsafe ? "UNSAFE_TARGET" : invalidSettings ? "SETTINGS_INVALID" : "INSPECTION_BLOCKED",
+      nextSafeAction: { action: sourceIntegrity ? "review-installer-source" : "review-private-ownership",
+        owner: "facilitator", targetClass: sourceIntegrity ? "source" : "user-global-guard", approvalRequired: false },
+      writesAttempted: false, writesCommitted: false, verified: false,
+    })}\n`);
+    process.exitCode = 1;
+    return;
+  }
   if (args.has("--check") && args.has("--json")) {
     const ids = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
       "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
@@ -211,18 +238,55 @@ function isMainModule() {
 async function main() {
   enterStage("INPUT_SCOPE");
   const manifest = loadManifest();
+  priorManifest = readPinnedIdentity("secrets-guard.r774.manifest.json", manifest);
+  legacyIdentities = readPinnedIdentity("secrets-guard.legacy.identities.json", manifest);
   diagnosticSourceIdentity = manifest.ref;
 
   if (args.has("--check") && args.has("--session-check")) {
     fail("Use either --check or --session-check, not both.");
   }
-  const unknown = [...args].filter((arg) => !["--check", "--session-check", "--json", "--claude", "--codex", "--diagnostic-json"].includes(arg));
+  const unknown = [...args].filter((arg) => !["--check", "--session-check", "--json", "--claude", "--codex", "--diagnostic-json", "--migration-preview"].includes(arg));
   if (unknown.length > 0) fail(`Unknown option: ${unknown.join(", ")}`);
   if (diagnosticMode && (args.has("--check") || args.has("--session-check") || args.has("--json"))) fail("Use --diagnostic-json only for an installation attempt.");
-  if (args.has("--json") && !args.has("--check")) {
-    fail("Use --json with --check.");
+  if (args.has("--json") && !args.has("--check") && !args.has("--migration-preview")) {
+    fail("Use --json with --check or --migration-preview.");
   }
   assertGlobalTargetsSafe();
+
+  if (args.has("--migration-preview")) {
+    if (args.has("--check") || args.has("--session-check") || diagnosticMode || !args.has("--json"))
+      fail("Use --migration-preview with --json only.");
+    const ownership = inspectOwnership(manifest, { requireSelected: false });
+    const receiptFree = ownership.status === "absent" ? classifyReceiptFree(manifest) : null;
+    const eligibility = ownership.status === "installer-upgrade-required" ? "upgrade-required"
+      : ownership.status === "installer-managed" ? "already-managed"
+        : receiptFree?.kind === "recognized-mixed" && APPS.claude && APPS.codex ? "eligible-migration"
+          : receiptFree?.kind === "empty" ? "new-install"
+            : receiptFree?.kind === "current-no-receipt" ? "receipt-repair"
+              : "hold";
+    const failureClass = eligibility !== "hold" ? "NONE"
+      : ownership.status === "invalid" ? "OWNERSHIP_INVALID"
+        : receiptFree?.kind === "unknown-bytes" ? "UNKNOWN_MANAGED_BYTES"
+          : receiptFree?.kind === "malformed-settings" ? "SETTINGS_INVALID" : "MIGRATION_TOPOLOGY_UNRECOGNIZED";
+    const firstFailedStage = eligibility !== "hold" ? null : ownership.status === "invalid" ? "OWNER_BINDING"
+      : failureClass === "MIGRATION_TOPOLOGY_UNRECOGNIZED" ? "INSTALLED_INSPECTION" : "OWNER_DISCOVERY";
+    const lastGoodStage = firstFailedStage ? previewStageIds[previewStageIds.indexOf(firstFailedStage) - 1] : "INSTALLED_INSPECTION";
+    const nextAction = eligibility === "hold" ? "review-private-ownership"
+      : eligibility === "already-managed" ? "runtime-proof" : "seek-separate-approval";
+    process.stdout.write(`${JSON.stringify({ schemaVersion: 1, operation: "migration-preview", scope: "user-global",
+      requiredClients: Object.entries(APPS).filter(([, selected]) => selected).map(([client]) => client),
+      ownership: ownership.status === "absent" ? receiptFree.kind : ownership.status,
+      ownershipClients: ownership.receipt?.clients || [],
+      eligibility, proposedSource: manifest.ref, preservation: ["unrelated-hooks", "settings-keys", "project-configuration", "file-modes"],
+      approvalClass: eligibility === "eligible-migration" ? "separate-human-migration-approval" : "separate-human-install-approval",
+      writesAttempted: false, writesCommitted: false, verified: false,
+      lastGoodStage, firstFailedStage, stages: previewStages(firstFailedStage), failureClass,
+      nextSafeAction: { action: nextAction, owner: eligibility === "hold" ? "facilitator" : "aibl-installer",
+        targetClass: "user-global-guard", approvalRequired: nextAction === "seek-separate-approval" },
+    }, null, 2)}\n`);
+    if (eligibility === "hold") process.exitCode = 1;
+    return;
+  }
 
   if (args.has("--check") || args.has("--session-check")) {
     const status = inspectInstalledGuard(manifest);
@@ -251,8 +315,17 @@ async function main() {
 
   enterStage("OWNER_DISCOVERY");
   const existingOwnership = inspectOwnership(manifest, { requireSelected: false, verifySelectedBinding: false });
+  const receiptFree = existingOwnership.status === "absent" ? classifyReceiptFree(manifest) : null;
   enterStage("OWNER_BINDING");
   if (existingOwnership.status === "invalid") fail("Installer ownership receipt is invalid. No guard files were changed; review it before repair.");
+  if (receiptFree && !["empty", "current-no-receipt", "recognized-mixed"].includes(receiptFree.kind))
+    fail("Receipt-free managed files cannot be attributed to an approved migration. No files were changed.");
+  if (receiptFree?.kind === "recognized-mixed" && (!APPS.claude || !APPS.codex))
+    fail("The recognized mixed installation spans both clients. Select both approved clients for migration; no files were changed.");
+  if (existingOwnership.status === "installer-upgrade-required"
+    && existingOwnership.receipt.clients.some((client) => !APPS[client])) {
+    fail("The previous installer receipt covers another client. Select both approved clients for this version upgrade; no files were changed.");
+  }
   enterStage("INSTALLED_INSPECTION");
   const before = inspectInstalledGuard(manifest);
   enterStage("APPROVAL");
@@ -312,6 +385,11 @@ async function main() {
   if (APPS.codex) validateCodexHooksMergeTarget(readJsonObjectIfExists(codexHooksPath, "~/.codex/hooks.json"));
 
   enterStage("STAGE_WRITES");
+  const testHome = path.resolve(os.homedir());
+  if (receiptFree && process.env.AIBL_GUARD_TEST_CONCURRENT_CHANGE === "1"
+    && process.env.AIBL_GUARD_TEST_HOME === testHome
+    && testHome.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`)
+    && fs.existsSync(claudeSettingsPath)) fs.appendFileSync(claudeSettingsPath, "\n");
   // 2. Stage + atomically swap only the files that differ. Both clients use the same pinned
   // canonical bytes plus narrowly scoped, checksum-pinned local supplements/adapters.
   const desired = [
@@ -341,6 +419,8 @@ async function main() {
     ...launchers, ownershipReceiptPath,
   ]);
   try {
+    if (receiptFree && classifyReceiptFree(manifest).fingerprint !== receiptFree.fingerprint)
+      fail("Managed guard state changed after ownership inspection. No installed bytes were replaced.");
     enterStage("COMMIT_FILES");
     writesAttempted = true;
     // 3. Replace reviewed bytes; the transaction below also covers settings, launchers and receipt.
@@ -481,7 +561,8 @@ function inspectClaudeGuard(manifest) {
     if (missing.length > 0) issues.push(`User-level read deny rules are incomplete (${missing.length} missing).`);
   }
 
-  verifyHook(settings, "PreToolUse", "secrets-guard.js", GUARD_MATCHER, claudeHooksDir, issues);
+  verifyHook(settings, "PreToolUse", "secrets-guard.js", manifest.ref === priorManifest.ref
+    ? "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit" : GUARD_MATCHER, claudeHooksDir, issues);
   verifyHook(settings, "PostToolUse", "secrets-tripwire.js", SHELL_MATCHER, claudeHooksDir, issues);
   verifyHook(settings, "PostToolUseFailure", "secrets-tripwire.js", SHELL_MATCHER, claudeHooksDir, issues);
   verifyHook(settings, "PreToolUse", "aws-credential-guard.mjs", SUPPLEMENT_PRE_MATCHER, claudeHooksDir, issues);
@@ -929,22 +1010,24 @@ function printStatus(status) {
 
 function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
   const selected = Object.entries(APPS).filter(([, enabled]) => enabled).map(([client]) => client);
+  const upgradeRequired = ownership.status === "installer-upgrade-required";
   const ownershipBindingFailed = ownership.status === "invalid"
     && !ownership.issues?.every((issue) => /^receipt (claude|codex) installed binding does not match this installer$/.test(issue));
-  const healthy = status.healthy && ownership.status !== "invalid";
-  const failure = healthy ? null : ownershipBindingFailed ? "OWNER_BINDING" : "INSTALLED_INSPECTION";
+  const healthy = status.healthy && (ownership.status === "absent" || ownership.status === "installer-managed");
+  const failure = healthy ? null : ownershipBindingFailed || upgradeRequired ? "OWNER_BINDING" : "INSTALLED_INSPECTION";
   const ids = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
     "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
   const failureIndex = failure ? ids.indexOf(failure) : -1;
   const mutationStages = new Set(["APPROVAL", "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT"]);
   const issueText = status.issues.join(" ");
-  const failureClass = healthy ? "NONE" : ownershipBindingFailed ? "OWNERSHIP_INVALID"
+  const failureClass = healthy ? "NONE" : upgradeRequired ? "UPGRADE_REQUIRED" : ownershipBindingFailed ? "OWNERSHIP_INVALID"
     : /invalid Unix launcher line endings/i.test(issueText) ? "LAUNCHER_LINE_ENDINGS_INVALID"
     : /disableAllHooks|disabled|managed.only/i.test(issueText) ? "CLIENT_POLICY_DISABLED"
       : /runtime|Node path|node executable/i.test(issueText) ? "RUNTIME_PATH_INVALID"
         : /settings.json.*JSON|hooks.json.*JSON|read deny/i.test(issueText) ? "SETTINGS_INVALID"
           : /matcher|User.level|registration/i.test(issueText) ? "REGISTRATION_INVALID" : "INSTALLED_BYTES";
-  const nextAction = ownershipBindingFailed ? "review-installer-receipt"
+  const nextAction = upgradeRequired ? "run-approved-installer-upgrade"
+    : ownershipBindingFailed ? "review-installer-receipt"
     : failureClass === "LAUNCHER_LINE_ENDINGS_INVALID" ? "inspect-private-launcher-line-endings"
     : failureClass === "SETTINGS_INVALID" ? "review-private-settings"
       : failureClass === "CLIENT_POLICY_DISABLED" ? "review-hook-policy"
@@ -963,8 +1046,8 @@ function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
     requiredClients: selected,
     approvedClients: [],
     perClient: Object.fromEntries(["claude", "codex"].map((client) => {
-      const clientOwner = ownership.status === "installer-managed" && ownership.receipt.clients.includes(client)
-        ? "installer-managed" : "unverified";
+      const clientOwner = ["installer-managed", "installer-upgrade-required"].includes(ownership.status)
+        && ownership.receipt.clients.includes(client) ? ownership.status : "unverified";
       return [client, {
         owner: clientOwner,
         protection: status[client].skipped ? "not selected" : status[client].healthy ? "healthy" : "incomplete",
@@ -975,7 +1058,8 @@ function jsonStatus(status, manifest, ownership = inspectOwnership(manifest)) {
     lastGoodStage: failure ? ids[failureIndex - 1] : "FINAL_REPORT",
     firstFailedStage: failure,
     failureClass,
-    nextSafeAction: healthy ? null : { action: nextAction, owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: nextAction === "run-approved-installer-repair" },
+    nextSafeAction: healthy ? null : { action: nextAction, owner: "aibl-installer", targetClass: "user-global-guard",
+      approvalRequired: ["run-approved-installer-repair", "run-approved-installer-upgrade"].includes(nextAction) },
     approvalState: "NOT_REQUIRED_READ_ONLY",
     writesAttempted: false,
     writesCommitted: false,
@@ -1015,7 +1099,8 @@ function receiptFor(manifest, clients = Object.entries(APPS).filter(([, selected
     schemaVersion: 1,
     owner: "aibl-installer",
     source: { location: normalizePath(repoRoot) },
-    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(manifestPath))) },
+    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(
+      manifest.ref === priorManifest.ref ? priorManifestPath : manifestPath))) },
     managedFiles,
     clients: Object.entries(managedFiles).filter(([, files]) => files.length > 0).map(([client]) => client),
   };
@@ -1034,7 +1119,8 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     || new Set(receipt.clients).size !== receipt.clients.length) {
     return { status: "invalid", issues: ["receipt clients are invalid"] };
   }
-  const expected = receiptFor(manifest, receipt.clients);
+  const receiptManifest = receipt.manifest?.ref === priorManifest.ref ? priorManifest : manifest;
+  const expected = receiptFor(receiptManifest, receipt.clients);
   // The checkout can move after installation. Its recorded path is recovery metadata, not a
   // trust input; ownership comes from the pinned manifest and independently inspected bindings.
   const fields = ["schemaVersion", "owner", "manifest", "managedFiles", "clients"];
@@ -1042,14 +1128,74 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
   if (typeof receipt?.source?.location !== "string") issues.push("source metadata");
   for (const client of receipt.clients) {
     if (!verifySelectedBinding && APPS[client]) continue;
-    const inspection = client === "claude" ? inspectClaudeGuard(manifest) : inspectCodexGuard(manifest);
+    const inspection = client === "claude" ? inspectClaudeGuard(receiptManifest) : inspectCodexGuard(receiptManifest);
     if (!inspection.healthy) issues.push(`${client} installed binding`);
   }
   if (requireSelected) for (const client of Object.keys(APPS)) {
     if (APPS[client] && !receipt.clients.includes(client)) issues.push(`${client} required ownership`);
   }
   if (issues.length > 0) return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: issues.map((field) => `receipt ${field} does not match this installer`) };
-  return { status: "installer-managed", receiptPath: normalizePath(ownershipReceiptPath), receipt };
+  return { status: receiptManifest === priorManifest ? "installer-upgrade-required" : "installer-managed",
+    receiptPath: normalizePath(ownershipReceiptPath), receipt };
+}
+
+function classifyReceiptFree(manifest) {
+  const controlled = [
+    ...FILES.map((name) => ["claude", name, path.join(claudeHooksDir, name)]),
+    ...CLAUDE_SUPPLEMENTAL_FILES.map((name) => ["claude", name, path.join(claudeHooksDir, name)]),
+    ...["secrets-guard.js", "secrets-tripwire.js", ...CODEX_LOCAL_FILES]
+      .map((name) => ["codex", name, path.join(codexHooksDir, name)]),
+  ];
+  const state = new Map();
+  const fingerprint = crypto.createHash("sha256");
+  let anySelected = false;
+  let unknownSelected = false;
+  for (const [client, name, target] of controlled) {
+    const stat = statWithoutSymlink(target);
+    const bytes = stat ? fs.readFileSync(target) : null;
+    fingerprint.update(`${client}/${name}:${stat ? stat.mode & 0o777 : "missing"}:${bytes?.length ?? 0}:`);
+    if (bytes) fingerprint.update(bytes);
+    if (!bytes) { state.set(`${client}/${name}`, "missing"); continue; }
+    if (APPS[client]) anySelected = true;
+    const identities = [
+      ["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities],
+    ].filter(([, source]) => {
+      const wanted = source.files?.[name] || source.local_files?.[name];
+      return wanted && (sha256(bytes) === wanted || (source.local_files?.[name] && sha256(normalizeLf(bytes)) === wanted));
+    }).map(([label]) => label);
+    if (identities.length === 0 && APPS[client]) unknownSelected = true;
+    state.set(`${client}/${name}`, identities);
+  }
+  let settingsValid = true;
+  let orphanRegistration = false;
+  for (const target of [claudeSettingsPath, codexHooksPath, ownershipReceiptPath]) {
+    const stat = statWithoutSymlink(target);
+    const bytes = stat ? fs.readFileSync(target) : null;
+    fingerprint.update(`${path.basename(target)}:${stat ? stat.mode & 0o777 : "missing"}:${bytes?.length ?? 0}:`);
+    if (bytes) fingerprint.update(bytes);
+    if (bytes && target !== ownershipReceiptPath
+      && ((target === claudeSettingsPath && APPS.claude) || (target === codexHooksPath && APPS.codex))) {
+      try {
+        const parsed = JSON.parse(bytes.toString("utf8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) settingsValid = false;
+        else if (!anySelected && /secrets-(?:guard|tripwire)|aws-credential/.test(JSON.stringify(parsed.hooks || {})))
+          orphanRegistration = true;
+      } catch { settingsValid = false; }
+    }
+  }
+  let kind = "unrecognized";
+  if (!settingsValid) kind = "malformed-settings";
+  else if (unknownSelected) kind = "unknown-bytes";
+  else if (orphanRegistration && !anySelected) kind = "unrecognized";
+  else if (["claude/secrets-guard.js", "claude/secrets-tripwire.js"].every((key) => state.get(key)?.includes("r774"))
+    && state.get("claude/install.mjs")?.includes("legacy")
+    && ["codex/secrets-guard.js", "codex/secrets-tripwire.js"].every((key) => state.get(key)?.includes("legacy"))
+    && controlled.every(([client, name]) => state.get(`${client}/${name}`) !== "missing")
+    && inspectClaudeGuard(priorManifest).issues.every((issue) => issue === "install.mjs does not match the pinned release.")
+    && inspectCodexGuard(legacyIdentities).healthy) kind = "recognized-mixed";
+  else if (!anySelected) kind = "empty";
+  else if (inspectInstalledGuard(manifest).healthy) kind = "current-no-receipt";
+  return { kind, fingerprint: fingerprint.digest("hex") };
 }
 
 function writeOwnershipReceipt(manifest, previous) {
@@ -1092,6 +1238,22 @@ function loadManifest() {
     fail("Guard manifest has no `local_files` hashes. Refusing to install unverified supplements or adapters.");
   }
   return manifest;
+}
+
+function readPinnedIdentity(name, manifest) {
+  const expected = manifest.local_files?.[name];
+  if (typeof expected !== "string") fail("A reviewed compatibility identity is not pinned. No files were changed.");
+  let bytes;
+  try { bytes = fs.readFileSync(path.join(hooksSourceDir, name)); }
+  catch { fail("A reviewed compatibility identity is unavailable. No files were changed."); }
+  if (!matchesReviewedHash(bytes, expected))
+    fail("A reviewed compatibility identity does not match its manifest hash. No files were changed.");
+  let value;
+  try { value = JSON.parse(bytes.toString("utf8")); }
+  catch { fail("A reviewed compatibility identity is malformed. No files were changed."); }
+  if (!value || typeof value.ref !== "string" || !value.files || !value.local_files)
+    fail("A reviewed compatibility identity is incomplete. No files were changed.");
+  return value;
 }
 
 async function getFile(ref, file) {

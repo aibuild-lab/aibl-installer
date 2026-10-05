@@ -18,6 +18,7 @@
 // and so are the Windows shells (pwsh/powershell -Command or -EncodedCommand, cmd /c, iex).
 
 const fs = require('fs');
+const path = require('path');
 
 const SECRET_SHAPES = [
   ['an Anthropic API key',      /\bsk-ant-[A-Za-z0-9_-]{24,}/],
@@ -84,7 +85,49 @@ if (WRITE_TOOLS.includes(input.tool_name)) {
 }
 
 // Guard both shells. PowerShell is a distinct tool on Windows and would otherwise bypass.
-if (input.tool_name !== 'Bash' && input.tool_name !== 'PowerShell') process.exit(0);
+if (input.tool_name !== 'Bash' && input.tool_name !== 'PowerShell' && input.tool_name !== 'Read') process.exit(0);
+if (input.tool_name === 'Read') {
+  const requested = input.tool_input?.file_path;
+  if (typeof requested !== 'string' || !requested.trim() || requested.includes('\0'))
+    deny('The Read path cannot be verified. Supply one valid file path.');
+  const normalized = requested.replace(/\\/g, '/');
+  if (isProtectedReadPath(normalized))
+    deny('This Read targets a protected secret-bearing path. Use approved runtime delivery.');
+  // Resolve existing target or nearest existing parent using metadata only, so symlinks and
+  // relative traversal cannot hide a protected target. Never open the target for content.
+  if (process.platform === 'win32' || !/^(?:[a-z]:\/|\/\/)/i.test(normalized)) {
+    let cursor = path.resolve(requested);
+    const missing = [];
+    while (true) {
+      let resolved;
+      try { resolved = fs.realpathSync.native(cursor); }
+      catch (error) {
+        if (error.code !== 'ENOENT') deny('The Read target cannot be verified safely.');
+        const parent = path.dirname(cursor);
+        if (parent === cursor) deny('The Read target cannot be verified safely.');
+        missing.unshift(path.basename(cursor));
+        cursor = parent;
+        continue;
+      }
+      if (isProtectedReadPath(path.join(resolved, ...missing).replace(/\\/g, '/')))
+        deny('This Read targets a protected secret-bearing path. Use approved runtime delivery.');
+      break;
+    }
+  }
+  process.exit(0);
+}
+
+function isProtectedReadPath(value) {
+  const normalized = path.posix.normalize(value.replace(/\\/g, '/')).toLowerCase();
+  const parts = normalized.split('/').filter(Boolean);
+  if (/^\/proc\/[^/]+\/environ$/.test(normalized)) return true;
+  if (parts.includes('secrets')) return true;
+  const name = parts.at(-1) || '';
+  if (/^\.env(?:\.|$)/.test(name))
+    return !/^\.env\.(?:example|sample|template|dist)$/.test(name);
+  return /(?:\.pem|\.p12|\.pfx|\.jks|\.keystore)$/.test(name)
+    || /^(?:id_rsa|id_ed25519|id_ecdsa|credentials[^/]*)$/.test(name);
+}
 const isPS = input.tool_name === 'PowerShell';
 // Only a string is inspectable. A number/object/array command would throw in splitShell.
 const rawCommand = input.tool_input && input.tool_input.command;
@@ -595,7 +638,7 @@ function isNulCutFieldOneOnEquals(tokens) {
 function denyIfSecretPath(text) {
   const raw = String(text || '');
   if (!raw) return;
-  const safe = raw.replace(/\.env\.(example|sample|template|dist)\b/gi, ' ');
+  const safe = raw.replace(/(^|[\\/])\.env\.(example|sample|template|dist)(?=$|[\\/])/gi, '$1 ');
   for (const [re, useSafe, message] of SECRET_PATH_RULES)
     if (re.test(useSafe ? safe : raw)) deny(message);
 }

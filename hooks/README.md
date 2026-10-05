@@ -25,6 +25,25 @@ selected client. Damaged or unsupported ownership is an incomplete result even w
 look healthy; review it before installing again. A local source path in a receipt is recovery
 metadata and does not grant authority to execute that checkout.
 
+The earlier R-774 receipt is checked against its exact preserved manifest and reported as
+`installer-upgrade-required`. Its old registration is valid for that version but does not prove
+built-in Read coverage. A receipt-free mix of pinned R-774 Claude guard and tripwire bytes with
+pinned legacy installer and Codex bytes can be previewed without changing files. From the verified
+installer source checkout, run:
+
+```bash
+node hooks/refresh-guard.mjs --migration-preview --json
+```
+
+An `eligible-migration` result is a proposal. After separate human approval covering both clients,
+run `node hooks/refresh-guard.mjs` from that same reviewed checkout. A chosen single-client install
+remains `--claude` or `--codex`; a recognized two-client mix requires both clients. The installer
+rechecks ownership under its transaction and stops on unknown bytes, unsafe targets, malformed
+settings, or concurrent change. It verifies files and registration before writing a new receipt.
+Fully quit and reopen each selected client, inspect or trust its exact hooks, then run allowed and
+protected synthetic controls. Healthy disk state alone does not prove runtime activation. Do not
+delete settings or write a receipt by hand.
+
 Installation snapshots its managed files, settings, backups, launchers, and receipt under a shared
 writer lock. A failed late step restores and reads back that scoped snapshot. `--diagnostic-json`
 reports ordered stages for a local installation attempt; its approval field is explicitly
@@ -69,6 +88,12 @@ class deterministically, whether or not the model "remembers." (Anthropic issue 
   (camp-hq W-#234). It also blocks a literal vendor-shaped key embedded in a shell command
   (`printf`, heredoc, `node -e writeFileSync`, inline `Authorization: Bearer …`) and - via the
   `Write`/`Edit`/`MultiEdit`/`NotebookEdit` matcher - a real key written straight into a file.
+  Claude's built-in `Read` is also matched. It checks `tool_input.file_path` and any locally
+  resolvable symlink target using filesystem metadata only, and returns a fixed path-free denial
+  for protected names and secret directories. Exact `.env.example`, `.env.sample`, `.env.template`,
+  and `.env.dist` files remain readable unless another protected directory rule applies. Native
+  `permissions.deny` rules remain additional protection. This hook does not isolate arbitrary
+  external processes or unrelated file tools.
   Direct `infisical dynamic-secrets` and `infisical pam` invocations are denied because they can
   return credentials outside the reviewed launcher lifecycle. Infisical token flags and sandbox
   bypass flags are denied for every Infisical command. The only `infisical secrets` exception is

@@ -63,7 +63,7 @@ const STUB = {
     "const node = (process.env.CLAUDE_HOOK_NODE || process.execPath).split(path.sep).join('/');\n" +
     "const hook = (name) => path.join(os.homedir(), '.claude', 'hooks', name).split(path.sep).join('/');\n" +
     "settings.hooks = { ...(settings.hooks ?? {}),\n" +
-    "  PreToolUse: [{ matcher: 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: `\\\"${node}\\\" \\\"${hook('secrets-guard.js')}\\\"` }] }],\n" +
+    "  PreToolUse: [{ matcher: 'Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: `\\\"${node}\\\" \\\"${hook('secrets-guard.js')}\\\"` }] }],\n" +
     "  PostToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: `\\\"${node}\\\" \\\"${hook('secrets-tripwire.js')}\\\"` }] }],\n" +
     "  PostToolUseFailure: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: `\\\"${node}\\\" \\\"${hook('secrets-tripwire.js')}\\\"` }] }],\n" +
     "};\n" +
@@ -73,6 +73,10 @@ for (const [name, body] of Object.entries(STUB)) fs.writeFileSync(path.join(src,
 
 // Copy the real updater into the throwaway repo so it resolves OUR temp manifest (beside it in hooks/).
 fs.copyFileSync(REAL_SCRIPT, path.join(repo, "hooks", "refresh-guard.mjs"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774.manifest.json"),
+  path.join(repo, "hooks", "secrets-guard.r774.manifest.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.identities.json"),
+  path.join(repo, "hooks", "secrets-guard.legacy.identities.json"));
 const LOCAL_FILES = {};
 for (const [name, source] of REAL_LOCAL_FILES) {
   const body = fs.readFileSync(source);
@@ -83,7 +87,11 @@ const manifestPath = path.join(repo, "hooks", "secrets-guard.manifest.json");
 const writeManifest = (ref, bodies) => fs.writeFileSync(manifestPath, JSON.stringify({
   ref,
   files: Object.fromEntries(Object.entries(bodies).map(([n, b]) => [n, sha256(b)])),
-  local_files: Object.fromEntries(Object.entries(LOCAL_FILES).map(([n, b]) => [n, sha256(normalizeLf(b))])),
+  local_files: {
+    ...Object.fromEntries(Object.entries(LOCAL_FILES).map(([n, b]) => [n, sha256(normalizeLf(b))])),
+    "secrets-guard.r774.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774.manifest.json")))),
+    "secrets-guard.legacy.identities.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.legacy.identities.json")))),
+  },
 }, null, 2));
 
 const run = (args = []) => spawnSync(process.execPath, [path.join(repo, "hooks", "refresh-guard.mjs"), ...args], {
@@ -392,6 +400,11 @@ check("installer ALWAYS re-runs to repair settings even when no file changed", i
 const settingsPath = path.join(home, ".claude", "settings.json");
 const canonicalSettings = fs.readFileSync(settingsPath, "utf8");
 const staleSettings = JSON.parse(canonicalSettings);
+staleSettings.hooks.PreToolUse[0].matcher = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit";
+fs.writeFileSync(settingsPath, JSON.stringify(staleSettings, null, 2));
+const missingRead = run(["--check", "--json"]);
+check("a registration missing only Read fails the current on-disk check",
+  missingRead.status !== 0 && JSON.parse(missingRead.stdout).failureClass === "REGISTRATION_INVALID");
 staleSettings.hooks.PreToolUse[0].matcher = "Bash|PowerShell";
 fs.writeFileSync(settingsPath, JSON.stringify(staleSettings, null, 2));
 const staleMatcher = run(["--check"]);
@@ -790,6 +803,164 @@ if (process.platform === "win32") {
 }
 
 check("unpinned error says it is not pinned to a release", /not pinned to a released version/.test(c.stderr));
+
+// Versioned ownership and the exact two-client mixed topology use only disposable homes.
+{
+  for (const [name, body] of Object.entries(STUB)) fs.writeFileSync(path.join(src, name), body);
+  writeManifest("current-fixture", STUB);
+  const current = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const priorPath = path.join(repo, "hooks", "secrets-guard.r774.manifest.json");
+  const legacyPath = path.join(repo, "hooks", "secrets-guard.legacy.identities.json");
+  const savedPrior = fs.readFileSync(priorPath);
+  const savedLegacy = fs.readFileSync(legacyPath);
+  const prior = { ...current, ref: "prior-fixture" };
+  fs.writeFileSync(priorPath, JSON.stringify(prior) + "\n");
+  writeManifest("current-fixture", STUB);
+  const runHome = (selectedHome, flags = [], extraEnv = {}) => spawnSync(process.execPath,
+    [path.join(repo, "hooks", "refresh-guard.mjs"), ...flags], {
+      env: { ...process.env, HOME: selectedHome, USERPROFILE: selectedHome, GUARD_SOURCE_DIR: src, ...extraEnv }, encoding: "utf8",
+    });
+  const receiptAt = (selectedHome) => path.join(selectedHome, ".claude", "hooks", "aibl-installer-guard-receipt.json");
+  const setOldMatcher = (selectedHome) => {
+    const target = path.join(selectedHome, ".claude", "settings.json");
+    const value = JSON.parse(fs.readFileSync(target, "utf8"));
+    value.hooks.PreToolUse.find((group) => group.hooks?.some((hook) => hook.command?.includes("secrets-guard.js"))).matcher =
+      "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit";
+    fs.writeFileSync(target, JSON.stringify(value, null, 2) + "\n");
+  };
+  const priorHome = path.join(root, "prior-receipt");
+  fs.mkdirSync(priorHome);
+  check("version fixture starts current", runHome(priorHome).status === 0);
+  setOldMatcher(priorHome);
+  const receipt = JSON.parse(fs.readFileSync(receiptAt(priorHome), "utf8"));
+  receipt.manifest = { ref: prior.ref, identity: sha256(normalizeLf(fs.readFileSync(priorPath))) };
+  fs.writeFileSync(receiptAt(priorHome), JSON.stringify(receipt, null, 2) + "\n");
+  const oldCheck = runHome(priorHome, ["--check", "--json"]);
+  const oldReport = JSON.parse(oldCheck.stdout);
+  check("valid prior receipt is installer-owned but upgrade-required",
+    oldCheck.status !== 0 && oldReport.ownership.status === "installer-upgrade-required"
+    && oldReport.onDisk.status === "incomplete" && oldReport.writesAttempted === false);
+  const narrowUpgrade = runHome(priorHome, ["--claude", "--diagnostic-json"]);
+  check("prior two-client receipt refuses a one-client upgrade without writes", narrowUpgrade.status !== 0
+    && JSON.parse(narrowUpgrade.stdout).writesAttempted === false);
+  check("approved current upgrade and second application succeed", runHome(priorHome).status === 0
+    && runHome(priorHome).status === 0
+    && JSON.parse(runHome(priorHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
+
+  const legacyGuard = Buffer.from("#!/usr/bin/env node\n// synthetic legacy guard\nprocess.exit(0);\n");
+  const legacyTripwire = Buffer.from("#!/usr/bin/env node\n// synthetic legacy tripwire\nprocess.exit(0);\n");
+  const legacyInstall = Buffer.from("// synthetic legacy install; never executed in migration\n");
+  fs.writeFileSync(legacyPath, JSON.stringify({ ref: "legacy-fixture", files: {
+    "secrets-guard.js": sha256(legacyGuard), "secrets-tripwire.js": sha256(legacyTripwire),
+    "install.mjs": sha256(legacyInstall),
+  }, local_files: current.local_files }) + "\n");
+  writeManifest("current-fixture", STUB);
+  const mixedHome = path.join(root, "recognized-mixed");
+  fs.mkdirSync(mixedHome);
+  check("mixed fixture starts current", runHome(mixedHome).status === 0);
+  fs.rmSync(receiptAt(mixedHome));
+  fs.writeFileSync(path.join(mixedHome, ".claude", "hooks", "install.mjs"), legacyInstall);
+  for (const [name, bytes] of [["secrets-guard.js", legacyGuard], ["secrets-tripwire.js", legacyTripwire]])
+    fs.writeFileSync(path.join(mixedHome, ".codex", "hooks", name), bytes);
+  setOldMatcher(mixedHome);
+  const preview = runHome(mixedHome, ["--migration-preview", "--json"]);
+  const proposal = JSON.parse(preview.stdout);
+  check("recognized mixed preview is read-only, anonymous and approval-gated", preview.status === 0
+    && proposal.eligibility === "eligible-migration" && proposal.ownership === "recognized-mixed"
+    && proposal.writesAttempted === false && !preview.stdout.includes(mixedHome));
+  const selected = runHome(mixedHome, ["--claude", "--diagnostic-json"]);
+  check("two-client mixed state refuses one-client mutation", selected.status !== 0
+    && JSON.parse(selected.stdout).writesAttempted === false);
+  const migrated = runHome(mixedHome);
+  check("approved synthetic mixed migration commits a current receipt", migrated.status === 0
+    && JSON.parse(runHome(mixedHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
+  const second = runHome(mixedHome);
+  check("second mixed migration application is healthy and idempotent", second.status === 0 && /already current/.test(second.stdout));
+  fs.rmSync(receiptAt(mixedHome));
+  fs.writeFileSync(path.join(mixedHome, ".claude", "hooks", "install.mjs"), legacyInstall);
+  for (const [name, bytes] of [["secrets-guard.js", legacyGuard], ["secrets-tripwire.js", legacyTripwire]])
+    fs.writeFileSync(path.join(mixedHome, ".codex", "hooks", name), bytes);
+  setOldMatcher(mixedHome);
+  const snapshot = () => {
+    const entries = [];
+    const walk = (directory) => {
+      for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+        const target = path.join(directory, item.name);
+        if (item.isDirectory()) walk(target);
+        else entries.push([path.relative(mixedHome, target), fs.statSync(target).mode & 0o777,
+          fs.readFileSync(target).toString("base64")]);
+      }
+    };
+    walk(mixedHome);
+    return entries.sort((a, b) => a[0].localeCompare(b[0]));
+  };
+  const beforeFault = snapshot();
+  const fault = runHome(mixedHome, ["--diagnostic-json"], {
+    AIBL_GUARD_TEST_HOME: mixedHome, AIBL_GUARD_TEST_FAIL_STAGE: "REGISTER_HOOKS",
+  });
+  check("mixed migration registration fault restores files, settings, modes and absent receipt",
+    fault.status !== 0 && JSON.parse(fault.stdout).rollback === "RESTORED"
+    && JSON.stringify(snapshot()) === JSON.stringify(beforeFault));
+  const beforeConcurrent = snapshot().filter(([name]) => name !== ".claude/settings.json");
+  const concurrent = runHome(mixedHome, ["--diagnostic-json"], {
+    AIBL_GUARD_TEST_HOME: mixedHome, AIBL_GUARD_TEST_CONCURRENT_CHANGE: "1",
+  });
+  const concurrentReport = JSON.parse(concurrent.stdout);
+  check("concurrent settings change stops before installer writes", concurrent.status !== 0
+    && concurrentReport.failureClass === "CONCURRENT_CHANGE" && concurrentReport.writesAttempted === false
+    && JSON.stringify(snapshot().filter(([name]) => name !== ".claude/settings.json")) === JSON.stringify(beforeConcurrent));
+  fs.writeFileSync(path.join(mixedHome, ".codex", "hooks", "secrets-guard.js"), "unknown synthetic bytes\n");
+  const unknown = runHome(mixedHome, ["--migration-preview", "--json"]);
+  check("unknown managed bytes stop migration before writes", unknown.status !== 0
+    && JSON.parse(unknown.stdout).failureClass === "UNKNOWN_MANAGED_BYTES"
+    && JSON.parse(unknown.stdout).firstFailedStage === "OWNER_DISCOVERY"
+    && JSON.parse(unknown.stdout).stages.find((stage) => stage.id === "COMMIT_FILES").status === "NOT_RUN"
+    && JSON.parse(unknown.stdout).writesAttempted === false);
+  const settingsFile = path.join(mixedHome, ".claude", "settings.json");
+  const priorSettings = fs.readFileSync(settingsFile);
+  fs.writeFileSync(settingsFile, "{malformed synthetic settings");
+  const malformedPreview = runHome(mixedHome, ["--migration-preview", "--json"]);
+  check("malformed settings produce a body-free preview hold", malformedPreview.status !== 0
+    && JSON.parse(malformedPreview.stdout).failureClass === "SETTINGS_INVALID"
+    && !malformedPreview.stdout.includes("malformed synthetic settings"));
+  fs.writeFileSync(settingsFile, priorSettings);
+  fs.writeFileSync(receiptAt(mixedHome), JSON.stringify({ ...receipt,
+    manifest: { ref: "forged", identity: "0".repeat(64) } }));
+  const forgedPreview = runHome(mixedHome, ["--migration-preview", "--json"]);
+  check("forged receipt cannot authorize migration", forgedPreview.status !== 0
+    && JSON.parse(forgedPreview.stdout).failureClass === "OWNERSHIP_INVALID"
+    && JSON.parse(forgedPreview.stdout).writesAttempted === false);
+  const oneHome = path.join(root, "single-client-foreign");
+  fs.mkdirSync(path.join(oneHome, ".codex", "hooks"), { recursive: true });
+  const foreign = path.join(oneHome, ".codex", "hooks", "secrets-guard.js");
+  fs.writeFileSync(foreign, "unrelated synthetic Codex bytes\n");
+  const one = runHome(oneHome, ["--claude"]);
+  check("Claude-only install preserves unselected Codex managed-name bytes", one.status === 0
+    && fs.readFileSync(foreign, "utf8") === "unrelated synthetic Codex bytes\n"
+    && !fs.existsSync(path.join(oneHome, ".codex", "hooks.json")));
+  if (process.platform !== "win32") {
+    const unsafeHome = path.join(root, "preview-symlink");
+    const outside = path.join(root, "preview-outside");
+    fs.mkdirSync(path.join(unsafeHome, ".claude"), { recursive: true });
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(unsafeHome, ".claude", "hooks"));
+    const unsafe = runHome(unsafeHome, ["--migration-preview", "--json"]);
+    check("migration preview rejects a symlinked managed target with body-free JSON", unsafe.status !== 0
+      && JSON.parse(unsafe.stdout).failureClass === "UNSAFE_TARGET"
+      && !unsafe.stdout.includes(unsafeHome));
+  }
+  const pinnedLegacy = fs.readFileSync(legacyPath);
+  fs.appendFileSync(legacyPath, " ");
+  const alteredIdentity = runHome(oneHome, ["--migration-preview", "--json"]);
+  check("a changed compatibility identity fails its reviewed pin before inspection", alteredIdentity.status !== 0
+    && JSON.parse(alteredIdentity.stdout).failureClass === "SOURCE_INTEGRITY"
+    && JSON.parse(alteredIdentity.stdout).firstFailedStage === "SOURCE_VERIFY"
+    && JSON.parse(alteredIdentity.stdout).stages.find((stage) => stage.id === "OWNER_DISCOVERY").status === "NOT_RUN"
+    && JSON.parse(alteredIdentity.stdout).writesAttempted === false);
+  fs.writeFileSync(legacyPath, pinnedLegacy);
+  fs.writeFileSync(priorPath, savedPrior);
+  fs.writeFileSync(legacyPath, savedLegacy);
+}
 
 try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
 
