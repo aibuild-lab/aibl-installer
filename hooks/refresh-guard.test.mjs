@@ -31,6 +31,82 @@ const check = (name, cond) => {
   else { failures.push(name); console.error(`FAIL - ${name}`); }
 };
 
+// --- Portable snapshot IDs and the concurrent-change assessment ----------------------------------
+// A controlled file is identified by its path relative to the disposable home, always spelled with
+// "/" so an ID means the same thing on POSIX and on Windows (where path.relative uses "\"). The
+// same helper builds the before and the after snapshot. Nothing below prints a file body, a
+// snapshot value, a private path, child stderr or an unconstrained exception: a failure names only
+// fixed predicates, closed identifiers and synthetic fixture IDs.
+const portableId = (pathApi, base, target) => pathApi.relative(base, target).split(pathApi.sep).join("/");
+const snapshotTree = (base) => {
+  const entries = [];
+  const walk = (directory) => {
+    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, item.name);
+      if (item.isDirectory()) walk(target);
+      else entries.push([portableId(path, base, target), fs.statSync(target).mode & 0o777,
+        fs.readFileSync(target).toString("base64")]);
+    }
+  };
+  walk(base);
+  return entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+};
+const changedIds = (before, after) => {
+  const index = (entries) => new Map(entries.map(([id, mode, body]) => [id, `${mode}:${body}`]));
+  const was = index(before);
+  const now = index(after);
+  return [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
+};
+const bodyOf = (entries, id) => {
+  const found = entries.find(([entryId]) => entryId === id);
+  return found ? Buffer.from(found[2], "base64") : null;
+};
+const STAGE_ORDER = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
+  "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
+const CLOSED_NAME = /^[A-Z][A-Z_]{0,39}$/;
+const closedName = (value) => (typeof value === "string" && CLOSED_NAME.test(value) ? value : "UNEXPECTED");
+const SETTINGS_ID = ".claude/settings.json";
+// The seam in refresh-guard.mjs appends exactly one LF to the settings file once ownership has been
+// inspected. That is the only change the concurrent-change scenario is allowed to leave behind.
+const assessConcurrentChange = ({ run, before, after, mutatedId = SETTINGS_ID }) => {
+  let report = null;
+  try { report = JSON.parse(run.stdout); } catch { report = null; }
+  if (report === null || typeof report !== "object") report = null;
+  const changed = changedIds(before, after);
+  const was = bodyOf(before, mutatedId);
+  const now = bodyOf(after, mutatedId);
+  const stages = Array.isArray(report?.stages) ? report.stages : [];
+  const failedAt = STAGE_ORDER.indexOf(report?.firstFailedStage);
+  return {
+    childCompleted: run.error === undefined && run.signal === null && Number.isInteger(run.status),
+    exitClass: !Number.isInteger(run.status) ? "NONE" : run.status === 0 ? "ZERO" : "NONZERO",
+    reportParsed: report !== null,
+    failureClass: closedName(report?.failureClass),
+    firstFailedStage: closedName(report?.firstFailedStage),
+    lastGoodStage: closedName(report?.lastGoodStage),
+    writesAttempted: report?.writesAttempted === true ? true : report?.writesAttempted === false ? false : "UNEXPECTED",
+    writesCommitted: report?.writesCommitted === true ? true : report?.writesCommitted === false ? false : "UNEXPECTED",
+    downstreamNotRun: failedAt >= 0 && STAGE_ORDER.slice(failedAt + 1).every((id) => stages.find((s) => s.id === id)?.status === "NOT_RUN"),
+    mutationObserved: was !== null && now !== null && now.equals(Buffer.concat([was, Buffer.from("\n")])),
+    unexpectedChangedIds: changed.filter((id) => id !== mutatedId),
+  };
+};
+const concurrentPredicates = (a) => ({
+  "child ran to completion and exited nonzero": a.childCompleted && a.exitClass === "NONZERO",
+  "report names CONCURRENT_CHANGE first failing at STAGE_WRITES after SOURCE_VERIFY":
+    a.reportParsed && a.failureClass === "CONCURRENT_CHANGE" && a.firstFailedStage === "STAGE_WRITES" && a.lastGoodStage === "SOURCE_VERIFY",
+  "no write attempted or committed and every downstream stage NOT_RUN":
+    a.writesAttempted === false && a.writesCommitted === false && a.downstreamNotRun,
+  "the intentional settings mutation was observed (the test seam activated)": a.mutationObserved,
+  "no other controlled file, setting, mode or receipt changed": a.unexpectedChangedIds.length === 0,
+});
+const concurrentDiagnostic = (a) => [
+  `child=${a.childCompleted ? "completed" : "not-completed"}`, `exit=${a.exitClass}`, `reportParsed=${a.reportParsed}`,
+  `failureClass=${a.failureClass}`, `firstFailedStage=${a.firstFailedStage}`, `lastGoodStage=${a.lastGoodStage}`,
+  `writesAttempted=${a.writesAttempted}`, `writesCommitted=${a.writesCommitted}`, `downstreamNotRun=${a.downstreamNotRun}`,
+  `mutationObserved=${a.mutationObserved}`, `unexpectedChangedIds=${JSON.stringify(a.unexpectedChangedIds.slice(0, 8))}`,
+].join(" ");
+
 // --- scratch layout ---
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "refresh-guard-"));
 const home = path.join(root, "home");
@@ -881,19 +957,7 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   for (const [name, bytes] of [["secrets-guard.js", legacyGuard], ["secrets-tripwire.js", legacyTripwire]])
     fs.writeFileSync(path.join(mixedHome, ".codex", "hooks", name), bytes);
   setOldMatcher(mixedHome);
-  const snapshot = () => {
-    const entries = [];
-    const walk = (directory) => {
-      for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
-        const target = path.join(directory, item.name);
-        if (item.isDirectory()) walk(target);
-        else entries.push([path.relative(mixedHome, target), fs.statSync(target).mode & 0o777,
-          fs.readFileSync(target).toString("base64")]);
-      }
-    };
-    walk(mixedHome);
-    return entries.sort((a, b) => a[0].localeCompare(b[0]));
-  };
+  const snapshot = () => snapshotTree(mixedHome);
   const beforeFault = snapshot();
   const fault = runHome(mixedHome, ["--diagnostic-json"], {
     AIBL_GUARD_TEST_HOME: mixedHome, AIBL_GUARD_TEST_FAIL_STAGE: "REGISTER_HOOKS",
@@ -901,14 +965,93 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   check("mixed migration registration fault restores files, settings, modes and absent receipt",
     fault.status !== 0 && JSON.parse(fault.stdout).rollback === "RESTORED"
     && JSON.stringify(snapshot()) === JSON.stringify(beforeFault));
-  const beforeConcurrent = snapshot().filter(([name]) => name !== ".claude/settings.json");
+  const beforeConcurrent = snapshot();
   const concurrent = runHome(mixedHome, ["--diagnostic-json"], {
     AIBL_GUARD_TEST_HOME: mixedHome, AIBL_GUARD_TEST_CONCURRENT_CHANGE: "1",
   });
-  const concurrentReport = JSON.parse(concurrent.stdout);
-  check("concurrent settings change stops before installer writes", concurrent.status !== 0
-    && concurrentReport.failureClass === "CONCURRENT_CHANGE" && concurrentReport.writesAttempted === false
-    && JSON.stringify(snapshot().filter(([name]) => name !== ".claude/settings.json")) === JSON.stringify(beforeConcurrent));
+  const concurrentAssessment = assessConcurrentChange({ run: concurrent, before: beforeConcurrent, after: snapshot() });
+  const concurrentResults = concurrentPredicates(concurrentAssessment);
+  for (const [predicate, held] of Object.entries(concurrentResults)) check(`concurrent settings change: ${predicate}`, held);
+  check("concurrent settings change stops before installer writes", Object.values(concurrentResults).every(Boolean));
+  if (!Object.values(concurrentResults).every(Boolean))
+    console.error(`DIAG - concurrent settings change: ${concurrentDiagnostic(concurrentAssessment)}`);
+
+  // Controls for the concurrent-change assertion. They run on synthetic snapshots and reports, with
+  // no child process. The path.win32 cases SIMULATE Windows path spelling on this host: they pin the
+  // separator defect that made the intentionally changed settings file stay in the preservation
+  // comparison on a real Windows runner, and they never substitute for executing on Windows.
+  {
+    const entry = (id, text, mode = 0o600) => [id, mode, Buffer.from(text).toString("base64")];
+    const tree = (overrides = {}) => [
+      entry(".claude/settings.json", "{}\n"), entry(".claude/settings.json.backup.secrets-guard", "{}\n"),
+      entry(".claude/settings.json2", "{}\n"), entry(".claude/hooks/install.mjs", "install\n", 0o700),
+      entry(".codex/hooks/secrets-guard.js", "guard\n", 0o700), entry(".claude/hooks/aibl-installer-guard-receipt.json", "{}\n"),
+    ].map((row) => overrides[row[0]] === undefined ? row : overrides[row[0]]).filter((row) => row !== null);
+    const goodReport = {
+      failureClass: "CONCURRENT_CHANGE", firstFailedStage: "STAGE_WRITES", lastGoodStage: "SOURCE_VERIFY",
+      writesAttempted: false, writesCommitted: false,
+      stages: STAGE_ORDER.map((id, index) => ({ id, status: index < 6 ? (id === "APPROVAL" ? "NOT_APPLICABLE" : "PASS") : index === 6 ? "FAIL" : "NOT_RUN" })),
+    };
+    const run = (report = goodReport, status = 1) => ({ status, signal: null, stdout: JSON.stringify(report) });
+    const mutated = tree({ ".claude/settings.json": entry(".claude/settings.json", "{}\n\n") });
+    const verdict = (assessment) => Object.values(concurrentPredicates(assessment)).every(Boolean);
+    const assess = (over = {}) => assessConcurrentChange({ run: run(), before: tree(), after: mutated, ...over });
+
+    check("portable IDs: POSIX and Windows (simulated) spellings give the same ID",
+      portableId(path.posix, "/tmp/h", "/tmp/h/.claude/settings.json") === SETTINGS_ID
+      && portableId(path.win32, "C:\\tmp\\h", "C:\\tmp\\h\\.claude\\settings.json") === SETTINGS_ID
+      && portableId(path.win32, "C:\\tmp\\h", "C:\\tmp\\h\\.claude\\hooks\\install.mjs") === ".claude/hooks/install.mjs");
+    check("portable IDs: the real snapshot of a disposable home uses only forward slashes",
+      snapshotTree(mixedHome).every(([id]) => !id.includes("\\") && !id.startsWith("/")));
+    const winRaw = (rows) => rows.map(([id, ...rest]) => [id.split("/").join("\\"), ...rest]);
+    check("defect reproduced (Windows spelling simulated): raw backslash IDs leave the mutated settings file in the comparison",
+      !verdict(assessConcurrentChange({ run: run(), before: winRaw(tree()), after: winRaw(mutated) })));
+    check("defect fixed (Windows spelling simulated): the same snapshots pass once IDs are portable",
+      verdict(assess({ before: tree(), after: mutated })));
+    check("passing control: the exact intentional settings mutation and nothing else", verdict(assess()));
+    check("exact exclusion: a changed settings backup is not excluded",
+      !verdict(assess({ after: tree({ ".claude/settings.json": mutated[0], ".claude/settings.json.backup.secrets-guard": entry(".claude/settings.json.backup.secrets-guard", "x\n") }) }))
+      && assess({ after: tree({ ".claude/settings.json": mutated[0], ".claude/settings.json.backup.secrets-guard": entry(".claude/settings.json.backup.secrets-guard", "x\n") }) })
+        .unexpectedChangedIds.join() === ".claude/settings.json.backup.secrets-guard");
+    check("exact exclusion: a similarly named neighbor changing alone is neither excluded nor mistaken for the mutation", (() => {
+      const result = assess({ after: tree({ ".claude/settings.json2": entry(".claude/settings.json2", "{}\n\n") }) });
+      return !verdict(result) && !result.mutationObserved && result.unexpectedChangedIds.join() === ".claude/settings.json2";
+    })());
+    check("an unexpected controlled-file content change still fails",
+      assess({ after: tree({ ".claude/settings.json": mutated[0], ".claude/hooks/install.mjs": entry(".claude/hooks/install.mjs", "other\n", 0o700) }) })
+        .unexpectedChangedIds.join() === ".claude/hooks/install.mjs");
+    check("an unexpected mode-only change still fails",
+      assess({ after: tree({ ".claude/settings.json": mutated[0], ".codex/hooks/secrets-guard.js": entry(".codex/hooks/secrets-guard.js", "guard\n", 0o600) }) })
+        .unexpectedChangedIds.join() === ".codex/hooks/secrets-guard.js");
+    check("a created receipt or a removed controlled file still fails",
+      !verdict(assess({ after: tree({ ".claude/settings.json": mutated[0] }).concat([entry(".claude/hooks/new-receipt.json", "{}\n")]) }))
+      && !verdict(assess({ after: tree({ ".claude/settings.json": mutated[0], ".codex/hooks/secrets-guard.js": null }) })));
+    check("missing fault injection (settings unchanged) cannot earn a pass",
+      !verdict(assess({ after: tree() })) && !assess({ after: tree() }).mutationObserved);
+    check("a mutation other than exactly one appended LF is not accepted as the seam",
+      !assess({ after: tree({ ".claude/settings.json": entry(".claude/settings.json", "{}\nx") }) }).mutationObserved);
+    check("the wrong failure class fails", !verdict(assess({ run: run({ ...goodReport, failureClass: "WRITE_FAILED" }) })));
+    check("writesAttempted=true fails", !verdict(assess({ run: run({ ...goodReport, writesAttempted: true }) })));
+    check("a zero exit, a killed child and unparseable output fail without throwing",
+      !verdict(assess({ run: run(goodReport, 0) }))
+      && !verdict(assess({ run: { status: null, signal: "SIGTERM", stdout: "" } }))
+      && !verdict(assess({ run: { status: 1, signal: null, stdout: "not json" } })));
+    check("a wrong first-failed or last-good stage fails",
+      !verdict(assess({ run: run({ ...goodReport, firstFailedStage: "COMMIT_FILES" }) }))
+      && !verdict(assess({ run: run({ ...goodReport, lastGoodStage: "OWNER_BINDING" }) })));
+    check("a downstream stage that is not NOT_RUN fails", !verdict(assess({
+      run: run({ ...goodReport, stages: goodReport.stages.map((stage) => stage.id === "COMMIT_FILES" ? { ...stage, status: "PASS" } : stage) }),
+    })));
+    const hostile = assess({
+      run: run({ ...goodReport, failureClass: "C:\\Users\\private\\secret", firstFailedStage: "/home/private/x", lastGoodStage: "token abc" }),
+      after: tree({ ".claude/settings.json": entry(".claude/settings.json", "{}\nSECRET-BODY-123\n") }),
+    });
+    const line = concurrentDiagnostic(hostile);
+    check("the diagnostic line is closed metadata only: no body, no snapshot value, no private path",
+      !line.includes("SECRET-BODY-123") && !line.includes(Buffer.from("{}\nSECRET-BODY-123\n").toString("base64"))
+      && !line.includes("private") && !line.includes("token") && !line.includes(root)
+      && /failureClass=UNEXPECTED firstFailedStage=UNEXPECTED lastGoodStage=UNEXPECTED/.test(line));
+  }
   fs.writeFileSync(path.join(mixedHome, ".codex", "hooks", "secrets-guard.js"), "unknown synthetic bytes\n");
   const unknown = runHome(mixedHome, ["--migration-preview", "--json"]);
   check("unknown managed bytes stop migration before writes", unknown.status !== 0
