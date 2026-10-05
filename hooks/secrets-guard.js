@@ -86,47 +86,75 @@ if (WRITE_TOOLS.includes(input.tool_name)) {
 
 // Guard both shells. PowerShell is a distinct tool on Windows and would otherwise bypass.
 if (input.tool_name !== 'Bash' && input.tool_name !== 'PowerShell' && input.tool_name !== 'Read') process.exit(0);
+// Template files that are meant to be read: exact names only, never a suffix of one.
+const TEMPLATE_ENV_NAME = /^\.env\.(?:example|sample|template|dist)$/;
+
 if (input.tool_name === 'Read') {
   const requested = input.tool_input?.file_path;
   if (typeof requested !== 'string' || !requested.trim() || requested.includes('\0'))
     deny('The Read path cannot be verified. Supply one valid file path.');
-  const normalized = requested.replace(/\\/g, '/');
-  if (isProtectedReadPath(normalized))
+  const outcome = classifyReadTarget(requested);
+  if (outcome === 'protected')
     deny('This Read targets a protected secret-bearing path. Use approved runtime delivery.');
-  // Resolve existing target or nearest existing parent using metadata only, so symlinks and
-  // relative traversal cannot hide a protected target. Never open the target for content.
-  if (process.platform === 'win32' || !/^(?:[a-z]:\/|\/\/)/i.test(normalized)) {
-    let cursor = path.resolve(requested);
+  if (outcome === 'unverifiable') deny('The Read target cannot be verified safely.');
+  process.exit(0);
+}
+
+// Name rules for one path component list. Mirrors the intended categories of SECRET_PATH_RULES
+// below (environment files, key and certificate files, credentials files) but classifies path
+// components instead of scanning free text: a .env-style name protects its own component and
+// anything under it, a template name is exempt only when it is exactly a template name, and a
+// public SSH key (`.pub`) is not treated as private material.
+function partsAreProtected(parts) {
+  if (parts.includes('secrets')) return true;
+  for (const part of parts)
+    if (/\.env(?![a-z0-9_])/.test(part) && !TEMPLATE_ENV_NAME.test(part)) return true;
+  const name = parts.at(-1) || '';
+  if (/\.(?:pem|p12|pfx|jks|keystore)(?![a-z0-9_])/.test(name)) return true;
+  if (/(?:id_rsa|id_ed25519|id_ecdsa)(?![a-z0-9_])/.test(name) && !/\.pub$/.test(name)) return true;
+  return /^credentials/.test(name) || /credentials(?![a-z0-9_])/.test(name);
+}
+
+// Classifies a spelling WITHOUT resolving it. Both the spelling as written (so `secrets/../x`
+// is judged by what was asked for) and its lexical collapse are checked.
+function isProtectedReadPath(value) {
+  const lowered = value.replace(/\\/g, '/').toLowerCase();
+  if (/^\/+proc\/[^/]+\/environ$/.test(path.posix.normalize(lowered))) return true;
+  return partsAreProtected(lowered.split('/').filter(Boolean))
+    || partsAreProtected(path.posix.normalize(lowered).split('/').filter(Boolean));
+}
+
+// 'protected' | 'unverifiable' | 'ok'. Filesystem metadata only (realpath/lstat); the target is
+// never opened. On POSIX the path is judged under both interpretations a reader may apply: the
+// kernel's (symlinks followed before any `..`, leading `//` kept) and the lexical collapse a
+// client may do first. Windows normalizes `..` lexically before access, so it gets one candidate.
+function classifyReadTarget(requested) {
+  if (isProtectedReadPath(requested)) return 'protected';
+  const candidates = [path.resolve(requested)];
+  if (process.platform !== 'win32')
+    candidates.unshift(path.isAbsolute(requested) ? requested : process.cwd() + path.sep + requested);
+  for (const candidate of new Set(candidates)) {
+    let cursor = candidate;
     const missing = [];
     while (true) {
       let resolved;
       try { resolved = fs.realpathSync.native(cursor); }
       catch (error) {
-        if (error.code !== 'ENOENT') deny('The Read target cannot be verified safely.');
+        if (error.code !== 'ENOENT') return 'unverifiable';
+        // A path the kernel cannot resolve cannot be read as spelled; only the lexical candidate
+        // is walked up to its nearest existing parent (a missing file under a real directory).
+        if (candidate !== path.resolve(requested)) break;
         const parent = path.dirname(cursor);
-        if (parent === cursor) deny('The Read target cannot be verified safely.');
+        if (parent === cursor) return 'unverifiable';
         missing.unshift(path.basename(cursor));
         cursor = parent;
         continue;
       }
-      if (isProtectedReadPath(path.join(resolved, ...missing).replace(/\\/g, '/')))
-        deny('This Read targets a protected secret-bearing path. Use approved runtime delivery.');
+      if (isProtectedReadPath(path.join(resolved, ...missing))) return 'protected';
       break;
     }
   }
-  process.exit(0);
-}
-
-function isProtectedReadPath(value) {
-  const normalized = path.posix.normalize(value.replace(/\\/g, '/')).toLowerCase();
-  const parts = normalized.split('/').filter(Boolean);
-  if (/^\/proc\/[^/]+\/environ$/.test(normalized)) return true;
-  if (parts.includes('secrets')) return true;
-  const name = parts.at(-1) || '';
-  if (/^\.env(?:\.|$)/.test(name))
-    return !/^\.env\.(?:example|sample|template|dist)$/.test(name);
-  return /(?:\.pem|\.p12|\.pfx|\.jks|\.keystore)$/.test(name)
-    || /^(?:id_rsa|id_ed25519|id_ecdsa|credentials[^/]*)$/.test(name);
+  return 'ok';
 }
 const isPS = input.tool_name === 'PowerShell';
 // Only a string is inspectable. A number/object/array command would throw in splitShell.
@@ -638,7 +666,7 @@ function isNulCutFieldOneOnEquals(tokens) {
 function denyIfSecretPath(text) {
   const raw = String(text || '');
   if (!raw) return;
-  const safe = raw.replace(/(^|[\\/])\.env\.(example|sample|template|dist)(?=$|[\\/])/gi, '$1 ');
+  const safe = raw.replace(/(^|[\\/=<])\.env\.(example|sample|template|dist)(?=$|[\\/])/gi, '$1 ');
   for (const [re, useSafe, message] of SECRET_PATH_RULES)
     if (re.test(useSafe ? safe : raw)) deny(message);
 }
@@ -847,7 +875,9 @@ for (const segment of segments) {
     const patternIndex = args.findIndex(arg => !arg.startsWith('-'));
     args = patternIndex >= 0 ? args.slice(patternIndex + 1) : [];
   }
-  denyIfSecretPath(args.join(' '));
+  // One path argument at a time: the exact-template exemption is a property of an argument, not of
+  // the whole command line, so flags and further arguments cannot hide or revoke it.
+  for (const arg of args) denyIfSecretPath(arg);
 }
 
 // 4. Language-eval exfil of env / .env (shell-independent)
