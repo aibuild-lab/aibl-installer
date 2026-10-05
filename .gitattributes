@@ -8,3 +8,6 @@ hooks/*.json text eol=lf
 # (frozen_family.verify_engine). Those hashes are LF bytes, so every text file must check out
 # LF on Windows as well, or a Windows student fails verification on start.sh before anything runs.
 * text=auto eol=lf
+
+# Historical reviewed bytes are exact test inputs; never convert their line endings.
+hooks/fixtures/reviewed-history/** -text

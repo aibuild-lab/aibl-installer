@@ -8,8 +8,10 @@ PY=python3; python3 -c 'import sys' >/dev/null 2>&1 || PY=python
 bash -n start.sh
 node hooks/manifest.test.mjs
 node hooks/secrets-guard.test.mjs
+node hooks/secrets-guard.read-paths.test.mjs
 node hooks/secrets-tripwire.test.mjs
 node hooks/install.test.mjs
 node hooks/codex-secrets-guard.test.mjs
 node hooks/refresh-guard.test.mjs
+node hooks/refresh-guard.history.test.mjs
 git diff --check

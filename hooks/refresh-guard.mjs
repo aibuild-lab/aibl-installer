@@ -37,6 +37,22 @@ const LOCAL_GUARD_FILES = [
 ];
 const CLAUDE_SUPPLEMENTAL_FILES = ["aws-credential-patterns.mjs", "aws-credential-guard.mjs", "aws-credential-tripwire.mjs"];
 const CODEX_LOCAL_FILES = ["aws-credential-patterns.mjs", "codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs"];
+// Version-distinct files decide which reviewed release a client's installation belongs to.
+const CLAUDE_DISTINCT = ["secrets-guard.js", "secrets-tripwire.js", "install.mjs"];
+const CODEX_DISTINCT = ["secrets-guard.js", "secrets-tripwire.js"];
+// The closed list of reviewed receipt-free topologies, as `claude|codex` release sets. Reviewed
+// bytes establish identity only; ownership comes from this list plus separate human approval, so
+// an arbitrary mix of individually known files is never attributed.
+//   current/r774/legacy: every distinct file of that release; mixed: the observed Claude R-774
+//   guard and tripwire beside the legacy installer; none: that client has no managed files.
+const REVIEWED_TOPOLOGIES = new Map();
+for (const set of ["current", "r774", "legacy"]) {
+  REVIEWED_TOPOLOGIES.set(`${set}|${set}`, set);
+  REVIEWED_TOPOLOGIES.set(`${set}|none`, set);
+  REVIEWED_TOPOLOGIES.set(`none|${set}`, set);
+}
+REVIEWED_TOPOLOGIES.set("mixed|legacy", "recognized-mixed");
+
 const claudeHooksDir = path.join(os.homedir(), ".claude", "hooks");
 const claudeSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
 const codexDir = path.join(os.homedir(), ".codex");
@@ -65,13 +81,62 @@ const args = new Set(process.argv.slice(2));
 const diagnosticMode = args.has("--diagnostic-json");
 const stageIds = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL",
   "SOURCE_VERIFY", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
-const previewStageIds = ["INPUT_SCOPE", "SOURCE_VERIFY", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION",
-  "APPROVAL", "STAGE_WRITES", "COMMIT_FILES", "REGISTER_HOOKS", "POST_VERIFY", "RECEIPT_COMMIT", "FINAL_REPORT"];
-function previewStages(firstFailedStage) {
-  const boundary = firstFailedStage ? previewStageIds.indexOf(firstFailedStage) : previewStageIds.indexOf("APPROVAL");
-  return previewStageIds.map((id, index) => ({ id, status: id === firstFailedStage ? "FAIL"
-    : index < boundary ? "PASS" : id === "APPROVAL" && !firstFailedStage ? "NOT_APPLICABLE" : "NOT_RUN" }));
+// ---- Shared hold model (R-774 review F-6) ---------------------------------------------------
+// One table names, for every closed hold class, the stage that failed, the stages proven before
+// it, who must act next, and whether that action needs an approval. The migration preview, the
+// install gate, and the --diagnostic-json report all read it, so the same held installation gets
+// the same cause, stage and next action from each. Effect flags stay operation-specific: a
+// preview never attempts writes, an installation may.
+class HoldError extends Error {
+  constructor(kind, message) { super(message); this.holdKind = kind; }
 }
+function hold(kind, message) { throw new HoldError(kind, message || HOLD_MESSAGES[kind]); }
+const DISCOVERED = ["INPUT_SCOPE", "OWNER_DISCOVERY"];
+const HOLDS = {
+  UNSAFE_TARGET: { failed: "INPUT_SCOPE", passed: [], action: "review-private-ownership", owner: "facilitator", target: "user-global-guard" },
+  SOURCE_INTEGRITY: { failed: "SOURCE_VERIFY", passed: ["INPUT_SCOPE"], action: "review-installer-source", owner: "facilitator", target: "source" },
+  SETTINGS_INVALID: { failed: "OWNER_DISCOVERY", passed: ["INPUT_SCOPE"], action: "review-private-settings", owner: "facilitator", target: "user-global-guard" },
+  UNKNOWN_MANAGED_BYTES: { failed: "OWNER_DISCOVERY", passed: ["INPUT_SCOPE"], action: "review-private-ownership", owner: "facilitator", target: "user-global-guard" },
+  OWNERSHIP_INVALID: { failed: "OWNER_BINDING", passed: DISCOVERED, action: "review-installer-receipt", owner: "facilitator", target: "user-global-guard" },
+  MIGRATION_TOPOLOGY_UNRECOGNIZED: { failed: "OWNER_BINDING", passed: DISCOVERED, action: "escalate-unreviewed-topology", owner: "facilitator", target: "user-global-guard" },
+  CLIENT_SELECTION_INCOMPLETE: { failed: "OWNER_BINDING", passed: DISCOVERED, action: "rerun-with-required-clients", owner: "aibl-installer", target: "user-global-guard" },
+  CONCURRENT_CHANGE: { failed: "STAGE_WRITES", passed: ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION", "APPROVAL", "SOURCE_VERIFY"],
+    action: "rerun-migration-preview", owner: "aibl-installer", target: "user-global-guard" },
+};
+const HOLD_MESSAGES = {
+  UNSAFE_TARGET: "A managed guard target or parent is a symlink or outside the selected home; no files were changed.",
+  SOURCE_INTEGRITY: "A reviewed compatibility identity or manifest does not match its pin. No files were changed.",
+  SETTINGS_INVALID: "A selected client's settings are not a valid JSON object. No files were changed; a facilitator reviews the file privately and never deletes it.",
+  UNKNOWN_MANAGED_BYTES: "A managed guard file has bytes that no reviewed release contains. No files were changed; do not delete or overwrite it. A facilitator inspects it privately.",
+  OWNERSHIP_INVALID: "Installer ownership receipt is invalid. No guard files were changed; review it before repair.",
+  MIGRATION_TOPOLOGY_UNRECOGNIZED: "The installed guard files are individually reviewed but not in a reviewed combination, so ownership cannot be attributed. No files were changed; escalate to the course team with the preview report.",
+  CLIENT_SELECTION_INCOMPLETE: "The reviewed installation spans clients that are not all selected. Select every client the preview names and preview again; no files were changed.",
+  CONCURRENT_CHANGE: "Managed guard state changed after ownership inspection. No installed bytes were replaced; preview again before any approval.",
+};
+function holdStages(passed, failed) {
+  return stageIds.map((id) => ({ id,
+    status: id === failed ? "FAIL" : passed.includes(id) ? id === "APPROVAL" ? "NOT_APPLICABLE" : "PASS" : "NOT_RUN",
+    ...(id === "APPROVAL" && passed.includes(id) ? { reason: "Caller authorization is outside this script." } : {}) }));
+}
+function holdFields(kind) {
+  const spec = HOLDS[kind];
+  return {
+    failureClass: kind, firstFailedStage: spec.failed,
+    lastGoodStage: spec.passed.filter((id) => id !== "APPROVAL").at(-1) || null,
+    stages: holdStages(spec.passed, spec.failed),
+    nextSafeAction: { action: spec.action, owner: spec.owner, targetClass: spec.target, approvalRequired: false },
+  };
+}
+// A failure that did not come from the table is classified once, here, for both operations.
+function holdKindOf(error) {
+  if (error?.holdKind) return error.holdKind;
+  const text = error?.message || "";
+  if (/symlink|outside the selected home/i.test(text)) return "UNSAFE_TARGET";
+  if (/compatibility identity|manifest hash|not pinned|pinned/i.test(text)) return "SOURCE_INTEGRITY";
+  if (/not valid JSON|must contain a JSON object/i.test(text)) return "SETTINGS_INVALID";
+  return null;
+}
+
 let activeStage = null;
 let passedStages = [];
 let rollbackState = "NOT_NEEDED";
@@ -80,20 +145,25 @@ let writesCommitted = false;
 let diagnosticSourceIdentity = null;
 let diagnosticProtection = null;
 let diagnosticClients = [];
+// Test seams act only when the caller names the exact disposable home AND that home is the
+// temporary directory or beneath it, so a real account can never trigger one.
+function disposableTestHome() {
+  const home = path.resolve(os.homedir());
+  const temp = path.resolve(os.tmpdir());
+  return process.env.AIBL_GUARD_TEST_HOME === home && (home === temp || home.startsWith(`${temp}${path.sep}`));
+}
 function enterStage(id) {
   if (!diagnosticMode) return;
   if (activeStage) passedStages.push(activeStage);
   activeStage = id;
-  const requested = process.env.AIBL_GUARD_TEST_FAIL_STAGE;
-  const home = path.resolve(os.homedir());
-  if (requested === id && process.env.AIBL_GUARD_TEST_HOME === home
-    && (home === path.resolve(os.tmpdir()) || home.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`))) {
+  if (process.env.AIBL_GUARD_TEST_FAIL_STAGE === id && disposableTestHome()) {
     throw new Error("Synthetic stage failure in disposable home");
   }
 }
-function diagnosticReport(failed) {
-  const completed = failed ? passedStages : [...passedStages, activeStage].filter(Boolean);
-  const firstFailedStage = failed ? activeStage || "INPUT_SCOPE" : null;
+function diagnosticReport(failed, error = null) {
+  const typedHold = failed && error?.holdKind && HOLDS[error.holdKind] ? holdFields(error.holdKind) : null;
+  const completed = failed ? (typedHold ? HOLDS[error.holdKind].passed : passedStages) : [...passedStages, activeStage].filter(Boolean);
+  const firstFailedStage = failed ? (typedHold ? typedHold.firstFailedStage : activeStage || "INPUT_SCOPE") : null;
   const failedIndex = firstFailedStage ? stageIds.indexOf(firstFailedStage) : -1;
   const stages = stageIds.map((id) => ({ id, status: firstFailedStage && id === firstFailedStage ? "FAIL"
     : completed.includes(id) ? id === "APPROVAL" ? "NOT_APPLICABLE" : "PASS" : "NOT_RUN",
@@ -114,11 +184,11 @@ function diagnosticReport(failed) {
         : APPS[client] ? "unverified" : "not selected",
       ownership: writesCommitted && diagnosticClients.includes(client) ? "installer-managed" : "unverified",
     }])),
-    stages,
+    stages: typedHold ? typedHold.stages : stages,
     lastGoodStage: completed.filter((id) => id !== "APPROVAL").at(-1) || null,
     firstFailedStage,
-    failureClass,
-    nextSafeAction: failed ? { action: rollbackState === "FAILED" ? "manual-recovery" : "review-and-retry", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true } : null,
+    failureClass: typedHold ? typedHold.failureClass : failureClass,
+    nextSafeAction: typedHold ? typedHold.nextSafeAction : failed ? { action: rollbackState === "FAILED" ? "manual-recovery" : "review-and-retry", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true } : null,
     approvalState: "EXTERNAL_AUTHORIZATION_UNVERIFIED",
     writesAttempted, writesCommitted, rollback: rollbackState,
     sourceIdentity: diagnosticSourceIdentity,
@@ -182,22 +252,17 @@ if (isMainModule()) {
   if (diagnosticMode) console.log = (...parts) => process.stderr.write(`${parts.join(" ")}\n`);
   main().then(() => { if (diagnosticMode) process.stdout.write(`${JSON.stringify(diagnosticReport(false))}\n`); }).catch((error) => {
   if (diagnosticMode) {
-    process.stdout.write(`${JSON.stringify(diagnosticReport(true))}\n`);
+    process.stdout.write(`${JSON.stringify(diagnosticReport(true, error))}\n`);
     process.exitCode = 1;
     return;
   }
   if (args.has("--migration-preview") && args.has("--json")) {
-    const unsafe = /symlink|outside the selected home/i.test(error.message || "");
-    const invalidSettings = /not valid JSON|must contain a JSON object/i.test(error.message || "");
-    const sourceIntegrity = /compatibility identity|manifest hash|pinned/i.test(error.message || "");
-    const firstFailedStage = sourceIntegrity ? "SOURCE_VERIFY" : unsafe ? "INPUT_SCOPE" : "OWNER_DISCOVERY";
-    const lastGoodStage = firstFailedStage === "INPUT_SCOPE" ? null : firstFailedStage === "SOURCE_VERIFY" ? "INPUT_SCOPE" : "SOURCE_VERIFY";
+    const kind = holdKindOf(error);
+    const fields = kind ? holdFields(kind) : { failureClass: "INSPECTION_BLOCKED", firstFailedStage: "OWNER_DISCOVERY", lastGoodStage: "INPUT_SCOPE",
+      stages: holdStages(["INPUT_SCOPE"], "OWNER_DISCOVERY"),
+      nextSafeAction: { action: "review-private-ownership", owner: "facilitator", targetClass: "user-global-guard", approvalRequired: false } };
     process.stdout.write(`${JSON.stringify({ schemaVersion: 1, operation: "migration-preview", scope: "user-global",
-      eligibility: "hold", ownership: "unknown", proposedSource: null, approvalClass: "facilitator-review",
-      lastGoodStage, firstFailedStage, stages: previewStages(firstFailedStage),
-      failureClass: sourceIntegrity ? "SOURCE_INTEGRITY" : unsafe ? "UNSAFE_TARGET" : invalidSettings ? "SETTINGS_INVALID" : "INSPECTION_BLOCKED",
-      nextSafeAction: { action: sourceIntegrity ? "review-installer-source" : "review-private-ownership",
-        owner: "facilitator", targetClass: sourceIntegrity ? "source" : "user-global-guard", approvalRequired: false },
+      eligibility: "hold", ownership: "unknown", proposedSource: null, approvalClass: "facilitator-review", ...fields,
       writesAttempted: false, writesCommitted: false, verified: false,
     })}\n`);
     process.exitCode = 1;
@@ -256,33 +321,24 @@ async function main() {
   if (args.has("--migration-preview")) {
     if (args.has("--check") || args.has("--session-check") || diagnosticMode || !args.has("--json"))
       fail("Use --migration-preview with --json only.");
-    const ownership = inspectOwnership(manifest, { requireSelected: false });
-    const receiptFree = ownership.status === "absent" ? classifyReceiptFree(manifest) : null;
-    const eligibility = ownership.status === "installer-upgrade-required" ? "upgrade-required"
-      : ownership.status === "installer-managed" ? "already-managed"
-        : receiptFree?.kind === "recognized-mixed" && APPS.claude && APPS.codex ? "eligible-migration"
-          : receiptFree?.kind === "empty" ? "new-install"
-            : receiptFree?.kind === "current-no-receipt" ? "receipt-repair"
-              : "hold";
-    const failureClass = eligibility !== "hold" ? "NONE"
-      : ownership.status === "invalid" ? "OWNERSHIP_INVALID"
-        : receiptFree?.kind === "unknown-bytes" ? "UNKNOWN_MANAGED_BYTES"
-          : receiptFree?.kind === "malformed-settings" ? "SETTINGS_INVALID" : "MIGRATION_TOPOLOGY_UNRECOGNIZED";
-    const firstFailedStage = eligibility !== "hold" ? null : ownership.status === "invalid" ? "OWNER_BINDING"
-      : failureClass === "MIGRATION_TOPOLOGY_UNRECOGNIZED" ? "INSTALLED_INSPECTION" : "OWNER_DISCOVERY";
-    const lastGoodStage = firstFailedStage ? previewStageIds[previewStageIds.indexOf(firstFailedStage) - 1] : "INSTALLED_INSPECTION";
-    const nextAction = eligibility === "hold" ? "review-private-ownership"
-      : eligibility === "already-managed" ? "runtime-proof" : "seek-separate-approval";
+    const decision = decideInstallState(manifest);
+    const { eligibility } = decision;
+    const held = eligibility === "hold" ? holdFields(decision.holdKind) : null;
+    const nextAction = held ? held.nextSafeAction
+      : { action: eligibility === "already-managed" ? "runtime-proof" : "seek-separate-approval", owner: "aibl-installer",
+        targetClass: "user-global-guard", approvalRequired: eligibility !== "already-managed" };
+    const passed = ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION"];
     process.stdout.write(`${JSON.stringify({ schemaVersion: 1, operation: "migration-preview", scope: "user-global",
       requiredClients: Object.entries(APPS).filter(([, selected]) => selected).map(([client]) => client),
-      ownership: ownership.status === "absent" ? receiptFree.kind : ownership.status,
-      ownershipClients: ownership.receipt?.clients || [],
+      ownership: decision.label,
+      ownershipClients: decision.ownership.receipt?.clients || [],
+      ...(decision.topology ? { topology: decision.topology, topologyClients: decision.requiredClients } : {}),
       eligibility, proposedSource: manifest.ref, preservation: ["unrelated-hooks", "settings-keys", "project-configuration", "file-modes"],
       approvalClass: eligibility === "eligible-migration" ? "separate-human-migration-approval" : "separate-human-install-approval",
       writesAttempted: false, writesCommitted: false, verified: false,
-      lastGoodStage, firstFailedStage, stages: previewStages(firstFailedStage), failureClass,
-      nextSafeAction: { action: nextAction, owner: eligibility === "hold" ? "facilitator" : "aibl-installer",
-        targetClass: "user-global-guard", approvalRequired: nextAction === "seek-separate-approval" },
+      ...(held ? { failureClass: held.failureClass, firstFailedStage: held.firstFailedStage, lastGoodStage: held.lastGoodStage, stages: held.stages }
+        : { failureClass: "NONE", firstFailedStage: null, lastGoodStage: "INSTALLED_INSPECTION", stages: holdStages(passed.concat("APPROVAL"), null) }),
+      nextSafeAction: nextAction,
     }, null, 2)}\n`);
     if (eligibility === "hold") process.exitCode = 1;
     return;
@@ -314,18 +370,10 @@ async function main() {
   }
 
   enterStage("OWNER_DISCOVERY");
-  const existingOwnership = inspectOwnership(manifest, { requireSelected: false, verifySelectedBinding: false });
-  const receiptFree = existingOwnership.status === "absent" ? classifyReceiptFree(manifest) : null;
+  const decision = decideInstallState(manifest);
+  const receiptFree = decision.receiptFree || null;
   enterStage("OWNER_BINDING");
-  if (existingOwnership.status === "invalid") fail("Installer ownership receipt is invalid. No guard files were changed; review it before repair.");
-  if (receiptFree && !["empty", "current-no-receipt", "recognized-mixed"].includes(receiptFree.kind))
-    fail("Receipt-free managed files cannot be attributed to an approved migration. No files were changed.");
-  if (receiptFree?.kind === "recognized-mixed" && (!APPS.claude || !APPS.codex))
-    fail("The recognized mixed installation spans both clients. Select both approved clients for migration; no files were changed.");
-  if (existingOwnership.status === "installer-upgrade-required"
-    && existingOwnership.receipt.clients.some((client) => !APPS[client])) {
-    fail("The previous installer receipt covers another client. Select both approved clients for this version upgrade; no files were changed.");
-  }
+  if (decision.holdKind) hold(decision.holdKind);
   enterStage("INSTALLED_INSPECTION");
   const before = inspectInstalledGuard(manifest);
   enterStage("APPROVAL");
@@ -385,10 +433,7 @@ async function main() {
   if (APPS.codex) validateCodexHooksMergeTarget(readJsonObjectIfExists(codexHooksPath, "~/.codex/hooks.json"));
 
   enterStage("STAGE_WRITES");
-  const testHome = path.resolve(os.homedir());
-  if (receiptFree && process.env.AIBL_GUARD_TEST_CONCURRENT_CHANGE === "1"
-    && process.env.AIBL_GUARD_TEST_HOME === testHome
-    && testHome.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`)
+  if (receiptFree && process.env.AIBL_GUARD_TEST_CONCURRENT_CHANGE === "1" && disposableTestHome()
     && fs.existsSync(claudeSettingsPath)) fs.appendFileSync(claudeSettingsPath, "\n");
   // 2. Stage + atomically swap only the files that differ. Both clients use the same pinned
   // canonical bytes plus narrowly scoped, checksum-pinned local supplements/adapters.
@@ -420,7 +465,7 @@ async function main() {
   ]);
   try {
     if (receiptFree && classifyReceiptFree(manifest).fingerprint !== receiptFree.fingerprint)
-      fail("Managed guard state changed after ownership inspection. No installed bytes were replaced.");
+      hold("CONCURRENT_CHANGE");
     enterStage("COMMIT_FILES");
     writesAttempted = true;
     // 3. Replace reviewed bytes; the transaction below also covers settings, launchers and receipt.
@@ -467,7 +512,7 @@ async function main() {
     ].join("\n"));
   }
   enterStage("RECEIPT_COMMIT");
-  writeOwnershipReceipt(manifest, existingOwnership);
+  writeOwnershipReceipt(manifest, decision.ownership);
   const committedOwnership = inspectOwnership(manifest);
   if (committedOwnership.status !== "installer-managed") {
     fail("The committed receipt did not verify against both requested client bindings.");
@@ -481,7 +526,7 @@ async function main() {
   } catch (error) {
     rollbackState = transaction.rollback();
     writesCommitted = false;
-    throw new Error(`${error.message || String(error)} Scoped rollback: ${rollbackState}.`);
+    throw Object.assign(new Error(`${error.message || String(error)} Scoped rollback: ${rollbackState}.`), error?.holdKind ? { holdKind: error.holdKind } : {});
   } finally {
     transaction.release();
   }
@@ -1139,6 +1184,21 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     receiptPath: normalizePath(ownershipReceiptPath), receipt };
 }
 
+function fileLabels(name, bytes, manifest) {
+  return [["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities]].filter(([, source]) => {
+    const wanted = source.files?.[name] || source.local_files?.[name];
+    return wanted && (sha256(bytes) === wanted || (source.local_files?.[name] && sha256(normalizeLf(bytes)) === wanted));
+  }).map(([label]) => label);
+}
+
+function releaseSetFor(client, state) {
+  const labels = (client === "claude" ? CLAUDE_DISTINCT : CODEX_DISTINCT).map((name) => state.get(`${client}/${name}`));
+  if (labels.some((entry) => entry === "missing")) return "partial";
+  for (const set of ["current", "r774", "legacy"]) if (labels.every((entry) => entry.includes(set))) return set;
+  if (client === "claude" && labels[0].includes("r774") && labels[1].includes("r774") && labels[2].includes("legacy")) return "mixed";
+  return "unreviewed";
+}
+
 function classifyReceiptFree(manifest) {
   const controlled = [
     ...FILES.map((name) => ["claude", name, path.join(claudeHooksDir, name)]),
@@ -1148,23 +1208,18 @@ function classifyReceiptFree(manifest) {
   ];
   const state = new Map();
   const fingerprint = crypto.createHash("sha256");
-  let anySelected = false;
-  let unknownSelected = false;
+  const present = { claude: false, codex: false };
+  const unknown = { claude: false, codex: false };
   for (const [client, name, target] of controlled) {
     const stat = statWithoutSymlink(target);
     const bytes = stat ? fs.readFileSync(target) : null;
     fingerprint.update(`${client}/${name}:${stat ? stat.mode & 0o777 : "missing"}:${bytes?.length ?? 0}:`);
     if (bytes) fingerprint.update(bytes);
     if (!bytes) { state.set(`${client}/${name}`, "missing"); continue; }
-    if (APPS[client]) anySelected = true;
-    const identities = [
-      ["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities],
-    ].filter(([, source]) => {
-      const wanted = source.files?.[name] || source.local_files?.[name];
-      return wanted && (sha256(bytes) === wanted || (source.local_files?.[name] && sha256(normalizeLf(bytes)) === wanted));
-    }).map(([label]) => label);
-    if (identities.length === 0 && APPS[client]) unknownSelected = true;
-    state.set(`${client}/${name}`, identities);
+    present[client] = true;
+    const labels = fileLabels(name, bytes, manifest);
+    if (labels.length === 0) unknown[client] = true;
+    state.set(`${client}/${name}`, labels);
   }
   let settingsValid = true;
   let orphanRegistration = false;
@@ -1178,24 +1233,58 @@ function classifyReceiptFree(manifest) {
       try {
         const parsed = JSON.parse(bytes.toString("utf8"));
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) settingsValid = false;
-        else if (!anySelected && /secrets-(?:guard|tripwire)|aws-credential/.test(JSON.stringify(parsed.hooks || {})))
-          orphanRegistration = true;
+        else if (!(APPS.claude && present.claude) && !(APPS.codex && present.codex)
+          && /secrets-(?:guard|tripwire)|aws-credential/.test(JSON.stringify(parsed.hooks || {}))) orphanRegistration = true;
       } catch { settingsValid = false; }
     }
   }
-  let kind = "unrecognized";
-  if (!settingsValid) kind = "malformed-settings";
-  else if (unknownSelected) kind = "unknown-bytes";
-  else if (orphanRegistration && !anySelected) kind = "unrecognized";
-  else if (["claude/secrets-guard.js", "claude/secrets-tripwire.js"].every((key) => state.get(key)?.includes("r774"))
-    && state.get("claude/install.mjs")?.includes("legacy")
-    && ["codex/secrets-guard.js", "codex/secrets-tripwire.js"].every((key) => state.get(key)?.includes("legacy"))
-    && controlled.every(([client, name]) => state.get(`${client}/${name}`) !== "missing")
-    && inspectClaudeGuard(priorManifest).issues.every((issue) => issue === "install.mjs does not match the pinned release.")
-    && inspectCodexGuard(legacyIdentities).healthy) kind = "recognized-mixed";
-  else if (!anySelected) kind = "empty";
-  else if (inspectInstalledGuard(manifest).healthy) kind = "current-no-receipt";
-  return { kind, fingerprint: fingerprint.digest("hex") };
+  const finish = (kind, extra = {}) => ({ kind, fingerprint: fingerprint.digest("hex"), requiredClients: [], topology: null, ...extra });
+  if (!settingsValid) return finish("malformed-settings");
+  // An unselected client's own unrecognized files are preserved untouched and never block.
+  const releases = { claude: "none", codex: "none" };
+  for (const client of ["claude", "codex"]) {
+    if (!present[client]) continue;
+    if (APPS[client] && unknown[client]) return finish("unknown-bytes");
+    const set = releaseSetFor(client, state);
+    releases[client] = !APPS[client] && ["partial", "unreviewed"].includes(set) ? "none" : set;
+  }
+  const selectedPresent = ["claude", "codex"].some((client) => APPS[client] && present[client]);
+  if (orphanRegistration && !selectedPresent) return finish("unrecognized");
+  if (releases.claude === "none" && releases.codex === "none") return finish("empty");
+  const topology = REVIEWED_TOPOLOGIES.get(`${releases.claude}|${releases.codex}`);
+  if (!topology) return finish("unreviewed-topology");
+  const requiredClients = ["claude", "codex"].filter((client) => releases[client] !== "none");
+  const kind = topology === "recognized-mixed" ? "recognized-mixed"
+    : topology === "legacy" ? "legacy-no-receipt" : topology === "r774" ? "prior-no-receipt"
+      : inspectInstalledGuard(manifest).healthy ? "current-no-receipt" : "current-registration-repair";
+  return finish(kind, { requiredClients, topology });
+}
+
+// The single decision both the migration preview and the installation gate consume.
+function decideInstallState(manifest) {
+  let ownership;
+  try { ownership = inspectOwnership(manifest, { requireSelected: false, verifySelectedBinding: false }); }
+  catch (error) { if (holdKindOf(error) === "SETTINGS_INVALID") return { ownership: { status: "unknown" }, label: "unknown", eligibility: "hold", holdKind: "SETTINGS_INVALID" }; throw error; }
+  const selected = Object.keys(APPS).filter((client) => APPS[client]);
+  if (ownership.status === "invalid")
+    return { ownership, label: "invalid", eligibility: "hold", holdKind: "OWNERSHIP_INVALID" };
+  if (ownership.status === "installer-managed")
+    return { ownership, label: ownership.status, eligibility: inspectInstalledGuard(manifest).healthy ? "already-managed" : "installed-repair", holdKind: null };
+  if (ownership.status === "installer-upgrade-required") {
+    const incomplete = ownership.receipt.clients.some((client) => !APPS[client]);
+    return { ownership, label: ownership.status, eligibility: incomplete ? "hold" : "upgrade-required",
+      holdKind: incomplete ? "CLIENT_SELECTION_INCOMPLETE" : null, requiredClients: ownership.receipt.clients };
+  }
+  const receiptFree = classifyReceiptFree(manifest);
+  const base = { ownership, receiptFree, label: receiptFree.kind, topology: receiptFree.topology, requiredClients: receiptFree.requiredClients };
+  if (receiptFree.kind === "empty") return { ...base, eligibility: "new-install", holdKind: null };
+  if (receiptFree.kind === "malformed-settings") return { ...base, eligibility: "hold", holdKind: "SETTINGS_INVALID" };
+  if (receiptFree.kind === "unknown-bytes") return { ...base, eligibility: "hold", holdKind: "UNKNOWN_MANAGED_BYTES" };
+  if (receiptFree.kind === "unrecognized" || receiptFree.kind === "unreviewed-topology")
+    return { ...base, eligibility: "hold", holdKind: "MIGRATION_TOPOLOGY_UNRECOGNIZED" };
+  if (receiptFree.requiredClients.some((client) => !selected.includes(client)))
+    return { ...base, eligibility: "hold", holdKind: "CLIENT_SELECTION_INCOMPLETE" };
+  return { ...base, eligibility: receiptFree.kind === "current-no-receipt" ? "receipt-repair" : "eligible-migration", holdKind: null };
 }
 
 function writeOwnershipReceipt(manifest, previous) {
@@ -1222,37 +1311,37 @@ function loadManifest() {
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   } catch (error) {
-    fail(`Cannot read the guard manifest at ${manifestPath}. (${error.message || error})`);
+    hold("SOURCE_INTEGRITY", `Cannot read the guard manifest at ${manifestPath}. (${error.message || error})`);
   }
   if (!manifest.ref || manifest.ref === "REPLACE_AT_RELEASE") {
-    fail([
+    hold("SOURCE_INTEGRITY", [
       "The secrets guard is not pinned to a released version yet (manifest `ref` is unset).",
       "This build must not install an unreviewed guard. Ask your program's channel to",
       "publish the reviewed hooks/secrets-guard.manifest.json.",
     ].join("\n"));
   }
   if (!manifest.files || typeof manifest.files !== "object") {
-    fail("Guard manifest has no `files` hashes. Refusing to install an unverified guard.");
+    hold("SOURCE_INTEGRITY", "Guard manifest has no `files` hashes. Refusing to install an unverified guard.");
   }
   if (!manifest.local_files || typeof manifest.local_files !== "object") {
-    fail("Guard manifest has no `local_files` hashes. Refusing to install unverified supplements or adapters.");
+    hold("SOURCE_INTEGRITY", "Guard manifest has no `local_files` hashes. Refusing to install unverified supplements or adapters.");
   }
   return manifest;
 }
 
 function readPinnedIdentity(name, manifest) {
   const expected = manifest.local_files?.[name];
-  if (typeof expected !== "string") fail("A reviewed compatibility identity is not pinned. No files were changed.");
+  if (typeof expected !== "string") hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is not pinned. No files were changed.");
   let bytes;
   try { bytes = fs.readFileSync(path.join(hooksSourceDir, name)); }
-  catch { fail("A reviewed compatibility identity is unavailable. No files were changed."); }
+  catch { hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is unavailable. No files were changed."); }
   if (!matchesReviewedHash(bytes, expected))
-    fail("A reviewed compatibility identity does not match its manifest hash. No files were changed.");
+    hold("SOURCE_INTEGRITY", "A reviewed compatibility identity does not match its manifest hash. No files were changed.");
   let value;
   try { value = JSON.parse(bytes.toString("utf8")); }
-  catch { fail("A reviewed compatibility identity is malformed. No files were changed."); }
+  catch { hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is malformed. No files were changed."); }
   if (!value || typeof value.ref !== "string" || !value.files || !value.local_files)
-    fail("A reviewed compatibility identity is incomplete. No files were changed.");
+    hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is incomplete. No files were changed.");
   return value;
 }
 
@@ -1306,8 +1395,10 @@ function beginGuardTransaction(targets) {
     commit() { /* The receipt is verified by the caller before success is reported. */ },
     rollback() {
       let restored = true;
+      let simulateFailure = process.env.AIBL_GUARD_TEST_FAIL_ROLLBACK === "1" && disposableTestHome();
       for (const item of snapshots.reverse()) {
         try {
+          if (simulateFailure) { simulateFailure = false; throw new Error("Synthetic rollback failure in disposable home"); }
           const current = statWithoutSymlink(item.target);
           if (!item.exists) {
             if (current) fs.rmSync(item.target);
@@ -1355,10 +1446,10 @@ function assertGlobalTargetsSafe() {
 function statWithoutSymlink(target) {
   const homeRoot = os.homedir();
   const relative = path.relative(homeRoot, target);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Guard target is outside the selected home.");
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new HoldError("UNSAFE_TARGET", "Guard target is outside the selected home.");
   let cursor = target;
   while (cursor !== path.dirname(homeRoot)) {
-    try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error("A managed guard target or parent is a symlink; no files were changed."); }
+    try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new HoldError("UNSAFE_TARGET", "A managed guard target or parent is a symlink; no files were changed."); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
     cursor = path.dirname(cursor);
   }

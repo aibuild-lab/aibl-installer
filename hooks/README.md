@@ -27,22 +27,70 @@ metadata and does not grant authority to execute that checkout.
 
 The earlier R-774 receipt is checked against its exact preserved manifest and reported as
 `installer-upgrade-required`. Its old registration is valid for that version but does not prove
-built-in Read coverage. A receipt-free mix of pinned R-774 Claude guard and tripwire bytes with
-pinned legacy installer and Codex bytes can be previewed without changing files. From the verified
-installer source checkout, run:
+built-in Read coverage. Legacy on-disk health is a statement about the legacy release only.
+
+### Receipt-free installations
+
+An installation with no ownership receipt is never attributed by guesswork. The installer
+recognizes a closed list of **reviewed topologies**: every version-distinct file (the guard, the
+tripwire and, for Claude, the installer) belongs to one reviewed release, and the clients together
+form one of these combinations. Reviewed bytes establish identity only; ownership and permission
+come from the list plus a separate human approval.
+
+| Topology (`--migration-preview --json`) | Claude | Codex | Apps the run must select |
+|---|---|---|---|
+| `legacy` (all legacy) | pinned legacy | pinned legacy, or none | every app that has files |
+| `r774` (receipt absent) | R-774 files | R-774 files, or none | every app that has files |
+| `current` (current bytes, no receipt or damaged registration) | current | current, or none | every app that has files |
+| `recognized-mixed` | R-774 guard and tripwire, legacy installer | legacy | both |
+
+A single-client legacy, R-774 or current installation (the other app has no managed files) is
+the same topology for that one app. Anything else, including a current Claude guard beside legacy
+Codex files, a missing tripwire, or any file that is not byte-identical to a reviewed release, is a
+hold.
+
+From the verified installer source checkout, with the same `--claude` or `--codex` flag the
+install will use:
 
 ```bash
 node hooks/refresh-guard.mjs --migration-preview --json
 ```
 
-An `eligible-migration` result is a proposal. After separate human approval covering both clients,
-run `node hooks/refresh-guard.mjs` from that same reviewed checkout. A chosen single-client install
-remains `--claude` or `--codex`; a recognized two-client mix requires both clients. The installer
-rechecks ownership under its transaction and stops on unknown bytes, unsafe targets, malformed
-settings, or concurrent change. It verifies files and registration before writing a new receipt.
-Fully quit and reopen each selected client, inspect or trust its exact hooks, then run allowed and
-protected synthetic controls. Healthy disk state alone does not prove runtime activation. Do not
-delete settings or write a receipt by hand.
+Preview changes nothing. `eligibility: eligible-migration` is a proposal naming the `topology`
+and `topologyClients`; it is not authorization and not a healthy result. After separate human
+approval covering every named app, run `node hooks/refresh-guard.mjs` from that same reviewed
+checkout. The installer rechecks the same decision under its transaction, preserves unrelated
+settings, hooks, permissions, project configuration and file modes, verifies files and registration,
+and only then writes the receipt. A failed late step restores the exact prior files, settings, modes
+and receipt state in reverse order; if restoration itself fails the report says `rollback: FAILED`
+and asks for manual recovery. Fully quit and reopen each selected client, inspect or trust its exact
+hooks, then run the allowed and protected synthetic controls: healthy disk state alone does not prove
+runtime activation. After a migration the Agent Native OS inspector reports `installer-managed` and
+writes nothing.
+
+### Held installations
+
+A hold stops before any write. The preview and the installation report the same class, first failed
+stage, last proven stage, downstream `NOT_RUN` stages and next action, and no hold ever recommends
+approving or retrying an installation whose owner is unknown. Do not delete settings, edit or rename
+managed files, or write a receipt by hand to clear a hold.
+
+Facilitator procedure for every hold: run `--migration-preview --json` and `--check --json` (both
+read-only), record `failureClass`, `ownership` and `firstFailedStage`, then follow the row below. When
+the row says escalate, send the class plus the SHA-256 of each managed file (`shasum -a 256` or
+`Get-FileHash`; never file contents) to the course team, who decide whether a new reviewed topology
+is needed.
+
+| `failureClass` | Meaning | Next action |
+|---|---|---|
+| `UNKNOWN_MANAGED_BYTES` | A managed file matches no reviewed release (edited, tool-modified, or newer than this installer). | Confirm the installer checkout is the reviewed current one; if it is older, update it first. Otherwise escalate. |
+| `MIGRATION_TOPOLOGY_UNRECOGNIZED` | Files are individually reviewed but not a reviewed combination, or a registration points at nothing. | Escalate. |
+| `SETTINGS_INVALID` | A selected app's `settings.json` or `hooks.json` is not a valid JSON object. | Repair that file by hand with the student (never delete it), then preview again. |
+| `OWNERSHIP_INVALID` | An ownership receipt does not match this installer. | Escalate; do not recreate the receipt. |
+| `UNSAFE_TARGET` | A managed path or parent is a symlink or outside the selected home. | Inspect privately; do not follow or replace it. |
+| `SOURCE_INTEGRITY` | This installer checkout does not match its own pins. | Re-obtain the installer from its reviewed source; never edit a pin. |
+| `CLIENT_SELECTION_INCOMPLETE` | The reviewed installation spans apps the run did not select. | Include every app the preview names and preview again. No approval is involved in choosing. |
+| `CONCURRENT_CHANGE` | Another process changed managed files during the attempt; nothing was replaced. | Quit the apps, preview again, then seek a fresh approval. |
 
 Installation snapshots its managed files, settings, backups, launchers, and receipt under a shared
 writer lock. A failed late step restores and reads back that scoped snapshot. `--diagnostic-json`
@@ -88,10 +136,18 @@ class deterministically, whether or not the model "remembers." (Anthropic issue 
   (camp-hq W-#234). It also blocks a literal vendor-shaped key embedded in a shell command
   (`printf`, heredoc, `node -e writeFileSync`, inline `Authorization: Bearer …`) and - via the
   `Write`/`Edit`/`MultiEdit`/`NotebookEdit` matcher - a real key written straight into a file.
-  Claude's built-in `Read` is also matched. It checks `tool_input.file_path` and any locally
-  resolvable symlink target using filesystem metadata only, and returns a fixed path-free denial
-  for protected names and secret directories. Exact `.env.example`, `.env.sample`, `.env.template`,
-  and `.env.dist` files remain readable unless another protected directory rule applies. Native
+  Claude's built-in `Read` is also matched. It classifies the path as supplied, as the kernel
+  would resolve it (symlinks followed before `..`, a leading `//` kept) and as a client would
+  collapse it, using filesystem metadata only (the target is never opened), and returns a fixed
+  path-free denial. A result that cannot be established stops safely. The protected categories match
+  the shell rules for the same names: `.env`-style files and directories (`prod.env`, `.env.d/x`),
+  key and certificate files including backups (`id_rsa.bak`, `mykey.pem.bak`, `.p12`, `.pfx`,
+  `.jks`, `.keystore`), credentials files (`aws-credentials.csv`), and `secrets` directories.
+  Exact `.env.example`, `.env.sample`, `.env.template` and `.env.dist` files remain readable, a
+  misleading suffix such as `.env.example.local` does not, and a public `.pub` key is not treated as
+  private material. `hooks/secrets-guard.read-paths.test.mjs` holds the shared Read/shell matrix,
+  including the few deliberate asymmetries. POSIX tests do not qualify Windows;
+  `docs/windows-read-walkthrough.md` lists the unexecuted native Windows gate. Native
   `permissions.deny` rules remain additional protection. This hook does not isolate arbitrary
   external processes or unrelated file tools.
   Direct `infisical dynamic-secrets` and `infisical pam` invocations are denied because they can
