@@ -314,6 +314,18 @@ function agree(label, home, flags, want) {
     && JSON.stringify(preview.nextSafeAction) === JSON.stringify(apply.nextSafeAction) && snapshot(home) === before);
 }
 
+{
+  // A failure with no typed cause is reported honestly by stage: before any approval or effect it is an
+  // unidentified installation (reviewed, never "approve and retry"); after approval a retry needs approval.
+  const home = receiptFreeHome("recognized-mixed");
+  const early = json(run(home, ["--diagnostic-json"], { AIBL_GUARD_TEST_HOME: home, AIBL_GUARD_TEST_FAIL_STAGE: "OWNER_DISCOVERY" }));
+  check("an untyped failure before approval names private review, not approve-and-retry", early?.firstFailedStage === "OWNER_DISCOVERY"
+    && early.nextSafeAction.action === "review-private-ownership" && early.nextSafeAction.approvalRequired === false, JSON.stringify(early?.nextSafeAction));
+  const late = json(run(home, ["--diagnostic-json"], { AIBL_GUARD_TEST_HOME: home, AIBL_GUARD_TEST_FAIL_STAGE: "REGISTER_HOOKS" }));
+  check("a failure after approval keeps review-and-retry with approval and a restored rollback", late?.firstFailedStage === "REGISTER_HOOKS"
+    && late.nextSafeAction.action === "review-and-retry" && late.nextSafeAction.approvalRequired === true && late.rollback === "RESTORED");
+}
+
 try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
 console.log(`\n${checks - failures.length}/${checks} history checks passed`);
 process.exit(failures.length ? 1 : 0);

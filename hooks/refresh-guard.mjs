@@ -188,7 +188,14 @@ function diagnosticReport(failed, error = null) {
     lastGoodStage: completed.filter((id) => id !== "APPROVAL").at(-1) || null,
     firstFailedStage,
     failureClass: typedHold ? typedHold.failureClass : failureClass,
-    nextSafeAction: typedHold ? typedHold.nextSafeAction : failed ? { action: rollbackState === "FAILED" ? "manual-recovery" : "review-and-retry", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true } : null,
+    // A failed rollback always needs manual recovery. A failure before any approval or effect with no
+    // typed cause is an unidentified installation: it is reviewed, never offered an approve-and-retry.
+    nextSafeAction: !failed ? null
+      : rollbackState === "FAILED" ? { action: "manual-recovery", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true }
+        : typedHold ? typedHold.nextSafeAction
+          : ["INPUT_SCOPE", "OWNER_DISCOVERY", "OWNER_BINDING", "INSTALLED_INSPECTION"].includes(firstFailedStage)
+            ? { action: "review-private-ownership", owner: "facilitator", targetClass: "user-global-guard", approvalRequired: false }
+            : { action: "review-and-retry", owner: "aibl-installer", targetClass: "user-global-guard", approvalRequired: true },
     approvalState: "EXTERNAL_AUTHORIZATION_UNVERIFIED",
     writesAttempted, writesCommitted, rollback: rollbackState,
     sourceIdentity: diagnosticSourceIdentity,
