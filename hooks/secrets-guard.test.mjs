@@ -11,6 +11,8 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), 'secrets-guard.js');
 const FAKE_ANTHROPIC = 'sk-ant-' + 'api03-' + 'A1b2C3d4E5'.repeat(6);
@@ -28,6 +30,7 @@ function decision(tool, arg) {
   // Bash/PowerShell take a command string; Write/Edit take a tool_input (string -> {content}).
   const tool_input = WRITE_TOOLS.includes(tool)
     ? (typeof arg === 'string' ? { content: arg } : arg)
+    : tool === 'Read' ? arg
     : { command: arg };
   const r = spawnSync('node', [HOOK], {
     input: JSON.stringify({ tool_name: tool, tool_input }),
@@ -39,6 +42,21 @@ function decision(tool, arg) {
 
 // [tool, command, expected]
 const CASES = [
+  // Read reaches this hook before any file access. No target content is opened by this test.
+  ['Read', { file_path: '.env' }, 'deny'],
+  ['Read', { file_path: 'C:\\Users\\student\\project\\.env' }, 'deny'],
+  ['Read', { file_path: 'C:\\Users\\student\\project\\..\\secrets\\notes.txt' }, 'deny'],
+  ['Read', { file_path: '\\\\server\\share\\secrets\\notes.txt' }, 'deny'],
+  ['Read', { file_path: 'secrets/nested/notes.txt' }, 'deny'],
+  ['Read', { file_path: '.env.example.local' }, 'deny'],
+  ['Read', { file_path: '.env.example' }, 'allow'],
+  ['Read', { file_path: '.env.sample' }, 'allow'],
+  ['Read', { file_path: '.env.template' }, 'allow'],
+  ['Read', { file_path: '.env.dist' }, 'allow'],
+  ['Read', { file_path: '/proc/self/environ' }, 'deny'],
+  ['Read', { file_path: 'README.md' }, 'allow'],
+  ['Read', {}, 'deny'],
+  ['Read', { file_path: 42 }, 'deny'],
   // --- real-workflow ALLOW: $(op read ...) injection must never be blocked ---
   ['Bash', `n8n --url "$(op read 'op://Agent Vault/N8N Instance/url')/api/v1" --key "$(op read 'op://Agent Vault/N8N API Key/credential')"`, 'allow'],
   ['Bash', `export APIFY_TOKEN=$(op read "op://Agent Vault/Apify API Token/credential")`, 'allow'],
@@ -100,6 +118,13 @@ const CASES = [
   ['Bash', 'printenv PATH', 'allow'],
   ['Bash', 'env FOO=bar npm start', 'allow'],
   ['Bash', 'cat .env.example', 'allow'],
+  ['Bash', 'cat .env.example.local', 'deny'],
+  ['Bash', 'head -n 5 .env.example', 'allow'],
+  ['Bash', 'cat -n .env.example', 'allow'],
+  ['Bash', 'cat README.md .env.example', 'allow'],
+  ['Bash', 'cat .env.example .env.sample', 'allow'],
+  ['Bash', 'cat .env.example .env', 'deny'],
+  ['Bash', 'cat .env.example2', 'deny'],
   ['Bash', 'git status', 'allow'],
   ['Bash', 'op whoami', 'allow'],
   ['Bash', 'op item list --vault "Agent Vault"', 'allow'],
@@ -567,5 +592,20 @@ for (const [tool, command, expected] of CASES) {
 for (const f of fails) {
   console.error(`FAIL [${f.tool}] expected ${f.expected}, got ${f.got}:\n  ${f.command}`);
 }
+const readFixture = fs.mkdtempSync(join(os.tmpdir(), 'guard-read-route-'));
+try {
+  fs.mkdirSync(join(readFixture, 'secrets'));
+  fs.writeFileSync(join(readFixture, 'secrets', 'note.txt'), 'SYNTHETIC_MARKER_ONLY\n');
+  fs.symlinkSync(join(readFixture, 'secrets'), join(readFixture, 'ordinary-link'));
+  let simulatedFileAccesses = 0;
+  const requested = 'ordinary-link/note.txt';
+  const routed = spawnSync('node', [HOOK], {
+    cwd: readFixture, input: JSON.stringify({ tool_name: 'Read', tool_input: { file_path: requested } }), encoding: 'utf8',
+  });
+  if (!/"permissionDecision":"deny"/.test(routed.stdout)) simulatedFileAccesses++;
+  if (routed.status !== 0 || simulatedFileAccesses !== 0 || routed.stdout.includes(requested)
+      || routed.stdout.includes('SYNTHETIC_MARKER_ONLY'))
+    fails.push({ tool: 'Read', command: 'protected symlink route', expected: 'body-free deny before simulated access', got: routed.stdout });
+} finally { fs.rmSync(readFixture, { recursive: true, force: true }); }
 console.log(`${pass}/${CASES.length} passed, ${MALFORMED_PAYLOADS.length - malformedFails.length}/${MALFORMED_PAYLOADS.length} malformed payloads handled without crashing`);
 process.exit(fails.length || malformedFails.length ? 1 : 0);

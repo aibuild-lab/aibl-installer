@@ -22,7 +22,7 @@ const hooksDir = path.join(claudeDir, 'hooks');
 const settingsPath = path.join(claudeDir, 'settings.json');
 const backupPath = settingsPath + '.backup.secrets-guard';
 
-const GUARD_MATCHER = 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit';
+const GUARD_MATCHER = 'Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit';
 const SHELL_MATCHER = 'Bash|PowerShell';
 
 function commandRunsScript(command, script) {

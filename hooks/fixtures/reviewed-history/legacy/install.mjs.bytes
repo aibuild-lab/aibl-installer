@@ -87,15 +87,13 @@ if (!path.isAbsolute(requestedNode) || !fs.existsSync(requestedNode)) {
 }
 const nodeBin = requestedNode.split(path.sep).join('/');
 
-// Only our current path and the literal legacy tilde path are installer-owned.
-// A same-named script elsewhere may belong to the user.
+// Match the hook by its script name as a WHOLE path token, not a substring. `.includes(script)`
+// would wrongly treat a sibling like `secrets-guard.js-helper` as a stale copy and delete it.
 function hookRunsScript(hook, script) {
   if (!hook || typeof hook.command !== 'string') return false;
   const normalized = hook.command.replaceAll('\\', '/');
-  return [path.join(hooksDir, script).replaceAll('\\', '/'), `~/.claude/hooks/${script}`].some((target) => {
-    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(?:^|[\\s"'])${escaped}(?=$|[\\s"';&|])`, process.platform === 'win32' ? 'i' : '').test(normalized);
-  });
+  const escaped = script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[\\s"'/])${escaped}(?=$|[\\s"';&|])`).test(normalized);
 }
 
 function ensureHook(event, script, matcher) {
@@ -150,7 +148,7 @@ function ensureHook(event, script, matcher) {
   if (JSON.stringify(current) === JSON.stringify(next)) return 'already correct';
   return removed > 0 ? 'repaired' : 'added';
 }
-const preStatus = ensureHook('PreToolUse', 'secrets-guard.js', 'Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit');
+const preStatus = ensureHook('PreToolUse', 'secrets-guard.js', 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit');
 const postStatus = ensureHook('PostToolUse', 'secrets-tripwire.js', 'Bash|PowerShell');
 const failureStatus = ensureHook('PostToolUseFailure', 'secrets-tripwire.js', 'Bash|PowerShell');
 

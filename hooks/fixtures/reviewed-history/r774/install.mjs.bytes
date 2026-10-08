@@ -150,7 +150,7 @@ function ensureHook(event, script, matcher) {
   if (JSON.stringify(current) === JSON.stringify(next)) return 'already correct';
   return removed > 0 ? 'repaired' : 'added';
 }
-const preStatus = ensureHook('PreToolUse', 'secrets-guard.js', 'Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit');
+const preStatus = ensureHook('PreToolUse', 'secrets-guard.js', 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit');
 const postStatus = ensureHook('PostToolUse', 'secrets-tripwire.js', 'Bash|PowerShell');
 const failureStatus = ensureHook('PostToolUseFailure', 'secrets-tripwire.js', 'Bash|PowerShell');
 

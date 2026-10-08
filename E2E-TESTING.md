@@ -17,6 +17,16 @@ student-work preservation and process-termination/duplicate-writer tests, plus
 the retained workshop and hook suites. No GitHub repositories or accounts are
 created by these tests. Browser sign-in and GitHub responses are simulated.
 
+The hook suites include two that exercise the R-774 review corrections:
+`hooks/secrets-guard.read-paths.test.mjs` (built-in Read path resolution on POSIX
+and the shared Read/shell category matrix, against a disposable directory of
+content-free files) and `hooks/refresh-guard.history.test.mjs` (every reviewed
+receipt-free topology and every closed hold, run against the exact historical
+legacy and R-774 bytes in `hooks/fixtures/reviewed-history`, in disposable homes,
+including rollback, a simulated rollback failure, and preview/application
+agreement). Neither proves client activation or Windows behavior; the unexecuted
+native Windows procedure is `docs/windows-read-walkthrough.md`.
+
 With an available PowerShell runtime, run
 `pwsh -NoProfile -File tests/test_windows_launcher.ps1`. It parses the launcher
 and checks actual Python interpreter resolution on that host. This is not an
