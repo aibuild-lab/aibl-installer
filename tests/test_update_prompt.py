@@ -140,6 +140,7 @@ class UneditedCopiesGetARecommendation(unittest.TestCase):
                 self.assertIn(command, STEP2)
         self.assertIn('never by guessing', STEP2)
         self.assertIn('two equal ids mean two identical copies', FLAT2)
+        self.assertIn("a folder's covers every name, mode and byte inside it", FLAT2)
 
     def test_every_case_is_named_once(self):
         for label in ('Unedited.', 'New here.', 'Changed.', "Can't tell."):
@@ -151,9 +152,17 @@ class UneditedCopiesGetARecommendation(unittest.TestCase):
         unedited = case('Unedited.')
         self.assertIn('equals one of those template ids', unedited)
         self.assertIn('Recommend taking the template version', unedited)
-        self.assertIn("You haven't changed this file, so the new version is safe to take.", unedited)
+        self.assertIn("You haven't changed this skill, so the new version is safe to take.", unedited)
+        self.assertIn('say "file" for the hook file', unedited)
         self.assertIn('Recommend taking the template version', case('New here.'))
         self.assertIn('replaces nothing', case('New here.'))
+
+    def test_new_here_needs_the_path_missing_on_disk_too(self):
+        new = case('New here.')
+        self.assertIn('the folder or file is not on disk either', new)
+        self.assertIn("If `HEAD:<path>` fails but the path is on disk, this is not New here; use Can't tell.", new)
+        self.assertIn('`HEAD:<path>` failed while the path is on disk', case("Can't tell."))
+        self.assertIn('Write `<path>` with forward slashes on every system', STEP2)
 
     def test_a_student_edit_gets_no_recommendation(self):
         changed = case('Changed.')
@@ -164,11 +173,13 @@ class UneditedCopiesGetARecommendation(unittest.TestCase):
 
     def test_an_unreadable_history_falls_back_to_the_plain_question(self):
         cant = case("Can't tell.")
-        for trigger in ('the shallow check or the history list failed', 'the repository is shallow', 'the list is empty'):
+        for trigger in ('the shallow check or the history list failed', 'the repository is shallow', 'the list is empty',
+                        'no shipped id could be read'):
             self.assertIn(trigger, cant)
         self.assertIn('no recommendation', cant)
         self.assertIn('say nothing about who changed the file', cant)
-        self.assertIn('The shallow check printed `false`, the history list worked and has at least one commit', case('Changed.'))
+        self.assertIn('The shallow check printed `false`, the history list worked and has at least one commit, '
+                      'at least one shipped id was read', case('Changed.'))
         self.assertIn('Use the first case that fits, in this order.', STEP2)
 
     def test_a_short_summary_comes_before_any_raw_diff(self):
@@ -189,6 +200,34 @@ class UneditedCopiesGetARecommendation(unittest.TestCase):
         self.assertGreaterEqual(len(said), 6)
         for line in said:
             self.assertNotRegex(line, r'`(git|gh|node|python3?|py) ')
+
+
+def decide(head_id, on_disk, shallow, commits, shipped):
+    """Step 2's four cases, first fit wins, in the prompt's order. None means that command failed."""
+    if head_id is not None and head_id in shipped:
+        return 'Unedited.'
+    if head_id is None and not on_disk:
+        return 'New here.'
+    if head_id is not None and shallow == 'false' and commits and shipped:
+        return 'Changed.'
+    return "Can't tell."
+
+
+class CaseOrder(unittest.TestCase):
+    """The first-fit rules on their own, including failures a real repository rarely produces."""
+
+    def test_a_match_wins_even_on_a_shallow_repository(self):
+        self.assertEqual(decide('a', True, 'true', ['c1'], {'a'}), 'Unedited.')
+
+    def test_no_shipped_id_read_cannot_claim_a_student_edit(self):
+        self.assertEqual(decide('a', True, 'false', ['c1', 'c2'], set()), "Can't tell.")
+
+    def test_a_failed_head_read_with_the_path_on_disk_is_not_new_here(self):
+        self.assertEqual(decide(None, True, 'false', ['c1'], {'b'}), "Can't tell.")
+
+    def test_a_failed_shallow_check_cannot_claim_a_student_edit(self):
+        self.assertEqual(decide('a', True, None, ['c1'], {'b'}), "Can't tell.")
+        self.assertEqual(decide('a', True, 'false', None, set()), "Can't tell.")
 
 
 @unittest.skipUnless(shutil.which('git'), 'git not available')
@@ -245,24 +284,23 @@ class HistoryCheckWithRealGit(unittest.TestCase):
         self.git('fetch', '-q', 'template', 'main', cwd=wb)
         return wb
 
-    def classify(self, wb, path):
-        """Step 2's commands and its four cases, first fit wins, in the prompt's order."""
-        head = self.git('rev-parse', '--verify', '--quiet', 'HEAD:' + path, cwd=wb, check=False)
+    def classify(self, wb, path, read_path=None):
+        """Step 2's commands, as the agent runs them. read_path is the spelling the agent typed, if different."""
+        spelled = read_path or path
+        head = self.git('rev-parse', '--verify', '--quiet', 'HEAD:' + spelled, cwd=wb, check=False)
         shallow = self.git('rev-parse', '--is-shallow-repository', cwd=wb, check=False)
-        listed = self.git('rev-list', '--first-parent', 'template/main', '--', path, cwd=wb, check=False)
+        listed = self.git('rev-list', '--first-parent', 'template/main', '--', spelled, cwd=wb, check=False)
         commits = listed.stdout.split() if listed.returncode == 0 else []
         shipped = set()
         for commit in commits:
-            found = self.git('rev-parse', '--verify', '--quiet', commit + ':' + path, cwd=wb, check=False)
+            found = self.git('rev-parse', '--verify', '--quiet', commit + ':' + spelled, cwd=wb, check=False)
             if found.returncode == 0:
                 shipped.add(found.stdout.strip())
-        if head.returncode == 0 and head.stdout.strip() in shipped:
-            return 'Unedited.'
-        if head.returncode:
-            return 'New here.'
-        if shallow.returncode == 0 and shallow.stdout.strip() == 'false' and commits:
-            return 'Changed.'
-        return "Can't tell."
+        return decide(head_id=head.stdout.strip() if head.returncode == 0 else None,
+                      on_disk=(wb / path).exists(),
+                      shallow=shallow.stdout.strip() if shallow.returncode == 0 else None,
+                      commits=commits if listed.returncode == 0 else None,
+                      shipped=shipped)
 
     def test_prompt_names_the_commands_this_test_runs(self):
         for command in (HEAD_ID, SHALLOW, HISTORY, SHIPPED_ID):
@@ -304,6 +342,28 @@ class HistoryCheckWithRealGit(unittest.TestCase):
         self.git('fetch', '-q', 'template', 'main', cwd=wb)
         self.assertEqual(self.git('rev-parse', '--is-shallow-repository', cwd=wb).stdout.strip(), 'true')
         self.assertEqual(self.classify(wb, self.SKILL), "Can't tell.")
+        self.assertEqual(self.classify(wb, self.HOOK), 'Unedited.')
+
+    def test_a_backslash_spelling_of_an_edited_copy_is_not_new_here(self):
+        wb = self.workbench({self.SKILL + '/SKILL.md': 'v2\nmy own note\n'})
+        self.assertEqual(self.classify(wb, self.SKILL, read_path=self.SKILL.replace('/', '\\')), "Can't tell.")
+        self.assertEqual(self.classify(wb, self.SKILL), 'Changed.')
+
+    def test_a_shallow_template_fetch_cannot_claim_a_student_edit(self):
+        wb = self.repo('shallow-fetch')
+        self.commit(wb, {self.SKILL + '/SKILL.md': 'v2\n'}, 'Initial commit')
+        self.git('remote', 'add', 'template', self.template.as_uri(), cwd=wb)
+        self.git('fetch', '-q', '--depth', '1', 'template', 'main', cwd=wb)
+        self.assertEqual(self.git('rev-parse', '--is-shallow-repository', cwd=wb).stdout.strip(), 'true')
+        self.assertEqual(self.classify(wb, self.SKILL), "Can't tell.")
+
+    def test_a_mode_change_inside_a_folder_is_changed(self):
+        wb = self.workbench({self.SKILL + '/SKILL.md': 'v2\n', self.HOOK: 'h1\n'})
+        self.git('update-index', '--chmod=+x', self.SKILL + '/SKILL.md', cwd=wb)
+        self.git('update-index', '--chmod=+x', self.HOOK, cwd=wb)
+        self.git('commit', '-q', '-m', 'make them executable', cwd=wb)
+        self.assertEqual(self.classify(wb, self.SKILL), 'Changed.')
+        # A file's id is its bytes alone: same bytes, so still a shipped copy.
         self.assertEqual(self.classify(wb, self.HOOK), 'Unedited.')
 
     def test_no_template_history_means_cant_tell(self):
