@@ -1,5 +1,5 @@
 {
-  "schema_version": "aibl.repository-descriptor/v1",
+  "schema_version": "aibl.repository-descriptor/v2",
   "id": "repo.aibl-installer",
   "display_name": "AIBL Installer",
   "repository": "aibuild-lab/aibl-installer",
@@ -24,9 +24,7 @@
     {
       "label": "End-to-end testing",
       "path": "E2E-TESTING.md"
-    }
-  ],
-  "agent_entry_points": [
+    },
     {
       "label": "Agent contract",
       "path": "AGENTS.md"
@@ -44,8 +42,19 @@
       "path": "hooks/secrets-guard.js"
     }
   ],
+  "agent_entry_points": [
+    {
+      "id": "repository-guide",
+      "kind": "instructions",
+      "purpose": "Read the repository boundaries before action; linked commands retain their owning approval requirements",
+      "path": "AGENTS.md",
+      "status": "active",
+      "effect_class": "read_only",
+      "approval_class": "none"
+    }
+  ],
   "review": {
-    "reviewed_at": "2026-09-11",
+    "reviewed_at": "2026-10-15",
     "cadence_days": 90
   },
   "roadmap_refs": [],
@@ -59,5 +68,6 @@
       "dependency_checks": "required",
       "seeded_from": "aibuild-lab/workshop-installer@64130d9"
     }
-  }
+  },
+  "accountable_owner_slug": "aibl-education"
 }
