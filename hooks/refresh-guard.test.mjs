@@ -153,6 +153,9 @@ fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774.manifes
   path.join(repo, "hooks", "secrets-guard.r774.manifest.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.identities.json"),
   path.join(repo, "hooks", "secrets-guard.legacy.identities.json"));
+// Pinned by its hash inside refresh-guard.mjs (not the manifest), so it is copied unchanged.
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.course-deployed.identities.json"),
+  path.join(repo, "hooks", "secrets-guard.course-deployed.identities.json"));
 const LOCAL_FILES = {};
 for (const [name, source] of REAL_LOCAL_FILES) {
   const body = fs.readFileSync(source);
@@ -1103,6 +1106,79 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   fs.writeFileSync(legacyPath, pinnedLegacy);
   fs.writeFileSync(priorPath, savedPrior);
   fs.writeFileSync(legacyPath, savedLegacy);
+}
+
+// === Phase W: the two 10-18-2026 field reports, read-only, on every CI platform ===
+// One learner reported from Windows 11 and one from macOS. refresh-guard.history.test.mjs proves the
+// full approved migration on POSIX; this slice runs the REAL script, pins and identities against the
+// exact reviewed fixture bytes on Linux, macOS and Windows CI, preview only (it writes nothing).
+{
+  const realHooks = path.dirname(REAL_SCRIPT);
+  const fx = (set, name) => fs.readFileSync(path.join(realHooks, "fixtures", "reviewed-history", set, `${name}.bytes`));
+  const reviewed = (name) => fs.readFileSync(path.join(realHooks, name));
+  const fieldHome = (files) => {
+    const fieldRoot = fs.mkdtempSync(path.join(root, "field-"));
+    for (const [id, bytes] of Object.entries(files)) {
+      const target = path.join(fieldRoot, ...id.split("/"));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, bytes);
+    }
+    return fieldRoot;
+  };
+  const preview = (fieldRoot, flags) => {
+    const result = spawnSync(process.execPath, [REAL_SCRIPT, "--migration-preview", "--json", ...flags], {
+      env: { ...process.env, HOME: fieldRoot, USERPROFILE: fieldRoot }, encoding: "utf8" });
+    try { return JSON.parse(result.stdout); } catch { return null; }
+  };
+  const supplements = (client) => Object.fromEntries((client === "claude"
+    ? ["aws-credential-patterns.mjs", "aws-credential-guard.mjs", "aws-credential-tripwire.mjs"]
+    : ["aws-credential-patterns.mjs", "codex-secrets-tripwire.mjs"]).map((name) => [`.${client}/hooks/${name}`, reviewed(name)]));
+  // Learner B (Windows 11): agent-native-os secrets-guard-2026-09-02 (#108) on both clients, with the
+  // old-form Windows launchers beside it; launchers are regenerated, never ownership evidence.
+  const learnerB = fieldHome({
+    ".claude/hooks/secrets-guard.js": fx("anos-2026-09-02", "secrets-guard.js"),
+    ".claude/hooks/secrets-tripwire.js": fx("legacy", "secrets-tripwire.js"),
+    ".claude/hooks/install.mjs": fx("legacy", "install.mjs"),
+    ...supplements("claude"),
+    ".codex/hooks/secrets-guard.js": fx("anos-2026-09-02", "secrets-guard.js"),
+    ".codex/hooks/secrets-tripwire.js": fx("legacy", "secrets-tripwire.js"),
+    ".codex/hooks/codex-secrets-guard.mjs": fx("anos-2026-09-02", "codex-secrets-guard.mjs"),
+    ...supplements("codex"),
+    ".codex/hooks/codex-secrets-guard.cmd": "@echo off\r\nrem synthetic old-form launcher\r\n",
+    ".codex/hooks/codex-secrets-tripwire.cmd": "@echo off\r\nrem synthetic old-form launcher\r\n",
+  });
+  const beforeB = JSON.stringify(snapshotTree(learnerB));
+  const bothB = preview(learnerB, ["--claude", "--codex"]);
+  check("field B: course-deployed state is an eligible migration for both clients, pending approval",
+    bothB?.eligibility === "eligible-migration" && bothB.topology === "course-deployed"
+    && JSON.stringify(bothB.topologyClients) === JSON.stringify(["claude", "codex"])
+    && bothB.priorState?.ref === "secrets-guard-2026-09-02" && bothB.priorState.agentNativeOsPullRequests.includes(108)
+    && bothB.approvalClass === "separate-human-migration-approval" && bothB.nextSafeAction?.approvalRequired === true
+    && bothB.writesAttempted === false);
+  check("field B: one client alone is still a client-selection hold",
+    preview(learnerB, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
+  check("field B: previews wrote nothing", JSON.stringify(snapshotTree(learnerB)) === beforeB);
+  // Learner A (macOS): the pinned legacy release on both clients, but a Codex tripwire adapter whose
+  // bytes no reviewed source contains. That stays held.
+  const learnerA = fieldHome({
+    ".claude/hooks/secrets-guard.js": fx("legacy", "secrets-guard.js"),
+    ".claude/hooks/secrets-tripwire.js": fx("legacy", "secrets-tripwire.js"),
+    ".claude/hooks/install.mjs": fx("legacy", "install.mjs"),
+    ...supplements("claude"),
+    ".codex/hooks/secrets-guard.js": fx("legacy", "secrets-guard.js"),
+    ".codex/hooks/secrets-tripwire.js": fx("legacy", "secrets-tripwire.js"),
+    ".codex/hooks/codex-secrets-guard.mjs": reviewed("codex-secrets-guard.mjs"),
+    ".codex/hooks/aws-credential-patterns.mjs": reviewed("aws-credential-patterns.mjs"),
+    ".codex/hooks/codex-secrets-tripwire.mjs": Buffer.concat([reviewed("codex-secrets-tripwire.mjs"), Buffer.from("// locally changed\n")]),
+  });
+  const beforeA = JSON.stringify(snapshotTree(learnerA));
+  const bothA = preview(learnerA, ["--claude", "--codex"]);
+  check("field A: an unproven Codex adapter holds with UNKNOWN_MANAGED_BYTES and offers no approval",
+    bothA?.eligibility === "hold" && bothA.failureClass === "UNKNOWN_MANAGED_BYTES" && bothA.firstFailedStage === "OWNER_DISCOVERY"
+    && bothA.nextSafeAction?.approvalRequired === false && bothA.writesAttempted === false);
+  check("field A: Claude alone is still a client-selection hold",
+    preview(learnerA, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
+  check("field A: previews wrote nothing", JSON.stringify(snapshotTree(learnerA)) === beforeA);
 }
 
 try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }

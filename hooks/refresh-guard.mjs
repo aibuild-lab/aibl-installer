@@ -52,6 +52,10 @@ for (const set of ["current", "r774", "legacy"]) {
   REVIEWED_TOPOLOGIES.set(`none|${set}`, set);
 }
 REVIEWED_TOPOLOGIES.set("mixed|legacy", "recognized-mixed");
+// Prior states that agent-native-os deployed before this repository became the guard's home are
+// release sets named `course:<ref>` (see readCourseDeployedIdentities). They form the
+// `course-deployed` topology only as themselves: every client with files on the same ref.
+const COURSE_SET_PREFIX = "course:";
 
 const claudeHooksDir = path.join(os.homedir(), ".claude", "hooks");
 const claudeSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
@@ -66,6 +70,13 @@ const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
 const priorManifestPath = path.join(hooksSourceDir, "secrets-guard.r774.manifest.json");
 let priorManifest;
 let legacyIdentities;
+// Pinned here rather than in secrets-guard.manifest.json on purpose: every ownership receipt and the
+// Agent Native OS inspector bind to the manifest file's own hash, so editing the manifest to add an
+// identity record would invalidate every installer-managed receipt. The guard bytes are unchanged.
+// Change this file and this hash together in one reviewed pull request.
+const courseDeployedPath = path.join(hooksSourceDir, "secrets-guard.course-deployed.identities.json");
+const COURSE_DEPLOYED_IDENTITIES_SHA256 = "0fb6a0d8181135a00067a4a26ceceb12b26ca11e4916ae099b68f05fc3da22c1";
+let courseDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
 const GUARD_MATCHER = "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit";
 const SHELL_MATCHER = "Bash|PowerShell";
@@ -312,6 +323,7 @@ async function main() {
   const manifest = loadManifest();
   priorManifest = readPinnedIdentity("secrets-guard.r774.manifest.json", manifest);
   legacyIdentities = readPinnedIdentity("secrets-guard.legacy.identities.json", manifest);
+  courseDeployedReleases = readCourseDeployedIdentities();
   diagnosticSourceIdentity = manifest.ref;
 
   if (args.has("--check") && args.has("--session-check")) {
@@ -340,6 +352,7 @@ async function main() {
       ownership: decision.label,
       ownershipClients: decision.ownership.receipt?.clients || [],
       ...(decision.topology ? { topology: decision.topology, topologyClients: decision.requiredClients } : {}),
+      ...(decision.priorState ? { priorState: decision.priorState } : {}),
       eligibility, proposedSource: manifest.ref, preservation: ["unrelated-hooks", "settings-keys", "project-configuration", "file-modes"],
       approvalClass: eligibility === "eligible-migration" ? "separate-human-migration-approval" : "separate-human-install-approval",
       writesAttempted: false, writesCommitted: false, verified: false,
@@ -1192,18 +1205,41 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
 }
 
 function fileLabels(name, bytes, manifest) {
-  return [["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities]].filter(([, source]) => {
+  const courseSources = [...courseDeployedReleases].flatMap(([ref, states]) =>
+    states.map((state) => [`${COURSE_SET_PREFIX}${ref}`, state]));
+  return [...new Set([["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities], ...courseSources].filter(([, source]) => {
     const wanted = source.files?.[name] || source.local_files?.[name];
     return wanted && (sha256(bytes) === wanted || (source.local_files?.[name] && sha256(normalizeLf(bytes)) === wanted));
-  }).map(([label]) => label);
+  }).map(([label]) => label))];
 }
 
 function releaseSetFor(client, state) {
   const labels = (client === "claude" ? CLAUDE_DISTINCT : CODEX_DISTINCT).map((name) => state.get(`${client}/${name}`));
   if (labels.some((entry) => entry === "missing")) return "partial";
-  for (const set of ["current", "r774", "legacy"]) if (labels.every((entry) => entry.includes(set))) return set;
+  const courseSets = [...courseDeployedReleases.keys()].map((ref) => `${COURSE_SET_PREFIX}${ref}`);
+  for (const set of ["current", "r774", "legacy", ...courseSets]) if (labels.every((entry) => entry.includes(set))) return set;
   if (client === "claude" && labels[0].includes("r774") && labels[1].includes("r774") && labels[2].includes("legacy")) return "mixed";
   return "unreviewed";
+}
+
+// A course-deployed adapter or supplement attributes nothing on its own: it counts only beside the
+// version-distinct files of its own agent-native-os release, which is how that refresher installed
+// it. Under any other release a file known only from a course state is an unreviewed combination.
+// Before course states existed every known local file carried a non-course label, so this changes
+// nothing for the legacy, R-774, mixed or current releases. Applied to selected clients only: an
+// unselected client's local files never decided its release, and unknown bytes are handled earlier.
+function localFilesFitRelease(client, set, state) {
+  return (client === "claude" ? CLAUDE_SUPPLEMENTAL_FILES : CODEX_LOCAL_FILES).every((name) => {
+    const labels = state.get(`${client}/${name}`);
+    if (labels === "missing" || labels.length === 0) return true;
+    return set.startsWith(COURSE_SET_PREFIX) ? labels.includes(set) : labels.some((label) => !label.startsWith(COURSE_SET_PREFIX));
+  });
+}
+
+// Reviewed only as itself: one agent-native-os release on every client that has files.
+function courseDeployedTopology(releases) {
+  const sets = [releases.claude, releases.codex].filter((set) => set !== "none");
+  return sets.length > 0 && sets.every((set) => set === sets[0] && set.startsWith(COURSE_SET_PREFIX)) ? "course-deployed" : null;
 }
 
 function classifyReceiptFree(manifest) {
@@ -1252,15 +1288,20 @@ function classifyReceiptFree(manifest) {
   for (const client of ["claude", "codex"]) {
     if (!present[client]) continue;
     if (APPS[client] && unknown[client]) return finish("unknown-bytes");
-    const set = releaseSetFor(client, state);
+    let set = releaseSetFor(client, state);
+    if (APPS[client] && !["partial", "unreviewed"].includes(set) && !localFilesFitRelease(client, set, state)) set = "unreviewed";
     releases[client] = !APPS[client] && ["partial", "unreviewed"].includes(set) ? "none" : set;
   }
   const selectedPresent = ["claude", "codex"].some((client) => APPS[client] && present[client]);
   if (orphanRegistration && !selectedPresent) return finish("unrecognized");
   if (releases.claude === "none" && releases.codex === "none") return finish("empty");
-  const topology = REVIEWED_TOPOLOGIES.get(`${releases.claude}|${releases.codex}`);
+  const topology = REVIEWED_TOPOLOGIES.get(`${releases.claude}|${releases.codex}`) || courseDeployedTopology(releases);
   if (!topology) return finish("unreviewed-topology");
   const requiredClients = ["claude", "codex"].filter((client) => releases[client] !== "none");
+  if (topology === "course-deployed") {
+    const set = releases[requiredClients[0]];
+    return finish("course-deployed-no-receipt", { requiredClients, topology, priorState: courseDeployedDescription(set) });
+  }
   const kind = topology === "recognized-mixed" ? "recognized-mixed"
     : topology === "legacy" ? "legacy-no-receipt" : topology === "r774" ? "prior-no-receipt"
       : inspectInstalledGuard(manifest).healthy ? "current-no-receipt" : "current-registration-repair";
@@ -1283,7 +1324,8 @@ function decideInstallState(manifest) {
       holdKind: incomplete ? "CLIENT_SELECTION_INCOMPLETE" : null, requiredClients: ownership.receipt.clients };
   }
   const receiptFree = classifyReceiptFree(manifest);
-  const base = { ownership, receiptFree, label: receiptFree.kind, topology: receiptFree.topology, requiredClients: receiptFree.requiredClients };
+  const base = { ownership, receiptFree, label: receiptFree.kind, topology: receiptFree.topology, requiredClients: receiptFree.requiredClients,
+    ...(receiptFree.priorState ? { priorState: receiptFree.priorState } : {}) };
   if (receiptFree.kind === "empty") return { ...base, eligibility: "new-install", holdKind: null };
   if (receiptFree.kind === "malformed-settings") return { ...base, eligibility: "hold", holdKind: "SETTINGS_INVALID" };
   if (receiptFree.kind === "unknown-bytes") return { ...base, eligibility: "hold", holdKind: "UNKNOWN_MANAGED_BYTES" };
@@ -1350,6 +1392,41 @@ function readPinnedIdentity(name, manifest) {
   if (!value || typeof value.ref !== "string" || !value.files || !value.local_files)
     hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is incomplete. No files were changed.");
   return value;
+}
+
+// The agent-native-os guard states, grouped by release ref. Each record is one proven version of
+// that repository's manifest; records sharing a ref share the version-distinct files and may differ
+// only in adapters. Anything malformed stops before discovery, like every other identity.
+function readCourseDeployedIdentities() {
+  let bytes;
+  try { bytes = fs.readFileSync(courseDeployedPath); }
+  catch { hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is unavailable. No files were changed."); }
+  if (!matchesReviewedHash(bytes, COURSE_DEPLOYED_IDENTITIES_SHA256))
+    hold("SOURCE_INTEGRITY", "A reviewed compatibility identity does not match its pinned hash. No files were changed.");
+  let value;
+  try { value = JSON.parse(bytes.toString("utf8")); }
+  catch { hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is malformed. No files were changed."); }
+  const hex = /^[0-9a-f]{64}$/;
+  const releases = new Map();
+  for (const state of Array.isArray(value?.states) ? value.states : []) {
+    const complete = typeof state?.ref === "string" && state.ref.length > 0 && /^[0-9a-f]{40}$/.test(state.agentNativeOsCommit || "")
+      && state.files && Object.keys(state.files).length === FILES.length && FILES.every((name) => hex.test(state.files[name] || ""))
+      && state.local_files && Object.entries(state.local_files).every(([name, hash]) => LOCAL_GUARD_FILES.includes(name) && hex.test(hash));
+    const sibling = releases.get(state?.ref)?.[0];
+    if (!complete || (sibling && JSON.stringify(sibling.files) !== JSON.stringify(state.files)))
+      hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is incomplete. No files were changed.");
+    releases.set(state.ref, [...(releases.get(state.ref) || []), state]);
+  }
+  if (releases.size === 0) hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is incomplete. No files were changed.");
+  return releases;
+}
+
+// Public description of an attributed course-deployed state for the preview (no paths, no bytes).
+function courseDeployedDescription(set) {
+  const states = courseDeployedReleases.get(set.slice(COURSE_SET_PREFIX.length)) || [];
+  return { ref: set.slice(COURSE_SET_PREFIX.length), sourceRepository: "aibuild-lab/agent-native-os",
+    agentNativeOsCommits: states.map((state) => state.agentNativeOsCommit),
+    agentNativeOsPullRequests: states.map((state) => state.agentNativeOsPullRequest).filter(Number.isInteger) };
 }
 
 async function getFile(ref, file) {
