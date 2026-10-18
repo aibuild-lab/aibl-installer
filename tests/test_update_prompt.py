@@ -5,6 +5,12 @@ session is not open on your workbench" for their real workbench, because the old
 `git remote get-url origin` as the wrong folder. These tests pin the classification, the connect step's safety
 checks, and the settings hook guidance.
 
+Step 1, older workbenches: workbenches made in the first setup cohort (13 September 2026) never got
+`.aibl/template.json`, so a student already in `my-workbench` was told to go and open `my-workbench`, and looped.
+Step 1 now recognises an older workbench by its shape, adds the template's marker on a yes, and never sends a
+student in a folder named `my-workbench` back to the same folder. The shape tests run the prompt's own checks and
+Git commands on disposable folders.
+
 Step 2: an unedited stock copy gets a "take the template version" recommendation. The staff rehearsal on
 2026-10-14 (finding B3) saw five keep-or-take questions on about 43 KB of raw diff with no recommendation, for
 files the student had never touched. The prompt now compares each copy's Git id with every version the template
@@ -31,6 +37,7 @@ def section(start, end):
 
 STEP1 = section('## Step 1:', '## Step 2:')
 CONNECT = section('### Connect it first', 'Run `git status --short`.')
+MARKER = section('### Add the marker first', '### Connect it first')
 RULES = section('## Rules', '## Step 1:')
 STEP2 = section('## Step 2:', '## Step 3:')
 
@@ -53,7 +60,8 @@ class WorkbenchClassification(unittest.TestCase):
         wrong = bullet('Not a workbench.')
         self.assertIn('This session is not open on your workbench', wrong)
         self.assertIn('no `.aibl/template.json`', wrong)
-        for case in ('Your workbench, not connected to GitHub yet.', 'A workbench with no save history.'):
+        for case in ('Your workbench, not connected to GitHub yet.', 'A workbench with no save history.',
+                     'An older workbench, missing its marker.', 'A workbench from the retired course.'):
             self.assertNotIn('not open on your workbench', bullet(case))
 
     def test_missing_origin_is_a_workbench_that_needs_connecting(self):
@@ -67,10 +75,193 @@ class WorkbenchClassification(unittest.TestCase):
         self.assertIn('`origin` is the public template', bullet('Your workbench, not connected to GitHub yet.'))
 
     def test_every_case_is_named_once(self):
-        for case in ('Not a workbench.', 'A workbench with no save history.', 'Your workbench, not connected to GitHub yet.',
+        for case in ('Not a workbench.', 'A workbench from the retired course.', 'An older workbench, missing its marker.',
+                     'A workbench with no save history.', 'Your workbench, not connected to GitHub yet.',
                      "Your workbench, connected to someone else's repository.", 'Your workbench, connected.'):
             with self.subTest(case=case):
                 bullet(case)
+
+
+class OlderWorkbench(unittest.TestCase):
+    """A workbench from before the template carried its marker is still the student's workbench."""
+
+    def test_the_shape_names_every_part(self):
+        older = bullet('An older workbench, missing its marker.')
+        for part in ('There is no `.aibl/template.json`', '`git rev-parse` worked', '`CLAUDE.md` or `AGENTS.md`',
+                     'a `context/` folder', '`aibl-enroll`, `aibl-checkpoint` or `aibl-personalize`',
+                     '`.claude/skills/` or `.agents/skills/`', 'it is not from the retired course', 'Add the marker first',
+                     'from the top of this step'):
+            with self.subTest(part=part):
+                self.assertIn(part, older)
+
+    def test_the_retired_course_is_sent_to_start_fresh_not_marked(self):
+        retired = bullet('A workbench from the retired course.')
+        self.assertIn('`.aibl/installed-agent-essentials.json`', retired)
+        self.assertIn('`/aibl-teach`', retired)
+        self.assertIn('Start fresh', retired)
+        self.assertIn('Stop.', retired)
+        self.assertLess(STEP1.index('**A workbench from the retired course.**'),
+                        STEP1.index('**An older workbench, missing its marker.**'))
+
+    def test_the_wrong_folder_message_never_loops_inside_my_workbench(self):
+        wrong = bullet('Not a workbench.')
+        named = wrong.index('If the folder is named `my-workbench`')
+        self.assertIn("part of an older workbench's shape but not all of it", wrong)
+        self.assertIn('do not send them back to it', wrong)
+        self.assertIn('it is missing <what is missing, in plain words>', wrong)
+        self.assertIn("ask in your program's channel", wrong[named:wrong.index('Otherwise')])
+        self.assertLess(named, wrong.index('Otherwise, say: "This session is not open on your workbench.'))
+
+    def test_the_marker_comes_from_the_template_and_is_checked(self):
+        self.assertIn("step 2's two commands", MARKER)
+        self.assertIn('`git show template/main:.aibl/template.json`', MARKER)
+        self.assertIn('`schema_version` is `aibl.workbench-template/v1`', MARKER)
+        self.assertIn('`repository` is `aibuild-lab/my-workbench-template`', MARKER)
+        self.assertIn('not a plain folder', MARKER)
+
+    def test_the_file_is_shown_and_written_only_after_a_yes(self):
+        ask = MARKER.index('OK?"')
+        self.assertLess(MARKER.index("the file's exact contents"), ask)
+        self.assertLess(ask, MARKER.index('git checkout template/main -- .aibl/template.json'))
+        self.assertIn('On a no, say:', MARKER)
+        self.assertIn('run each of these yourself', MARKER)
+
+    def test_only_the_marker_is_committed(self):
+        self.assertIn('`git commit -m "Add the workbench marker file" -- .aibl/template.json`', MARKER)
+        self.assertIn('nothing else', MARKER)
+        self.assertIn('`git diff --quiet HEAD template/main -- .aibl/template.json`', MARKER)
+
+    def test_rule_2_allows_the_marker_and_nothing_more(self):
+        self.assertIn('plus `.aibl/template.json` in step 1\'s "Add the marker first", only when it is missing and only '
+                      "after the student's yes", RULES)
+
+    def test_student_facing_lines_carry_no_shell_commands(self):
+        found = re.findall(r'[Ss]ay: "([^"]*)"|^> "(.*)"$', MARKER, flags=re.M)
+        said = [a or b for a, b in found]
+        self.assertGreaterEqual(len(said), 4)
+        for line in said:
+            self.assertNotRegex(line, r'`(git|gh|node|python3?|py) ')
+
+
+TEMPLATE_SKILLS = ('aibl-enroll', 'aibl-checkpoint', 'aibl-personalize')
+
+
+def folder_case(top, is_git):
+    """Step 1's cases for a folder, in the prompt's order, before origin is looked at. top is the folder on disk."""
+    if (top / '.aibl' / 'template.json').is_file():
+        return 'marked'
+    claude = top / 'CLAUDE.md'
+    if (top / '.aibl' / 'installed-agent-essentials.json').is_file() or (
+            claude.is_file() and '/aibl-teach' in claude.read_text(encoding='utf-8')):
+        return 'A workbench from the retired course.'
+    notes = claude.is_file() or (top / 'AGENTS.md').is_file()
+    skills = any((top / root / name).is_dir() for root in ('.claude/skills', '.agents/skills') for name in TEMPLATE_SKILLS)
+    shape = [is_git, notes, (top / 'context').is_dir(), skills]
+    if all(shape):
+        return 'An older workbench, missing its marker.'
+    if top.name == 'my-workbench' or any(shape[1:]):
+        return 'Not a workbench (say what is missing).'
+    return 'Not a workbench (wrong folder).'
+
+
+@unittest.skipUnless(shutil.which('git'), 'git not available')
+class OlderWorkbenchWithRealGit(unittest.TestCase):
+    """The shape check and the marker commands, run as the student's agent would."""
+
+    MARKER_BYTES = ('{\n  "schema_version": "aibl.workbench-template/v1",\n'
+                    '  "repository": "aibuild-lab/my-workbench-template",\n  "version": "0.0.12"\n}\n')
+
+    def git(self, *args, cwd, check=True):
+        result = subprocess.run(['git', '-c', 'core.autocrlf=false', *args], cwd=cwd, check=False,
+                                capture_output=True, text=True)
+        if check and result.returncode:
+            raise AssertionError(result.stderr)
+        return result
+
+    def repo(self, name, files, commit=True):
+        path = self.tmp / name
+        path.mkdir(parents=True)
+        self.git('init', '-q', '-b', 'main', cwd=path)
+        self.git('config', 'user.email', 'test@example.invalid', cwd=path)
+        self.git('config', 'user.name', 'test', cwd=path)
+        for rel, body in files.items():
+            target = path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(body.encode('utf-8'))
+        if commit:
+            self.git('add', '-A', cwd=path)
+            self.git('commit', '-q', '-m', 'Day one: the workbench starter', cwd=path)
+        return path
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.template = self.repo('template', {'.aibl/template.json': self.MARKER_BYTES, 'CLAUDE.md': 'template\n'})
+
+    def early(self, name='my-workbench', commit=True, extra=None):
+        files = {'CLAUDE.md': 'notes\n', 'AGENTS.md': 'notes\n', 'context/README.md': 'me\n',
+                 '.claude/skills/aibl-checkpoint/SKILL.md': 'early\n', '.claude/skills/aibl-personalize/SKILL.md': 'early\n'}
+        files.update(extra or {})
+        return self.repo(name, files, commit=commit)
+
+    def add_marker(self, wb):
+        """Add the marker first, after the yes: step 2's two commands, then the three numbered steps."""
+        self.git('remote', 'add', 'template', self.template.as_uri(), cwd=wb)
+        self.git('fetch', '-q', 'template', 'main', cwd=wb)
+        shown = self.git('show', 'template/main:.aibl/template.json', cwd=wb).stdout
+        self.assertIn('"schema_version": "aibl.workbench-template/v1"', shown)
+        self.git('checkout', 'template/main', '--', '.aibl/template.json', cwd=wb)
+        self.git('commit', '-q', '-m', 'Add the workbench marker file', '--', '.aibl/template.json', cwd=wb)
+        self.assertEqual(self.git('diff', '--quiet', 'HEAD', 'template/main', '--', '.aibl/template.json', cwd=wb,
+                                  check=False).returncode, 0)
+
+    def test_an_early_workbench_has_the_older_shape(self):
+        self.assertEqual(folder_case(self.early(), True), 'An older workbench, missing its marker.')
+
+    def test_codex_skills_alone_count(self):
+        wb = self.repo('codex-only', {'AGENTS.md': 'notes\n', 'context/README.md': 'me\n',
+                                      '.agents/skills/aibl-enroll/SKILL.md': 'early\n'})
+        self.assertEqual(folder_case(wb, True), 'An older workbench, missing its marker.')
+
+    def test_the_retired_course_is_not_an_older_workbench(self):
+        wb = self.early(extra={'.aibl/installed-agent-essentials.json': '{}\n'})
+        self.assertEqual(folder_case(wb, True), 'A workbench from the retired course.')
+        wb = self.early(name='teach', extra={'CLAUDE.md': 'Start with /aibl-teach\n'})
+        self.assertEqual(folder_case(wb, True), 'A workbench from the retired course.')
+
+    def test_a_partial_shape_in_my_workbench_says_what_is_missing(self):
+        wb = self.repo('my-workbench', {'CLAUDE.md': 'notes\n', '.claude/skills/aibl-checkpoint/SKILL.md': 'x\n'})
+        self.assertEqual(folder_case(wb, True), 'Not a workbench (say what is missing).')
+        plain = self.tmp / 'nested' / 'my-workbench'
+        plain.mkdir(parents=True)
+        self.assertEqual(folder_case(plain, False), 'Not a workbench (say what is missing).')
+
+    def test_an_unrelated_folder_is_the_wrong_folder(self):
+        other = self.tmp / 'Documents'
+        other.mkdir()
+        self.assertEqual(folder_case(other, False), 'Not a workbench (wrong folder).')
+
+    def test_the_marker_is_the_template_file_and_the_only_commit(self):
+        wb = self.early()
+        (wb / 'context' / 'README.md').write_bytes(b'me, half written\n')
+        (wb / 'work').mkdir()
+        (wb / 'work' / 'draft.md').write_bytes(b'unsaved\n')
+        before = self.git('rev-parse', 'HEAD', cwd=wb).stdout.strip()
+        self.add_marker(wb)
+        self.assertEqual((wb / '.aibl' / 'template.json').read_bytes(), self.MARKER_BYTES.encode('utf-8'))
+        self.assertEqual(self.git('diff', '--name-only', before, 'HEAD', cwd=wb).stdout.split(), ['.aibl/template.json'])
+        status = self.git('status', '--short', cwd=wb).stdout
+        self.assertIn(' M context/README.md', status)
+        self.assertIn('?? work/', status)
+        self.assertEqual(folder_case(wb, True), 'marked')
+        # No origin, so the next pass of step 1 reaches "not connected to GitHub yet".
+        self.assertNotEqual(self.git('remote', 'get-url', 'origin', cwd=wb, check=False).returncode, 0)
+
+    def test_a_workbench_with_no_snapshot_yet_gets_the_marker_as_its_first(self):
+        wb = self.early(name='unborn', commit=False)
+        self.add_marker(wb)
+        self.assertEqual(self.git('ls-tree', '-r', '--name-only', 'HEAD', cwd=wb).stdout.split(), ['.aibl/template.json'])
+        self.assertIn('?? CLAUDE.md', self.git('status', '--short', cwd=wb).stdout)
 
 
 class ConnectStep(unittest.TestCase):
