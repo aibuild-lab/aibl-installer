@@ -11,5 +11,8 @@ Identity comes from the pinned compatibility records, not from this folder:
 - `r774/` is checked against the immutable `hooks/secrets-guard.r774.manifest.json`
   (`aibl-installer-r774-guard-ownership`). The R-774 tripwire is byte-identical to the current
   `hooks/secrets-tripwire.js` and is not duplicated here.
+- `anos-2026-09-02/` is checked against the agent-native-os #108 record (`f3231373`) in
+  `hooks/secrets-guard.course-deployed.identities.json` (`secrets-guard-2026-09-02`). Its tripwire
+  and installer are the legacy bytes above, and its other adapters equal the current ones.
 
 The `.bytes` suffix keeps editors, linters and hook-source scanners from treating them as live code.
