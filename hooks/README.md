@@ -43,9 +43,16 @@ come from the list plus a separate human approval.
 | `r774` (receipt absent) | R-774 files | R-774 files, or none | every app that has files |
 | `current` (current bytes, no receipt or damaged registration) | current | current, or none | every app that has files |
 | `recognized-mixed` | R-774 guard and tripwire, legacy installer | legacy | both |
+| `course-deployed` | one earlier agent-native-os release | the same release, or none | every app that has files |
 
-A single-client legacy, R-774 or current installation (the other app has no managed files) is
-the same topology for that one app. Anything else, including a current Claude guard beside legacy
+`course-deployed` covers the guard states that `aibuild-lab/agent-native-os` installed before this
+repository became the guard's home. `secrets-guard.course-deployed.identities.json` lists each one
+by exact hash with its source commit, and the preview's `priorState` names the release it matched.
+A course-deployed adapter counts only beside its own release's guard. Two different earlier
+releases on the two apps, or one beside the legacy, R-774 or current files, are a hold.
+
+A single-client legacy, R-774, current or course-deployed installation (the other app has no
+managed files) is the same topology for that one app. Anything else, including a current Claude guard beside legacy
 Codex files, a missing tripwire, or any file that is not byte-identical to a reviewed release, is a
 hold.
 
@@ -83,7 +90,7 @@ is needed.
 
 | `failureClass` | Meaning | Next action |
 |---|---|---|
-| `UNKNOWN_MANAGED_BYTES` | A managed file matches no reviewed release (edited, tool-modified, or newer than this installer). | Confirm the installer checkout is the reviewed current one; if it is older, update it first. Otherwise escalate. |
+| `UNKNOWN_MANAGED_BYTES` | A managed file matches no reviewed release and no recorded agent-native-os release (edited, tool-modified, or newer than this installer). | Confirm the installer checkout is the reviewed current one; if it is older, update it first. Otherwise escalate. |
 | `MIGRATION_TOPOLOGY_UNRECOGNIZED` | Files are individually reviewed but not a reviewed combination, or a registration points at nothing. | Escalate. |
 | `SETTINGS_INVALID` | A selected app's `settings.json` or `hooks.json` is not a valid JSON object. | Repair that file by hand with the student (never delete it), then preview again. |
 | `OWNERSHIP_INVALID` | An ownership receipt does not match this installer. | Escalate; do not recreate the receipt. |

@@ -38,6 +38,49 @@ for (const name of ["secrets-guard.js", "install.mjs"])
   check(`R-774 fixture ${name} is the pinned R-774 release`, sha(fx("r774", name)) === prior.files[name]);
 check("the R-774 tripwire is byte-identical to the current tripwire", sha(current("secrets-tripwire.js")) === prior.files["secrets-tripwire.js"]);
 
+// Course-deployed prior states (agent-native-os, before 09-11-2026). The fixtures are the exact bytes
+// that repository's refresher installed for secrets-guard-2026-09-02 (agent-native-os #108, f3231373).
+const course = JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.course-deployed.identities.json"), "utf8"));
+const courseState = course.states.find((state) => state.agentNativeOsCommit === "f323137327a788bfe639c94052445f6a6ffe4e32");
+check("course-deployed fixture secrets-guard.js is the agent-native-os #108 release", sha(fx("anos-2026-09-02", "secrets-guard.js")) === courseState?.files["secrets-guard.js"]);
+check("course-deployed fixture codex-secrets-guard.mjs is the agent-native-os #108 adapter",
+  sha(fx("anos-2026-09-02", "codex-secrets-guard.mjs")) === courseState?.local_files["codex-secrets-guard.mjs"]);
+check("every course-deployed state names its source commit and shares the legacy tripwire and installer",
+  course.states.length > 0 && course.states.every((state) => /^[0-9a-f]{40}$/.test(state.agentNativeOsCommit)
+    && /^[0-9a-f]{40}$/.test(state.workshopInstallerTagCommit) && state.ref !== legacy.ref
+    && state.files["secrets-tripwire.js"] === legacy.files["secrets-tripwire.js"] && state.files["install.mjs"] === legacy.files["install.mjs"]));
+
+// The two field reports of 10-18-2026, by the SHA-256 each learner posted (no file contents).
+// Learner B (Windows 11): every managed file is the agent-native-os secrets-guard-2026-09-02 state.
+const LEARNER_B = {
+  "secrets-guard.js": "126577de637de687fe58f7fcdc740fc1d0eae7fc3b5e087948692f9eaf1da568",
+  "codex-secrets-guard.mjs": "2161dc1eee905fe5dd05b84415fa43967326dafa50a17d2aac2a7823f4b3acc1",
+  "secrets-tripwire.js": "8db9436d1230b2b84f06416f84be4d44557454d87dca38fac2fc795f61a658e7",
+  "install.mjs": "a28b70a42ee286cae0e916d62a24b4bf6ea7d3e3bc5cd593caada2c6eea40060",
+  "codex-secrets-tripwire.mjs": "4816fb7233bf89195babdb00d42ba40006d67acb142383b23638c8aaa065de21",
+  "aws-credential-patterns.mjs": "ab56ba1d82f0ac367dfe5542d378490833e540c55baff0f84cb413bae4422699",
+  "aws-credential-guard.mjs": "1783032b3246d8323a77738bcc9c9789d2fd49ff59737971df17b294800c5409",
+  "aws-credential-tripwire.mjs": "1bea3ccd1c113a1b2846f2d14ecaabe3d79a5bc833f46c37382b445f8bebe657",
+};
+check("learner B's posted hashes are exactly one agent-native-os state (#108)", Object.entries(LEARNER_B).every(([name, hash]) =>
+  (courseState?.files[name] || courseState?.local_files[name]) === hash));
+check("learner B's fixtures carry learner B's posted hashes", sha(fx("anos-2026-09-02", "secrets-guard.js")) === LEARNER_B["secrets-guard.js"]
+  && sha(fx("anos-2026-09-02", "codex-secrets-guard.mjs")) === LEARNER_B["codex-secrets-guard.mjs"]);
+// Learner A (macOS): the pinned legacy release on both clients, except one Codex adapter whose bytes no
+// aibuild-lab repository ever contained (every ref and pull request searched 10-18-2026). It stays held.
+const LEARNER_A_KNOWN = {
+  "secrets-guard.js": "a1f5a937e231282225c88761e6312dd681abdf778e1aa7fd85985bc629efd1c4",
+  "secrets-tripwire.js": "8db9436d1230b2b84f06416f84be4d44557454d87dca38fac2fc795f61a658e7",
+  "codex-secrets-guard.mjs": "dcabd5c1ad5aa658b85a23234adcd48e2981fe7921e8db0dbec512391dfb6b64",
+  "aws-credential-patterns.mjs": "ab56ba1d82f0ac367dfe5542d378490833e540c55baff0f84cb413bae4422699",
+};
+const LEARNER_A_UNPROVEN_TRIPWIRE = "1570edab2887cc4794f11ff630cbd373c90326dbf3b063e6b74128701010bf51";
+check("learner A's other posted hashes are the pinned legacy release", Object.entries(LEARNER_A_KNOWN).every(([name, hash]) =>
+  (legacy.files[name] || legacy.local_files[name]) === hash) && sha(fx("legacy", "secrets-guard.js")) === LEARNER_A_KNOWN["secrets-guard.js"]);
+const pinnedEverywhere = JSON.stringify([prior, legacy, course,
+  JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.manifest.json"), "utf8"))]);
+check("learner A's unproven Codex tripwire hash is pinned by no identity", !pinnedEverywhere.includes(LEARNER_A_UNPROVEN_TRIPWIRE));
+
 // ---- harness ---------------------------------------------------------------------------------
 // Not realpath'd: the gated test seams compare the home with os.tmpdir() as the child sees it.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "guard-history-"));
@@ -142,6 +185,23 @@ const TOPOLOGIES = {
     for (const name of ["secrets-guard.js", "secrets-tripwire.js"]) put(path.join(p.codexHooks, name), fx("legacy", name));
     useOldMatcher(home);
   } },
+  // learner B (10-18-2026): both clients exactly as agent-native-os #108 installed them
+  "course-deployed-two": { flags: [], build(home) {
+    const p = paths(home);
+    put(path.join(p.claudeHooks, "secrets-guard.js"), fx("anos-2026-09-02", "secrets-guard.js"));
+    for (const name of ["secrets-tripwire.js", "install.mjs"]) put(path.join(p.claudeHooks, name), fx("legacy", name));
+    put(path.join(p.codexHooks, "secrets-guard.js"), fx("anos-2026-09-02", "secrets-guard.js"));
+    put(path.join(p.codexHooks, "secrets-tripwire.js"), fx("legacy", "secrets-tripwire.js"));
+    put(path.join(p.codexHooks, "codex-secrets-guard.mjs"), fx("anos-2026-09-02", "codex-secrets-guard.mjs"));
+    useOldMatcher(home);
+  } },
+  // the same release on a Claude-only machine
+  "course-deployed-claude": { flags: ["--claude"], build(home) {
+    const p = paths(home);
+    put(path.join(p.claudeHooks, "secrets-guard.js"), fx("anos-2026-09-02", "secrets-guard.js"));
+    for (const name of ["secrets-tripwire.js", "install.mjs"]) put(path.join(p.claudeHooks, name), fx("legacy", name));
+    useOldMatcher(home);
+  } },
 };
 function receiptFreeHome(name) {
   const home = newHome();
@@ -162,6 +222,8 @@ const EXPECTED = {
   "current-damaged": { topology: "current", clients: ["claude", "codex"] },
   "legacy-claude": { topology: "legacy", clients: ["claude"] },
   "recognized-mixed": { topology: "recognized-mixed", clients: ["claude", "codex"] },
+  "course-deployed-two": { topology: "course-deployed", clients: ["claude", "codex"], priorRef: "secrets-guard-2026-09-02" },
+  "course-deployed-claude": { topology: "course-deployed", clients: ["claude"], priorRef: "secrets-guard-2026-09-02" },
 };
 for (const [name, want] of Object.entries(EXPECTED)) {
   const flags = TOPOLOGIES[name].flags;
@@ -176,6 +238,11 @@ for (const [name, want] of Object.entries(EXPECTED)) {
     && proposal.nextSafeAction.action === "seek-separate-approval" && proposal.nextSafeAction.approvalRequired === true
     && proposal.stages.find((stage) => stage.id === "COMMIT_FILES").status === "NOT_RUN");
   check(`${name}: preview wrote nothing and leaked no path`, snapshot(home) === before && noStrayHome(preview, home));
+  check(`${name}: preview names the attributed prior state only for a course-deployed installation`, want.priorRef
+    ? proposal?.priorState?.ref === want.priorRef && proposal.priorState.sourceRepository === "aibuild-lab/agent-native-os"
+      && proposal.priorState.agentNativeOsCommits.includes("f323137327a788bfe639c94052445f6a6ffe4e32")
+      && proposal.priorState.agentNativeOsPullRequests.includes(108)
+    : proposal?.priorState === undefined, JSON.stringify(proposal?.priorState));
   const readOnly = run(home, ["--check", "--json", ...flags]);
   check(`${name}: read-only check is not healthy before migration`, readOnly.status !== 0 && snapshot(home) === before);
 
@@ -213,6 +280,16 @@ for (const [name, want] of Object.entries(EXPECTED)) {
   const matcher = JSON.parse(fs.readFileSync(paths(approved).settings, "utf8")).hooks?.PreToolUse
     ?.find((group) => group.hooks?.some((hook) => hook.command?.includes("secrets-guard.js")))?.matcher ?? "";
   check(`${name}: registration now carries the Read matcher`, /\|Read\|/.test(matcher));
+  // The field canary from learner A, against the migrated guard: Claude's built-in Read of a synthetic,
+  // content-free .env outside any project. The hook classifies by path metadata and never opens it.
+  const outside = path.join(approved, "outside-project");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, ".env"), "");
+  const readCanary = spawnSync(process.execPath, [path.join(paths(approved).claudeHooks, "secrets-guard.js")], {
+    input: JSON.stringify({ tool_name: "Read", tool_input: { file_path: path.join(outside, ".env") } }), encoding: "utf8", cwd: outside });
+  check(`${name}: migrated guard denies a built-in Read of a .env outside the project`, readCanary.status === 0
+    && /"permissionDecision":"deny"/.test(readCanary.stdout), readCanary.stdout + readCanary.stderr);
+  fs.rmSync(outside, { recursive: true, force: true });
   const settled = snapshot(approved);
   const second = run(approved, flags);
   check(`${name}: second application is idempotent and writes nothing`, second.status === 0 && /already current/.test(second.stdout) && snapshot(approved) === settled);
@@ -281,6 +358,62 @@ function agree(label, home, flags, want) {
   const home = receiptFreeHome("legacy-two");
   put(path.join(paths(home).codexHooks, "secrets-guard.js"), current("secrets-guard.js"));
   agree("current Codex guard beside a legacy Claude installation", home, [], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // learner A: the legacy release on both clients with a Codex tripwire adapter no reviewed source contains
+  const home = receiptFreeHome("legacy-two");
+  const unproven = Buffer.concat([current("codex-secrets-tripwire.mjs"), Buffer.from("// locally changed adapter\n")]);
+  check("learner A stand-in tripwire is pinned by no identity", !pinnedEverywhere.includes(sha(unproven)));
+  put(path.join(paths(home).codexHooks, "codex-secrets-tripwire.mjs"), unproven);
+  agree("learner A: legacy release with an unproven Codex tripwire", home, [], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+  agree("learner A: the same installation with Claude alone selected", home, ["--claude"], { failureClass: "CLIENT_SELECTION_INCOMPLETE", firstFailedStage: "OWNER_BINDING", action: "rerun-with-required-clients" });
+}
+{
+  // a course-deployed guard with one byte changed is not that release
+  const home = receiptFreeHome("course-deployed-two");
+  const edited = Buffer.from(fx("anos-2026-09-02", "secrets-guard.js"));
+  edited[edited.length - 2] ^= 0x20;
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"), edited);
+  agree("course-deployed guard with one changed byte", home, [], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // two individually proven releases on two clients are not a reviewed combination
+  const home = receiptFreeHome("course-deployed-two");
+  for (const name of ["secrets-guard.js", "secrets-tripwire.js"]) put(path.join(paths(home).codexHooks, name), fx("legacy", name));
+  put(path.join(paths(home).codexHooks, "codex-secrets-guard.mjs"), current("codex-secrets-guard.mjs"));
+  agree("course-deployed Claude beside a legacy Codex installation", home, [], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // a course-deployed adapter attributes nothing beside another release's guard
+  const home = receiptFreeHome("legacy-two");
+  put(path.join(paths(home).codexHooks, "codex-secrets-guard.mjs"), fx("anos-2026-09-02", "codex-secrets-guard.mjs"));
+  agree("course-deployed Codex adapter beside a legacy guard", home, [], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // and a course-deployed guard needs its own release's adapter, not the current one
+  const home = receiptFreeHome("course-deployed-two");
+  put(path.join(paths(home).codexHooks, "codex-secrets-guard.mjs"), current("codex-secrets-guard.mjs"));
+  agree("course-deployed guard beside the current Codex adapter", home, [], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  const home = receiptFreeHome("course-deployed-two");
+  agree("course-deployed two-client installation with one client selected", home, ["--codex"], { failureClass: "CLIENT_SELECTION_INCOMPLETE", firstFailedStage: "OWNER_BINDING", action: "rerun-with-required-clients" });
+}
+{
+  // the course-deployed record is pinned by refresh-guard.mjs; any change to it is a source-integrity hold
+  const home = receiptFreeHome("course-deployed-two");
+  const hooksCopy = path.join(root, "tampered-course-source");
+  fs.mkdirSync(hooksCopy);
+  fs.cpSync(HOOKS, path.join(hooksCopy, "hooks"), { recursive: true });
+  fs.appendFileSync(path.join(hooksCopy, "hooks", "secrets-guard.course-deployed.identities.json"), " ");
+  const tampered = path.join(hooksCopy, "hooks", "refresh-guard.mjs");
+  const go = (flags) => spawnSync(process.execPath, [tampered, ...flags], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: "utf8" });
+  const before = snapshot(home);
+  const preview = json(go(["--migration-preview", "--json"]));
+  const apply = json(go(["--diagnostic-json"]));
+  check("tampered course-deployed record: preview and application hold with SOURCE_INTEGRITY and write nothing",
+    preview?.failureClass === "SOURCE_INTEGRITY" && apply?.failureClass === "SOURCE_INTEGRITY"
+    && preview.eligibility !== "eligible-migration" && snapshot(home) === before, JSON.stringify(preview));
 }
 {
   const home = receiptFreeHome("legacy-claude");
