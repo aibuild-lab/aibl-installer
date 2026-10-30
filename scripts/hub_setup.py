@@ -25,6 +25,33 @@ from course_setup import (HARNESSES, SetupError, check_tools, command, registry,
 
 SKILLS = ('aibl-personalize', 'aibl-checkpoint', 'aibl-enroll')
 
+# cloned_existing: the repository came back from GitHub, for example onto a new computer. Some
+# things never go to GitHub (the template's .gitignore and the course's library/.gitignore keep
+# them on the computer), so they were only on the old one. SETUP-PROMPT.md step 8 says these
+# same words when an older copy of this script gives no left_behind; tests keep the two equal.
+LEFT_BEHIND = (
+    "Your workbench came back from GitHub, but not everything comes with it. Anything in your library, "
+    "your job folders and your voice samples was only on your old computer, so it isn't here. "
+    "If that computer still works, copy them across before you go on:\n"
+    "1. On the old computer, open your home folder, then GitHub, then my-workbench.\n"
+    "2. Copy the library folder, the runs folder, and every file in work/course/staff whose name starts "
+    "with voice onto a USB drive.\n"
+    "3. On this computer, put each one back in the same place inside my-workbench. Add them in; "
+    "don't replace the whole folder.\n"
+    "Keys you saved on the old computer aren't here either. Add them again when a lesson asks for them.\n"
+    "If the old computer is gone, nothing else is lost: the rest of your workbench came back from GitHub."
+)
+LEFT_BEHIND_NIGHT_SHIFT = ("Your Team HQ night shift ran on the old computer only. To run it on this one, "
+                           "ask your assistant to put the night shift on a schedule.")
+LEFT_BEHIND_PATHS = ('library/', 'runs/', 'work/course/staff/voice*', '.env')
+
+# Agent Native Camp keeps its own clone at ~/GitHub/agent-native-camp (Camp's
+# scripts/diagnose-course-repo.mjs), with a descriptor naming it. Setup never touches it; it only
+# says so, once, so a Camp alum knows the workbench is a separate folder beside it.
+CAMP_ID = 'repo.agent-native-camp'
+CAMP_SAY = ("I can see your Camp folder. I didn't touch it, and setup never will. "
+            "Your workbench is its own folder beside it, my-workbench.")
+
 
 def public_template(reg=None):
     reg = reg or registry()
@@ -126,6 +153,29 @@ def skills_present(folder):
     return found
 
 
+def left_behind(folder):
+    """What a workbench cloned back from GitHub is missing, in words for the student. Looks only."""
+    say = LEFT_BEHIND
+    team_hq = (folder / 'work' / 'team-hq').is_dir() or (folder / '.aibl' / 'programs' / 'agent-team-hq.json').is_file()
+    if team_hq:
+        say += '\n' + LEFT_BEHIND_NIGHT_SHIFT
+    return {'what': list(LEFT_BEHIND_PATHS), 'team_hq_night_shift': team_hq, 'say': say}
+
+
+def camp_folder(home):
+    """Camp's own clone beside the workbench, when its descriptor says so; else None.
+    Reads one small file and nothing else; never lists, opens or changes anything else there."""
+    folder = Path(home) / 'GitHub' / 'agent-native-camp'
+    descriptor = folder / '.aibl' / 'repository.json'
+    try:
+        if not descriptor.is_file() or descriptor.stat().st_size > 64 * 1024:
+            return None
+        meta = json.loads(descriptor.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return str(folder) if isinstance(meta, dict) and meta.get('id') == CAMP_ID else None
+
+
 def twin_signed_in(runner, harness):
     """Report only. Sign-in happened in step 6; a false here is a reminder, not a stop."""
     h = HARNESSES[harness]
@@ -204,6 +254,11 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
     if missing:
         receipt['note'] = ('This workbench was made before the starter skills shipped in the template, or from a different template. '
                            'Nothing was changed. Ask in your program channel with this message.')
+    if status == 'cloned_existing':
+        receipt['left_behind'] = left_behind(folder)
+    camp = camp_folder(home)
+    if camp:
+        receipt['camp'] = {'folder': camp, 'say': CAMP_SAY}
     receipt['next'] = ('Open ' + str(folder) + ' in the app you chose (step 9). Type / in Claude or $ in Codex; the three aibl- skills are there.')
     return receipt
 
