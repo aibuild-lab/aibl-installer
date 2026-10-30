@@ -77,7 +77,29 @@ const LEARNER_A_KNOWN = {
 const LEARNER_A_UNPROVEN_TRIPWIRE = "1570edab2887cc4794f11ff630cbd373c90326dbf3b063e6b74128701010bf51";
 check("learner A's other posted hashes are the pinned legacy release", Object.entries(LEARNER_A_KNOWN).every(([name, hash]) =>
   (legacy.files[name] || legacy.local_files[name]) === hash) && sha(fx("legacy", "secrets-guard.js")) === LEARNER_A_KNOWN["secrets-guard.js"]);
-const pinnedEverywhere = JSON.stringify([prior, legacy, course,
+// Workshop-installer states (Camp and workshop alumni, 10-30-2026). aibuild-lab/workshop-installer's
+// setup put its main branch's three hook files into ~/.claude/hooks. The fixtures are those exact git
+// blobs, one folder per record, named by the workshop-installer commit that put them on main.
+const workshop = JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.workshop-installer.identities.json"), "utf8"));
+const WORKSHOP_COMMITS = ["00eadf9", "86f9cbc", "d8fdc6b", "9ab6044", "f506b52", "64130d9"];
+const workshopState = (short) => workshop.states.find((state) => state.workshopInstallerCommit.startsWith(short));
+check("the workshop-installer record holds exactly the six workshop states no other record names",
+  JSON.stringify(workshop.states.map((state) => state.workshopInstallerCommit.slice(0, 7))) === JSON.stringify(WORKSHOP_COMMITS));
+for (const short of WORKSHOP_COMMITS) {
+  const state = workshopState(short);
+  check(`workshop ${short}: record names its full source commit and its own ref`, /^[0-9a-f]{40}$/.test(state?.workshopInstallerCommit || "")
+    && state.ref === `workshop-installer-${short}` && Object.keys(state.local_files).length === 0);
+  for (const name of ["secrets-guard.js", "secrets-tripwire.js", "install.mjs"])
+    check(`workshop ${short}: fixture ${name} is the recorded hash`, sha(fx(`workshop-${short}`, name)) === state?.files[name]);
+}
+const knownTriples = [legacy, prior, ...course.states].map((source) => JSON.stringify(source.files));
+check("no workshop record repeats a state an earlier record already names",
+  workshop.states.every((state) => !knownTriples.includes(JSON.stringify(state.files)) && state.ref !== legacy.ref
+    && !course.states.some((other) => other.ref === state.ref)));
+check("QA's 10-30 finding: the workshop 64130d9 guard is the sha256 QA reported (02fbc66d...)",
+  workshopState("64130d9")?.files["secrets-guard.js"].startsWith("02fbc66d"));
+
+const pinnedEverywhere = JSON.stringify([prior, legacy, course, workshop,
   JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.manifest.json"), "utf8"))]);
 check("learner A's unproven Codex tripwire hash is pinned by no identity", !pinnedEverywhere.includes(LEARNER_A_UNPROVEN_TRIPWIRE));
 
@@ -203,9 +225,29 @@ const TOPOLOGIES = {
     useOldMatcher(home);
   } },
 };
+// Camp and workshop alumni: built the way the workshop installer's setup did it, on a home this
+// installer never touched. The three files of one workshop state go into ~/.claude/hooks and that
+// state's own install.mjs registers them (Claude only; the workshop installer never set up Codex).
+function workshopBuild(short) {
+  return (home) => {
+    const p = paths(home);
+    fs.mkdirSync(p.claudeHooks, { recursive: true });
+    for (const name of ["secrets-guard.js", "secrets-tripwire.js", "install.mjs"]) put(path.join(p.claudeHooks, name), fx(`workshop-${short}`, name));
+    const registered = spawnSync(process.execPath, [path.join(p.claudeHooks, "install.mjs")], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: "utf8" });
+    if (registered.status !== 0) throw new Error(`workshop ${short} install failed: ${registered.stderr}`);
+  };
+}
+for (const short of WORKSHOP_COMMITS)
+  TOPOLOGIES[`workshop-${short}-claude`] = { flags: ["--claude"], fresh: true, build: workshopBuild(short) };
 function receiptFreeHome(name) {
   const home = newHome();
-  const { flags, build } = TOPOLOGIES[name];
+  const { flags, build, fresh } = TOPOLOGIES[name];
+  if (fresh) {
+    build(home);
+    addUnrelated(home);
+    return home;
+  }
   const installed = run(home, flags);
   if (installed.status !== 0) throw new Error(`fixture install failed: ${installed.stderr}`);
   addUnrelated(home);
@@ -225,6 +267,17 @@ const EXPECTED = {
   "course-deployed-two": { topology: "course-deployed", clients: ["claude", "codex"], priorRef: "secrets-guard-2026-09-02" },
   "course-deployed-claude": { topology: "course-deployed", clients: ["claude"], priorRef: "secrets-guard-2026-09-02" },
 };
+for (const short of WORKSHOP_COMMITS)
+  EXPECTED[`workshop-${short}-claude`] = { topology: "course-deployed", clients: ["claude"], priorRef: `workshop-installer-${short}`,
+    workshopCommit: workshopState(short)?.workshopInstallerCommit, workshopPullRequest: workshopState(short)?.workshopInstallerPullRequest };
+const priorStateMatches = (want, priorState) => want.workshopCommit
+  ? priorState?.ref === want.priorRef && priorState.sourceRepository === "aibuild-lab/workshop-installer"
+    && JSON.stringify(priorState.workshopInstallerCommits) === JSON.stringify([want.workshopCommit])
+    && JSON.stringify(priorState.workshopInstallerPullRequests) === JSON.stringify([want.workshopPullRequest])
+    && priorState.agentNativeOsCommits === undefined
+  : priorState?.ref === want.priorRef && priorState.sourceRepository === "aibuild-lab/agent-native-os"
+    && priorState.agentNativeOsCommits.includes("f323137327a788bfe639c94052445f6a6ffe4e32")
+    && priorState.agentNativeOsPullRequests.includes(108);
 for (const [name, want] of Object.entries(EXPECTED)) {
   const flags = TOPOLOGIES[name].flags;
   const home = receiptFreeHome(name);
@@ -239,9 +292,7 @@ for (const [name, want] of Object.entries(EXPECTED)) {
     && proposal.stages.find((stage) => stage.id === "COMMIT_FILES").status === "NOT_RUN");
   check(`${name}: preview wrote nothing and leaked no path`, snapshot(home) === before && noStrayHome(preview, home));
   check(`${name}: preview names the attributed prior state only for a course-deployed installation`, want.priorRef
-    ? proposal?.priorState?.ref === want.priorRef && proposal.priorState.sourceRepository === "aibuild-lab/agent-native-os"
-      && proposal.priorState.agentNativeOsCommits.includes("f323137327a788bfe639c94052445f6a6ffe4e32")
-      && proposal.priorState.agentNativeOsPullRequests.includes(108)
+    ? priorStateMatches(want, proposal?.priorState)
     : proposal?.priorState === undefined, JSON.stringify(proposal?.priorState));
   const readOnly = run(home, ["--check", "--json", ...flags]);
   check(`${name}: read-only check is not healthy before migration`, readOnly.status !== 0 && snapshot(home) === before);
@@ -412,6 +463,54 @@ function agree(label, home, flags, want) {
   const preview = json(go(["--migration-preview", "--json"]));
   const apply = json(go(["--diagnostic-json"]));
   check("tampered course-deployed record: preview and application hold with SOURCE_INTEGRITY and write nothing",
+    preview?.failureClass === "SOURCE_INTEGRITY" && apply?.failureClass === "SOURCE_INTEGRITY"
+    && preview.eligibility !== "eligible-migration" && snapshot(home) === before, JSON.stringify(preview));
+}
+{
+  // the workshop 64130d9 guard with one changed byte is not that release: it still holds
+  const home = receiptFreeHome("workshop-64130d9-claude");
+  const edited = Buffer.from(fx("workshop-64130d9", "secrets-guard.js"));
+  edited[edited.length - 2] ^= 0x20;
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"), edited);
+  agree("workshop 64130d9 guard with one changed byte", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // and so does a copy with an extra line added at the end
+  const home = receiptFreeHome("workshop-64130d9-claude");
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"),
+    Buffer.concat([fx("workshop-64130d9", "secrets-guard.js"), Buffer.from("// edited locally\n")]));
+  agree("workshop 64130d9 guard with a line added", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // individually known workshop files from two different states are not one release
+  const home = receiptFreeHome("workshop-64130d9-claude");
+  for (const name of ["secrets-tripwire.js", "install.mjs"]) put(path.join(paths(home).claudeHooks, name), fx("workshop-9ab6044", name));
+  agree("workshop 64130d9 guard beside the June workshop tripwire and installer", home, ["--claude"], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // a workshop state attributes no adapter: an AWS supplement beside it is not a reviewed combination
+  const home = receiptFreeHome("workshop-64130d9-claude");
+  put(path.join(paths(home).claudeHooks, "aws-credential-guard.mjs"), current("aws-credential-guard.mjs"));
+  agree("workshop 64130d9 guard beside an AWS supplement", home, ["--claude"], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // a Claude-only workshop installation, previewed from Codex, asks to include Claude like any reviewed release
+  const home = receiptFreeHome("workshop-64130d9-claude");
+  agree("workshop 64130d9 Claude installation with only Codex selected", home, ["--codex"], { failureClass: "CLIENT_SELECTION_INCOMPLETE", firstFailedStage: "OWNER_BINDING", action: "rerun-with-required-clients" });
+}
+{
+  // the workshop-installer record is pinned by refresh-guard.mjs; any change to it is a source-integrity hold
+  const home = receiptFreeHome("workshop-64130d9-claude");
+  const hooksCopy = path.join(root, "tampered-workshop-source");
+  fs.mkdirSync(hooksCopy);
+  fs.cpSync(HOOKS, path.join(hooksCopy, "hooks"), { recursive: true });
+  fs.appendFileSync(path.join(hooksCopy, "hooks", "secrets-guard.workshop-installer.identities.json"), " ");
+  const tampered = path.join(hooksCopy, "hooks", "refresh-guard.mjs");
+  const go = (flags) => spawnSync(process.execPath, [tampered, ...flags], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: "utf8" });
+  const before = snapshot(home);
+  const preview = json(go(["--migration-preview", "--json", "--claude"]));
+  const apply = json(go(["--diagnostic-json", "--claude"]));
+  check("tampered workshop-installer record: preview and application hold with SOURCE_INTEGRITY and write nothing",
     preview?.failureClass === "SOURCE_INTEGRITY" && apply?.failureClass === "SOURCE_INTEGRITY"
     && preview.eligibility !== "eligible-migration" && snapshot(home) === before, JSON.stringify(preview));
 }

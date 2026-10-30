@@ -76,6 +76,14 @@ let legacyIdentities;
 // Change this file and this hash together in one reviewed pull request.
 const courseDeployedPath = path.join(hooksSourceDir, "secrets-guard.course-deployed.identities.json");
 const COURSE_DEPLOYED_IDENTITIES_SHA256 = "0fb6a0d8181135a00067a4a26ceceb12b26ca11e4916ae099b68f05fc3da22c1";
+// Guard states aibuild-lab/workshop-installer installed straight from its main branch (Camp and
+// workshop alumni), pinned the same way and for the same reason. Each record cites the
+// workshop-installer commit that put those bytes on main: 00eadf9 (#8), 86f9cbc (#9), d8fdc6b (#11),
+// 9ab6044 (#12), f506b52 (#26, tag secrets-guard-2026-09-03-r2) and 64130d9 (#33, main since
+// 09-09-2026). They join the course-deployed topology under their own refs, so they are attributed
+// only as a whole release and still need a separate human approval.
+const workshopInstallerPath = path.join(hooksSourceDir, "secrets-guard.workshop-installer.identities.json");
+const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "f95bb18826bd4fd6986a3b14127e3d523183eb703e383029f375c278c3703c52";
 let courseDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
 const GUARD_MATCHER = "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit";
@@ -1397,11 +1405,21 @@ function readPinnedIdentity(name, manifest) {
 // The agent-native-os guard states, grouped by release ref. Each record is one proven version of
 // that repository's manifest; records sharing a ref share the version-distinct files and may differ
 // only in adapters. Anything malformed stops before discovery, like every other identity.
+// The workshop-installer states load the same way from their own pinned file, under refs that
+// must not repeat an agent-native-os ref, so each release keeps exactly one source.
 function readCourseDeployedIdentities() {
+  const courseReleases = readDeployedStates(courseDeployedPath, COURSE_DEPLOYED_IDENTITIES_SHA256, "agentNativeOsCommit");
+  const workshopReleases = readDeployedStates(workshopInstallerPath, WORKSHOP_INSTALLER_IDENTITIES_SHA256, "workshopInstallerCommit");
+  if ([...workshopReleases.keys()].some((ref) => courseReleases.has(ref)))
+    hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is incomplete. No files were changed.");
+  return new Map([...courseReleases, ...workshopReleases]);
+}
+
+function readDeployedStates(file, pinnedSha256, commitField) {
   let bytes;
-  try { bytes = fs.readFileSync(courseDeployedPath); }
+  try { bytes = fs.readFileSync(file); }
   catch { hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is unavailable. No files were changed."); }
-  if (!matchesReviewedHash(bytes, COURSE_DEPLOYED_IDENTITIES_SHA256))
+  if (!matchesReviewedHash(bytes, pinnedSha256))
     hold("SOURCE_INTEGRITY", "A reviewed compatibility identity does not match its pinned hash. No files were changed.");
   let value;
   try { value = JSON.parse(bytes.toString("utf8")); }
@@ -1409,7 +1427,7 @@ function readCourseDeployedIdentities() {
   const hex = /^[0-9a-f]{64}$/;
   const releases = new Map();
   for (const state of Array.isArray(value?.states) ? value.states : []) {
-    const complete = typeof state?.ref === "string" && state.ref.length > 0 && /^[0-9a-f]{40}$/.test(state.agentNativeOsCommit || "")
+    const complete = typeof state?.ref === "string" && state.ref.length > 0 && /^[0-9a-f]{40}$/.test(state[commitField] || "")
       && state.files && Object.keys(state.files).length === FILES.length && FILES.every((name) => hex.test(state.files[name] || ""))
       && state.local_files && Object.entries(state.local_files).every(([name, hash]) => LOCAL_GUARD_FILES.includes(name) && hex.test(hash));
     const sibling = releases.get(state?.ref)?.[0];
@@ -1424,6 +1442,10 @@ function readCourseDeployedIdentities() {
 // Public description of an attributed course-deployed state for the preview (no paths, no bytes).
 function courseDeployedDescription(set) {
   const states = courseDeployedReleases.get(set.slice(COURSE_SET_PREFIX.length)) || [];
+  if (states[0]?.workshopInstallerCommit)
+    return { ref: set.slice(COURSE_SET_PREFIX.length), sourceRepository: "aibuild-lab/workshop-installer",
+      workshopInstallerCommits: states.map((state) => state.workshopInstallerCommit),
+      workshopInstallerPullRequests: states.map((state) => state.workshopInstallerPullRequest).filter(Number.isInteger) };
   return { ref: set.slice(COURSE_SET_PREFIX.length), sourceRepository: "aibuild-lab/agent-native-os",
     agentNativeOsCommits: states.map((state) => state.agentNativeOsCommit),
     agentNativeOsPullRequests: states.map((state) => state.agentNativeOsPullRequest).filter(Number.isInteger) };

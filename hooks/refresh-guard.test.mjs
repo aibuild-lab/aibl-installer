@@ -156,6 +156,8 @@ fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.ident
 // Pinned by its hash inside refresh-guard.mjs (not the manifest), so it is copied unchanged.
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.course-deployed.identities.json"),
   path.join(repo, "hooks", "secrets-guard.course-deployed.identities.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.workshop-installer.identities.json"),
+  path.join(repo, "hooks", "secrets-guard.workshop-installer.identities.json"));
 const LOCAL_FILES = {};
 for (const [name, source] of REAL_LOCAL_FILES) {
   const body = fs.readFileSync(source);
