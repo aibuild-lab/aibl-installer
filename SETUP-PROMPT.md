@@ -345,7 +345,7 @@ Read the result:
   > If the old computer is gone, nothing else is lost: the rest of your workbench came back from GitHub.
 
   Never copy, move or open anything on the student's behalf here; they bring the files across themselves. Then continue to step 9.
-- `"camp"` is present (any status): the student's Agent Native Camp folder is beside the workbench. Say its `camp.say` once, word for word. Say nothing else about Camp, and never open, change or set up anything in the Camp folder.
+- `"camp"` is present (any status): setup found the student's Agent Native Camp setup on this computer. Say its `camp.say` once, word for word. Say nothing else about Camp, never ask whether they took Camp, and never open, change or set up anything in a Camp folder. Setup records that it said this (`~/.aibl/camp.json`), so neither a rerun nor enrolling later says or asks it again; when `"camp"` is absent, say nothing about Camp.
 - `"skills_missing"` is not empty: the workbench was made from an older template. Nothing was changed. Tell the student to ask in their program's channel with that message, and continue; the workbench still works.
 - `"template": { ..., "version": "0.0.12" }`: the template version you report in step 10. If it is `null`, the template ships no version stamp; say "the current template" and do not go looking for a number elsewhere.
 - `Setup paused: GitHub is not signed in yet`: step 6.1 did not finish. Do it, then run the same command again.
