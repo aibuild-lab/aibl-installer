@@ -35,15 +35,20 @@ LEFT_BEHIND = (
     "If that computer still works, copy them across before you go on:\n"
     "1. On the old computer, open your home folder, then GitHub, then my-workbench.\n"
     "2. Copy the library folder, the runs folder, and every file in work/course/staff whose name starts "
-    "with voice onto a USB drive.\n"
+    "with voice or ends with -accounts.yaml onto a USB drive.\n"
     "3. On this computer, put each one back in the same place inside my-workbench. Add them in; "
     "don't replace the whole folder.\n"
+    "If you worked on the old computer after your last save, save there first, then ask your assistant here "
+    "to bring that save in.\n"
     "Keys you saved on the old computer aren't here either. Add them again when a lesson asks for them.\n"
-    "If the old computer is gone, nothing else is lost: the rest of your workbench came back from GitHub."
+    "If the old computer is gone, your saved work came back from GitHub; sign-ins, keys and your mail "
+    "account records start fresh here.\n"
+    "Already in a program? It came back with your workbench. To bring it up to date, paste the Update prompt; "
+    "don't enroll again."
 )
 LEFT_BEHIND_NIGHT_SHIFT = ("Your Team HQ night shift ran on the old computer only. To run it on this one, "
                            "ask your assistant to put the night shift on a schedule.")
-LEFT_BEHIND_PATHS = ('library/', 'runs/', 'work/course/staff/voice*', '.env')
+LEFT_BEHIND_PATHS = ('library/', 'runs/', 'work/course/staff/voice*', 'work/course/staff/*-accounts.yaml', '.env')
 
 # Agent Native Camp alumni were set up by the Agent Native OS workshop installer, which made
 # ~/GitHub/agent-native-os; Camp's reference clone sits beside it at ~/GitHub/agent-native-camp

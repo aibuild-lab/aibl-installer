@@ -339,10 +339,12 @@ Read the result:
 
   > Your workbench came back from GitHub, but not everything comes with it. Anything in your library, your job folders and your voice samples was only on your old computer, so it isn't here. If that computer still works, copy them across before you go on:
   > 1. On the old computer, open your home folder, then GitHub, then my-workbench.
-  > 2. Copy the library folder, the runs folder, and every file in work/course/staff whose name starts with voice onto a USB drive.
+  > 2. Copy the library folder, the runs folder, and every file in work/course/staff whose name starts with voice or ends with -accounts.yaml onto a USB drive.
   > 3. On this computer, put each one back in the same place inside my-workbench. Add them in; don't replace the whole folder.
+  > If you worked on the old computer after your last save, save there first, then ask your assistant here to bring that save in.
   > Keys you saved on the old computer aren't here either. Add them again when a lesson asks for them.
-  > If the old computer is gone, nothing else is lost: the rest of your workbench came back from GitHub.
+  > If the old computer is gone, your saved work came back from GitHub; sign-ins, keys and your mail account records start fresh here.
+  > Already in a program? It came back with your workbench. To bring it up to date, paste the Update prompt; don't enroll again.
 
   Never copy, move or open anything on the student's behalf here; they bring the files across themselves. Then continue to step 9.
 - `"camp"` is present (any status): setup found the student's Agent Native Camp setup on this computer. Say its `camp.say` once, word for word. Say nothing else about Camp, never ask whether they took Camp, and never open, change or set up anything in a Camp folder. Setup records that it said this (`~/.aibl/camp.json`), so neither a rerun nor enrolling later says or asks it again; when `"camp"` is absent, say nothing about Camp.

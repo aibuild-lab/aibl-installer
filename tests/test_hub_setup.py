@@ -324,7 +324,7 @@ class LeftBehindTests(unittest.TestCase):
             self.assertEqual(r['status'], 'cloned_existing')
             left = r['left_behind']
             self.assertEqual(left['say'], hub.LEFT_BEHIND)
-            self.assertEqual(left['what'], ['library/', 'runs/', 'work/course/staff/voice*', '.env'])
+            self.assertEqual(left['what'], ['library/', 'runs/', 'work/course/staff/voice*', 'work/course/staff/*-accounts.yaml', '.env'])
             self.assertFalse(left['team_hq_night_shift'])
             self.assertNotIn('night shift', left['say'])
             for words in ('library', 'job folders', 'voice samples', 'old computer', 'If that computer still works'):
