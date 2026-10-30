@@ -43,13 +43,21 @@ come from the list plus a separate human approval.
 | `r774` (receipt absent) | R-774 files | R-774 files, or none | every app that has files |
 | `current` (current bytes, no receipt or damaged registration) | current | current, or none | every app that has files |
 | `recognized-mixed` | R-774 guard and tripwire, legacy installer | legacy | both |
-| `course-deployed` | one earlier agent-native-os release | the same release, or none | every app that has files |
+| `course-deployed` | one earlier agent-native-os or workshop-installer release | the same release, or none | every app that has files |
 
 `course-deployed` covers the guard states that `aibuild-lab/agent-native-os` installed before this
 repository became the guard's home. `secrets-guard.course-deployed.identities.json` lists each one
 by exact hash with its source commit, and the preview's `priorState` names the release it matched.
 A course-deployed adapter counts only beside its own release's guard. Two different earlier
 releases on the two apps, or one beside the legacy, R-774 or current files, are a hold.
+
+It also covers the Claude-only guard states that `aibuild-lab/workshop-installer` put in
+`~/.claude/hooks` straight from its main branch (Camp and workshop alumni, including its current
+`64130d9` guard from 09-09-2026). `secrets-guard.workshop-installer.identities.json` lists each state
+no other record names, with the workshop-installer commit that put it on main, and `priorState`
+then names that commit instead of an agent-native-os one. A workshop state has no adapters, so an
+adapter or supplement beside it is a hold, and an edited copy of any workshop file is still
+`UNKNOWN_MANAGED_BYTES`.
 
 A single-client legacy, R-774, current or course-deployed installation (the other app has no
 managed files) is the same topology for that one app. Anything else, including a current Claude guard beside legacy
