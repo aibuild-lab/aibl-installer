@@ -335,7 +335,19 @@ It checks tool versions, checks GitHub is signed in, creates the private reposit
 Read the result:
 - `"status": "created"`: new repository, new folder. Continue to step 9.
 - `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 9.
-- `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Continue to step 9.
+- `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Some things never go to GitHub, so they were only on the old computer. Before step 9, show the student the result's `left_behind.say` word for word, as your own message, line breaks kept. If the result has no `left_behind` (an older copy of the script), say this instead, word for word:
+
+  > Your workbench came back from GitHub, but not everything comes with it. Anything in your library, your job folders and your voice samples was only on your old computer, so it isn't here. If that computer still works, copy them across before you go on:
+  > 1. On the old computer, open your home folder, then GitHub, then my-workbench.
+  > 2. Copy the library folder, the runs folder, and every file in work/course/staff whose name starts with voice or ends with -accounts.yaml onto a USB drive.
+  > 3. On this computer, put each one back in the same place inside my-workbench. Add them in; don't replace the whole folder.
+  > If you worked on the old computer after your last save, save there first, then ask your assistant here to bring that save in.
+  > Keys you saved on the old computer aren't here either. Add them again when a lesson asks for them.
+  > If the old computer is gone, your saved work came back from GitHub; sign-ins, keys and your mail account records start fresh here.
+  > Already in a program? It came back with your workbench. To bring it up to date, paste the Update prompt; don't enroll again.
+
+  Never copy, move or open anything on the student's behalf here; they bring the files across themselves. Then continue to step 9.
+- `"camp"` is present (any status): setup found the student's Agent Native Camp setup on this computer. Say its `camp.say` once, word for word. Say nothing else about Camp, never ask whether they took Camp, and never open, change or set up anything in a Camp folder. Setup records that it said this (`~/.aibl/camp.json`), so neither a rerun nor enrolling later says or asks it again; when `"camp"` is absent, say nothing about Camp.
 - `"skills_missing"` is not empty: the workbench was made from an older template. Nothing was changed. Tell the student to ask in their program's channel with that message, and continue; the workbench still works.
 - `"template": { ..., "version": "0.0.12" }`: the template version you report in step 10. If it is `null`, the template ships no version stamp; say "the current template" and do not go looking for a number elsewhere.
 - `Setup paused: GitHub is not signed in yet`: step 6.1 did not finish. Do it, then run the same command again.

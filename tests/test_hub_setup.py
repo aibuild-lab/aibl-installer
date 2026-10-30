@@ -1,4 +1,4 @@
-import json, sys, tempfile, unittest
+import json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import hub_setup as hub
@@ -22,6 +22,7 @@ class Fake:
         self.claude = True
         self.with_skills = True
         self.template_version = '0.0.12'   # .aibl/template.json in the template; None means the template ships no stamp
+        self.team_hq = False          # the student's repository on GitHub already holds Agent Team HQ's work/team-hq/
 
     def __call__(self, args, cwd=None, interactive=False):
         self.calls.append(args)
@@ -57,6 +58,8 @@ class Fake:
                 for app in ('.claude', '.agents'):
                     for s in hub.SKILLS:
                         d = p / app / 'skills' / s; d.mkdir(parents=True); (d / 'SKILL.md').write_text('---\nname: ' + s + '\n---\n')
+            if self.team_hq:
+                (p / 'work' / 'team-hq').mkdir(parents=True); (p / 'work' / 'team-hq' / 'north-star.md').write_text('mine\n')
             return ''
         if args[:3] == ['git', 'remote', 'get-url']:
             return 'https://github.com/' + FULL + '.git'
@@ -237,6 +240,243 @@ class HubSetupTests(unittest.TestCase):
             for bad in ('my/workbench', 'con', 'x.git'):
                 with self.assertRaises(SetupError):
                     run(Fake(), d, name=bad)
+
+
+# Throwaway home folders go under AIBL_TEST_SCRATCH when it is set (removed after each test either way).
+SCRATCH = os.environ.get('AIBL_TEST_SCRATCH') or None
+PROMPT = (Path(__file__).resolve().parents[1] / 'SETUP-PROMPT.md').read_text(encoding='utf-8')
+CAMP = {'schema_version': 'aibl.repository-descriptor/v2', 'id': 'repo.agent-native-camp'}
+
+
+def scratch_home():
+    if SCRATCH:
+        Path(SCRATCH).mkdir(parents=True, exist_ok=True)
+    return tempfile.TemporaryDirectory(dir=SCRATCH)
+
+
+CAMP_URL = 'https://github.com/aibuild-lab/agent-native-camp.git'
+MIRROR_URL = 'https://github.com/camper-example/agent-native-camp-private.git'
+
+
+def camp_clone(home, descriptor=CAMP, where=('GitHub', 'agent-native-camp'), remotes=None):
+    folder = Path(home).joinpath(*where)
+    (folder / '.aibl').mkdir(parents=True)
+    (folder / 'START-HERE.md').write_text('camp\n')
+    if descriptor is not None:
+        (folder / '.aibl' / 'repository.json').write_text(descriptor if isinstance(descriptor, str) else json.dumps(descriptor))
+    if remotes:
+        git(folder, 'init', '-q')
+        for name, url in remotes.items():
+            git(folder, 'remote', 'add', name, url)
+    return folder
+
+
+def git(cwd, *args):
+    subprocess.run(['git', *args], cwd=cwd, check=True, capture_output=True)
+
+
+def workshop_installer_layout(home):
+    """What the Agent Native OS workshop installer leaves, Camp or not."""
+    home = Path(home)
+    os_repo = home / 'GitHub' / 'agent-native-os'
+    (os_repo / '.aibl').mkdir(parents=True)
+    (os_repo / '.aibl' / 'repo-state.md').write_text('# AI Build Lab Repo State\n')
+    git(os_repo, 'init', '-q')
+    git(os_repo, 'remote', 'add', 'origin', 'https://github.com/camper-example/agent-native-os-private.git')
+    git(os_repo, 'remote', 'add', 'upstream', 'https://github.com/aibuild-lab/agent-native-os.git')
+    (home / 'GitHub' / 'workshop-installer').mkdir(parents=True)
+    (home / '.aibl' / 'workshop-installer').mkdir(parents=True)
+    (home / '.aibl' / 'workshop-installer' / 'state.json').write_text('{}\n')
+    (home / '.hermes').mkdir()  # the workshop teaches a local Hermes here
+
+
+def context_repo(home, marker=True):
+    folder = Path(home) / 'context-repo'
+    (folder / 'about-me').mkdir(parents=True)
+    if marker:
+        (folder / '.camp-context-repo').write_text('camp-context-repo-schema=1\n')
+    return folder
+
+
+def camp_record(home):
+    path = Path(home) / '.aibl' / 'camp.json'
+    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+
+
+def snapshot(base):
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(base):
+        for name in dirnames + filenames:
+            full = Path(dirpath) / name
+            info = full.lstat()
+            out[full.relative_to(base).as_posix()] = (info.st_size, info.st_mtime_ns)
+    return out
+
+
+class LeftBehindTests(unittest.TestCase):
+    """cloned_existing: the workbench came back from GitHub, for example onto a new computer, without
+    what only ever lived on the old one (risk R6 in Wonderboy's Returning-Students-Routes-10-30-2026)."""
+
+    def test_cloned_back_says_what_stayed_on_the_old_computer(self):
+        with scratch_home() as home:
+            f = Fake(); f.exists = True
+            r = run(f, home)
+            self.assertEqual(r['status'], 'cloned_existing')
+            left = r['left_behind']
+            self.assertEqual(left['say'], hub.LEFT_BEHIND)
+            self.assertEqual(left['what'], ['library/', 'runs/', 'work/course/staff/voice*', 'work/course/staff/*-accounts.yaml', '.env'])
+            self.assertFalse(left['team_hq_night_shift'])
+            self.assertNotIn('night shift', left['say'])
+            for words in ('library', 'job folders', 'voice samples', 'old computer', 'If that computer still works'):
+                self.assertIn(words, left['say'])
+
+    def test_team_hq_workbench_also_hears_about_its_night_shift(self):
+        with scratch_home() as home:
+            f = Fake(); f.exists = True; f.team_hq = True
+            left = run(f, home)['left_behind']
+            self.assertTrue(left['team_hq_night_shift'])
+            self.assertEqual(left['say'], hub.LEFT_BEHIND + '\n' + hub.LEFT_BEHIND_NIGHT_SHIFT)
+
+    def test_new_and_reused_workbenches_say_nothing_about_it(self):
+        with scratch_home() as home:
+            f = Fake()
+            self.assertNotIn('left_behind', run(f, home))     # created
+            self.assertNotIn('left_behind', run(f, home))     # already_initialized
+
+    def test_prompt_carries_the_same_words_for_an_older_script(self):
+        self.assertIn('`left_behind.say` word for word', PROMPT)
+        for line in hub.LEFT_BEHIND.split('\n'):
+            self.assertIn('  > ' + line + '\n', PROMPT)
+
+    def test_no_em_dashes_in_the_new_words(self):
+        for text in (hub.LEFT_BEHIND, hub.LEFT_BEHIND_NIGHT_SHIFT, hub.CAMP_SAY):
+            self.assertNotIn('—', text)
+
+
+class CampNoticeTests(unittest.TestCase):
+    """A Camp alum's own Camp clone sits at ~/GitHub/agent-native-camp. Setup only says it is untouched."""
+
+    def test_camp_clone_with_its_descriptor_gets_one_line(self):
+        with scratch_home() as home:
+            folder = camp_clone(home)
+            r = run(Fake(), home)
+            self.assertEqual(r['camp'], {'folder': str(folder), 'say': hub.CAMP_SAY})
+
+    def test_no_descriptor_or_another_id_or_unreadable_says_nothing(self):
+        for descriptor in (None, {'id': 'repo.something-else'}, 'not json', json.dumps({'id': 'repo.agent-native-camp', 'pad': 'y' * 70000})):
+            with self.subTest(descriptor=str(descriptor)[:20]), scratch_home() as home:
+                camp_clone(home, descriptor)
+                self.assertNotIn('camp', run(Fake(), home))
+
+    def test_no_camp_says_nothing(self):
+        with scratch_home() as home:
+            self.assertNotIn('camp', run(Fake(), home))
+
+    def test_camp_folder_is_left_exactly_as_it_was(self):
+        with scratch_home() as home:
+            folder = camp_clone(home)
+            before = snapshot(folder)
+            f = Fake(); f.exists = True
+            run(f, home)
+            self.assertEqual(snapshot(folder), before)
+            self.assertFalse(any(str(folder) in ' '.join(map(str, c)) for c in f.calls))
+
+    def test_prompt_says_the_camp_line_and_nothing_more(self):
+        self.assertIn("Say its `camp.say` once, word for word. Say nothing else about Camp", PROMPT)
+        self.assertIn("never ask whether they took Camp", PROMPT)
+        self.assertIn("`~/.aibl/camp.json`", PROMPT)
+
+
+class CampOldInstallerLayoutTests(unittest.TestCase):
+    """The layouts the Agent Native OS workshop installer and Camp leave on a Mac or Windows computer
+    (the same paths under the home folder, except Windows' OneDrive Documents and Desktop)."""
+
+    def says(self, home, fake=None):
+        r = run(fake or Fake(), home)
+        return r.get('camp')
+
+    def test_workshop_alum_who_never_took_camp_hears_nothing(self):
+        with scratch_home() as home:
+            workshop_installer_layout(home)
+            self.assertIsNone(self.says(home))
+            self.assertIsNone(camp_record(home))
+
+    def test_clone_from_before_the_descriptor(self):
+        for remotes in ({'origin': MIRROR_URL, 'upstream': CAMP_URL}, {'origin': CAMP_URL},
+                        {'origin': 'git@github.com:camper-example/agent-native-camp-private.git'}):
+            with self.subTest(remotes=remotes), scratch_home() as home:
+                workshop_installer_layout(home)
+                folder = camp_clone(home, descriptor=None, remotes=remotes)
+                self.assertEqual(self.says(home), {'folder': str(folder), 'say': hub.CAMP_SAY})
+
+    def test_lookalike_remote_is_not_camp(self):
+        with scratch_home() as home:
+            camp_clone(home, descriptor=None, remotes={'origin': 'https://github.com/aibuild-lab/agent-native-camp-hq.git'})
+            self.assertIsNone(self.says(home))
+
+    def test_clone_somewhere_else(self):
+        for where in (('Documents', 'GitHub', 'agent-native-camp'), ('Desktop', 'agent-native-camp'), ('agent-native-camp',),
+                      ('GitHub', 'agent-native-camp-private'), ('OneDrive', 'Documents', 'agent-native-camp')):
+            with self.subTest(where=where), scratch_home() as home:
+                folder = camp_clone(home, descriptor=None, where=where, remotes={'origin': MIRROR_URL, 'upstream': CAMP_URL})
+                self.assertEqual(self.says(home), {'folder': str(folder), 'say': hub.CAMP_SAY})
+
+    def test_only_context_repo(self):
+        with scratch_home() as home:
+            workshop_installer_layout(home)
+            folder = context_repo(home)
+            self.assertEqual(self.says(home), {'folder': str(folder), 'say': hub.CAMP_SAY})
+
+    def test_weak_signs_alone_say_nothing_and_never_ask(self):
+        for make in (lambda h: context_repo(h, marker=False),
+                     lambda h: (Path(h) / 'Documents' / 'Agent-Native-Camp').mkdir(parents=True),
+                     lambda h: camp_clone(h, descriptor=None)):
+            with scratch_home() as home:
+                make(home)
+                self.assertIsNone(self.says(home))
+                self.assertIsNone(camp_record(home))
+
+
+class CampOnceTests(unittest.TestCase):
+    """The Camp line is said at most once, ever, and setup never asks. ~/.aibl/camp.json is the
+    record the template's aibl-enroll also reads (its tests/joining_from.py writes the same shape)."""
+
+    def test_said_once_then_never_again(self):
+        with scratch_home() as home:
+            camp_clone(home)
+            first = run(Fake(), home)
+            self.assertEqual(first['camp']['say'], hub.CAMP_SAY)
+            record = camp_record(home)
+            self.assertEqual((record['schema'], record['took_camp'], record['told'], record['by']),
+                             ('aibl.camp-answer/v1', True, True, 'aibl-installer'))
+            self.assertNotIn('camp', run(Fake(), home))          # a rerun
+            f = Fake(); f.exists = True
+            self.assertNotIn('camp', run(f, home))                # a new computer's clone-back
+
+    def test_enroll_already_said_or_answered(self):
+        for record in ({'took_camp': True, 'told': True, 'by': 'aibl-enroll'}, 'broken'):
+            with self.subTest(record=record), scratch_home() as home:
+                camp_clone(home)
+                path = Path(home) / '.aibl' / 'camp.json'
+                path.parent.mkdir(parents=True)
+                path.write_text('not json' if record == 'broken' else json.dumps({'schema': 'aibl.camp-answer/v1', **record}))
+                before = path.read_text()
+                self.assertNotIn('camp', run(Fake(), home))
+                self.assertEqual(path.read_text(), before)
+
+    def test_answered_no_then_a_strong_sign_says_the_line_once(self):
+        with scratch_home() as home:
+            path = Path(home) / '.aibl' / 'camp.json'
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({'schema': 'aibl.camp-answer/v1', 'took_camp': False, 'told': False, 'by': 'aibl-enroll'}))
+            camp_clone(home)
+            self.assertIn('camp', run(Fake(), home))
+            self.assertNotIn('camp', run(Fake(), home))
+
+    def test_no_sign_writes_no_record(self):
+        with scratch_home() as home:
+            run(Fake(), home)
+            self.assertFalse((Path(home) / '.aibl' / 'camp.json').exists())
 
 
 if __name__ == '__main__':

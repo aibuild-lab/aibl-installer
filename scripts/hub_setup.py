@@ -17,13 +17,63 @@ Nothing here deletes anything.
 The frozen cohort route (family_setup_handoff.py) is separate and unchanged.
 """
 from __future__ import annotations
-import argparse, datetime, json, sys, time
+import argparse, datetime, json, re, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from course_setup import (HARNESSES, SetupError, check_tools, command, registry, remote_matches, repo_name,
                           safe_workspace, verify_existing, write)
 
 SKILLS = ('aibl-personalize', 'aibl-checkpoint', 'aibl-enroll')
+
+# cloned_existing: the repository came back from GitHub, for example onto a new computer. Some
+# things never go to GitHub (the template's .gitignore and the course's library/.gitignore keep
+# them on the computer), so they were only on the old one. SETUP-PROMPT.md step 8 says these
+# same words when an older copy of this script gives no left_behind; tests keep the two equal.
+LEFT_BEHIND = (
+    "Your workbench came back from GitHub, but not everything comes with it. Anything in your library, "
+    "your job folders and your voice samples was only on your old computer, so it isn't here. "
+    "If that computer still works, copy them across before you go on:\n"
+    "1. On the old computer, open your home folder, then GitHub, then my-workbench.\n"
+    "2. Copy the library folder, the runs folder, and every file in work/course/staff whose name starts "
+    "with voice or ends with -accounts.yaml onto a USB drive.\n"
+    "3. On this computer, put each one back in the same place inside my-workbench. Add them in; "
+    "don't replace the whole folder.\n"
+    "If you worked on the old computer after your last save, save there first, then ask your assistant here "
+    "to bring that save in.\n"
+    "Keys you saved on the old computer aren't here either. Add them again when a lesson asks for them.\n"
+    "If the old computer is gone, your saved work came back from GitHub; sign-ins, keys and your mail "
+    "account records start fresh here.\n"
+    "Already in a program? It came back with your workbench. To bring it up to date, paste the Update prompt; "
+    "don't enroll again."
+)
+LEFT_BEHIND_NIGHT_SHIFT = ("Your Team HQ night shift ran on the old computer only. To run it on this one, "
+                           "ask your assistant to put the night shift on a schedule.")
+LEFT_BEHIND_PATHS = ('library/', 'runs/', 'work/course/staff/voice*', 'work/course/staff/*-accounts.yaml', '.env')
+
+# Agent Native Camp alumni were set up by the Agent Native OS workshop installer, which made
+# ~/GitHub/agent-native-os; Camp's reference clone sits beside it at ~/GitHub/agent-native-camp
+# (Camp's scripts/diagnose-course-repo.mjs). Setup never touches Camp; on a verified Camp sign it
+# says so, once, ever. Verified signs, the same as the template's update-check.mjs --joining-from:
+#   - a Camp clone holding Camp's descriptor (id repo.agent-native-camp, on Camp main since
+#     09-02-2026, so an older clone has none);
+#   - a Camp clone whose own .git/config names aibuild-lab/agent-native-camp or a private
+#     <name>/agent-native-camp-private mirror;
+#   - ~/context-repo holding Camp's .camp-context-repo marker (Week 2, on the camper's computer).
+# The clone is looked for at ~/GitHub first, then a few fixed places, under either name. Setup only
+# checks those fixed paths and reads those small files; it never lists, opens or changes anything
+# else there, and it never asks about Camp. Weak signs are left to aibl-enroll, which asks once.
+CAMP_ID = 'repo.agent-native-camp'
+CAMP_SAY = ("I can see your Camp folder. I didn't touch it, and setup never will. "
+            "Your workbench is its own folder, my-workbench.")
+CAMP_REMOTE = re.compile(r'(?:^|[@/])github\.com[:/](?:aibuild-lab/agent-native-camp|[A-Za-z0-9-]+/agent-native-camp-private)(?:\.git)?/?$', re.I)
+CAMP_CONTEXT_MARKER = re.compile(r'^camp-context-repo-schema=\d+$')
+CAMP_PARENTS = (('GitHub',), (), ('Documents', 'GitHub'), ('Documents',), ('Desktop',),
+                ('OneDrive', 'Documents', 'GitHub'), ('OneDrive', 'Documents'), ('OneDrive', 'Desktop'))
+CAMP_NAMES = ('agent-native-camp', 'agent-native-camp-private')
+# ~/.aibl/camp.json: the one record, shared with the template's aibl-enroll, that the Camp line was
+# said or the Camp question answered. Once it exists, neither surface asks or says it again.
+CAMP_RECORD = ('.aibl', 'camp.json')
+CAMP_RECORD_SCHEMA = 'aibl.camp-answer/v1'
 
 
 def public_template(reg=None):
@@ -126,6 +176,103 @@ def skills_present(folder):
     return found
 
 
+def left_behind(folder):
+    """What a workbench cloned back from GitHub is missing, in words for the student. Looks only."""
+    say = LEFT_BEHIND
+    team_hq = (folder / 'work' / 'team-hq').is_dir() or (folder / '.aibl' / 'programs' / 'agent-team-hq.json').is_file()
+    if team_hq:
+        say += '\n' + LEFT_BEHIND_NIGHT_SHIFT
+    return {'what': list(LEFT_BEHIND_PATHS), 'team_hq_night_shift': team_hq, 'say': say}
+
+
+def _small_text(path, limit):
+    """A small regular file's text, or None. Never follows a link."""
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+            return None
+        return path.read_text(encoding='utf-8')
+    except (OSError, ValueError):
+        return None
+
+
+def camp_descriptor(folder):
+    text = _small_text(Path(folder) / '.aibl' / 'repository.json', 64 * 1024)
+    try:
+        meta = json.loads(text) if text is not None else None
+    except ValueError:
+        return False
+    return isinstance(meta, dict) and meta.get('id') == CAMP_ID
+
+
+def camp_remote(folder):
+    """True when the folder's own .git/config has a remote naming Camp or a private Camp mirror.
+    Reads that one file as text; runs no Git command there."""
+    text = _small_text(Path(folder) / '.git' / 'config', 64 * 1024)
+    in_remote = False
+    for line in (text or '').splitlines():
+        section = re.match(r'\s*\[\s*([A-Za-z]+)', line)
+        if section:
+            in_remote = section.group(1).lower() == 'remote'
+            continue
+        url = re.match(r'\s*url\s*=\s*"?([^"\s]+)"?\s*$', line, re.I)
+        if in_remote and url and CAMP_REMOTE.search(url.group(1)):
+            return True
+    return False
+
+
+def camp_context_marker(folder):
+    text = _small_text(Path(folder) / '.camp-context-repo', 1024)
+    return bool(text is not None and CAMP_CONTEXT_MARKER.match(text.strip()))
+
+
+def camp_folder(home):
+    """The first folder with a verified Camp sign (a Camp clone, else ~/context-repo); else None."""
+    home = Path(home)
+    for parent in CAMP_PARENTS:
+        for name in CAMP_NAMES:
+            folder = home.joinpath(*parent, name)
+            if folder.is_dir() and (camp_descriptor(folder) or camp_remote(folder)):
+                return str(folder)
+    context = home / 'context-repo'
+    if context.is_dir() and camp_context_marker(context):
+        return str(context)
+    return None
+
+
+def camp_record(home):
+    """None when there is no record; the record when it is Camp's; {'unreadable': True} otherwise."""
+    path = Path(home).joinpath(*CAMP_RECORD)
+    if not path.exists() and not path.is_symlink():
+        return None
+    text = _small_text(path, 4096)
+    try:
+        record = json.loads(text) if text is not None else None
+    except ValueError:
+        record = None
+    if not isinstance(record, dict) or record.get('schema') != CAMP_RECORD_SCHEMA or not isinstance(record.get('took_camp'), bool):
+        return {'unreadable': True}
+    return record
+
+
+def camp_notice(home):
+    """The Camp line for this run, at most once ever. Writes the shared record when it gives one."""
+    folder = camp_folder(home)
+    if not folder:
+        return None
+    record = camp_record(home)
+    if record is not None and (record.get('unreadable') or record.get('told') is True):
+        return None
+    path = Path(home).joinpath(*CAMP_RECORD)
+    if path.parent.is_symlink() or path.is_symlink():
+        return None
+    try:
+        write(path, {'schema': CAMP_RECORD_SCHEMA, 'took_camp': True, 'told': True, 'by': 'aibl-installer',
+                     'recorded_at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    except OSError:
+        return None  # without the record the line could repeat, so it is not said
+    return {'folder': folder, 'say': CAMP_SAY}
+
+
 def twin_signed_in(runner, harness):
     """Report only. Sign-in happened in step 6; a false here is a reminder, not a stop."""
     h = HARNESSES[harness]
@@ -204,6 +351,11 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
     if missing:
         receipt['note'] = ('This workbench was made before the starter skills shipped in the template, or from a different template. '
                            'Nothing was changed. Ask in your program channel with this message.')
+    if status == 'cloned_existing':
+        receipt['left_behind'] = left_behind(folder)
+    camp = camp_notice(home)
+    if camp:
+        receipt['camp'] = camp
     receipt['next'] = ('Open ' + str(folder) + ' in the app you chose (step 9). Type / in Claude or $ in Codex; the three aibl- skills are there.')
     return receipt
 
