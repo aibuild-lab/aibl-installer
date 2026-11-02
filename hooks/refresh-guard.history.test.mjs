@@ -82,9 +82,10 @@ check("learner A's other posted hashes are the pinned legacy release", Object.en
 // blobs, one folder per record, named by the workshop-installer commit that put them on main.
 const workshop = JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.workshop-installer.identities.json"), "utf8"));
 const WORKSHOP_COMMITS = ["00eadf9", "86f9cbc", "d8fdc6b", "9ab6044", "f506b52", "64130d9"];
-const workshopState = (short) => workshop.states.find((state) => state.workshopInstallerCommit.startsWith(short));
-check("the workshop-installer record holds exactly the six workshop states no other record names",
-  JSON.stringify(workshop.states.map((state) => state.workshopInstallerCommit.slice(0, 7))) === JSON.stringify(WORKSHOP_COMMITS));
+const workshopLf = workshop.states.filter((state) => state.lineEndings === undefined);
+const workshopState = (short) => workshopLf.find((state) => state.workshopInstallerCommit.startsWith(short));
+check("the workshop-installer record holds exactly the six LF workshop states no other record names",
+  JSON.stringify(workshopLf.map((state) => state.workshopInstallerCommit.slice(0, 7))) === JSON.stringify(WORKSHOP_COMMITS));
 for (const short of WORKSHOP_COMMITS) {
   const state = workshopState(short);
   check(`workshop ${short}: record names its full source commit and its own ref`, /^[0-9a-f]{40}$/.test(state?.workshopInstallerCommit || "")
@@ -98,6 +99,46 @@ check("no workshop record repeats a state an earlier record already names",
     && !course.states.some((other) => other.ref === state.ref)));
 check("QA's 10-30 finding: the workshop 64130d9 guard is the sha256 QA reported (02fbc66d...)",
   workshopState("64130d9")?.files["secrets-guard.js"].startsWith("02fbc66d"));
+
+// Windows copies of every workshop state (routes walk, 11-02-2026). workshop-installer has no
+// .gitattributes, so Git for Windows (core.autocrlf=true by default) checks its hooks out with CRLF and
+// the workshop's install.mjs copies them as they are. The -crlf fixtures are the exact bytes of a
+// core.autocrlf=true checkout at each commit; each record must be the same content as a reviewed LF
+// state at the same commit, with nothing different except a CR before every LF.
+const WORKSHOP_MAIN = ["00eadf9", "86f9cbc", "d8fdc6b", "9ab6044", "ef2731e", "30838ee", "f3cf6e2", "6aae7db", "afb284e",
+  "f506b52", "9b73e57", "ff0f28b", "64130d9"];
+const WORKSHOP_NAMES = ["secrets-guard.js", "secrets-tripwire.js", "install.mjs"];
+const workshopCrlf = workshop.states.filter((state) => state.lineEndings === "crlf");
+const crlfState = (short) => workshopCrlf.find((state) => state.workshopInstallerCommit.startsWith(short));
+const toLf = (buf) => Buffer.from(buf.toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+const pureCrlf = (buf) => { const text = buf.toString("latin1"); return /\r\n/.test(text) && !/\r(?!\n)/.test(text) && !/(?<!\r)\n/.test(text); };
+check("every workshop record is LF (no lineEndings field) or says crlf, and nothing else",
+  workshop.states.every((state) => state.lineEndings === undefined || state.lineEndings === "crlf"));
+check("the CRLF records are exactly the thirteen workshop main states, in main order",
+  JSON.stringify(workshopCrlf.map((state) => state.workshopInstallerCommit.slice(0, 7))) === JSON.stringify(WORKSHOP_MAIN));
+const lfSources = [...workshopLf, ...course.states, legacy];
+for (const short of WORKSHOP_MAIN) {
+  const state = crlfState(short);
+  check(`workshop ${short} CRLF: own ref, full source commit, no adapters`, state?.ref === `workshop-installer-${short}-crlf`
+    && /^[0-9a-f]{40}$/.test(state.workshopInstallerCommit) && Object.keys(state.local_files).length === 0);
+  const same = lfSources.filter((source) => source.ref === state?.sameContentAs);
+  check(`workshop ${short} CRLF: sameContentAs names a reviewed LF record`, same.length > 0, state?.sameContentAs);
+  const lf = workshopState(short);
+  if (lf) check(`workshop ${short} CRLF: commit, pull request, tag and dates equal its LF record`,
+    ["workshopInstallerCommit", "workshopInstallerPullRequest", "workshopInstallerTag", "onMainFrom", "replacedOnMainBy", "replacedOnMainAt"]
+      .every((field) => JSON.stringify(lf[field]) === JSON.stringify(state?.[field])) && state.sameContentAs === lf.ref);
+  for (const name of WORKSHOP_NAMES) {
+    const bytes = fx(`workshop-${short}-crlf`, name);
+    check(`workshop ${short} CRLF: fixture ${name} is the recorded hash and pure CRLF`, sha(bytes) === state?.files[name] && pureCrlf(bytes));
+    check(`workshop ${short} CRLF: ${name} with LF endings is the reviewed LF hash`,
+      same.length > 0 && same.every((source) => source.files[name] === sha(toLf(bytes))) && sha(bytes) !== sha(toLf(bytes)));
+    if (lf) check(`workshop ${short} CRLF: ${name} differs from the LF fixture only by line endings`, toLf(bytes).equals(fx(`workshop-${short}`, name)));
+  }
+}
+const lfHashes = new Set([...lfSources, prior].flatMap((source) => [...Object.values(source.files), ...Object.values(source.local_files || {})]));
+check("no CRLF record hash is any LF record's hash", workshopCrlf.every((state) => Object.values(state.files).every((hash) => !lfHashes.has(hash))));
+check("routes walk 11-02: the Windows copy of the 64130d9 guard is the sha256 the walk reported (9146e6b7...)",
+  crlfState("64130d9")?.files["secrets-guard.js"].startsWith("9146e6b7"));
 
 const pinnedEverywhere = JSON.stringify([prior, legacy, course, workshop,
   JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.manifest.json"), "utf8"))]);
@@ -228,18 +269,21 @@ const TOPOLOGIES = {
 // Camp and workshop alumni: built the way the workshop installer's setup did it, on a home this
 // installer never touched. The three files of one workshop state go into ~/.claude/hooks and that
 // state's own install.mjs registers them (Claude only; the workshop installer never set up Codex).
-function workshopBuild(short) {
+function workshopBuild(folder) {
   return (home) => {
     const p = paths(home);
     fs.mkdirSync(p.claudeHooks, { recursive: true });
-    for (const name of ["secrets-guard.js", "secrets-tripwire.js", "install.mjs"]) put(path.join(p.claudeHooks, name), fx(`workshop-${short}`, name));
+    for (const name of ["secrets-guard.js", "secrets-tripwire.js", "install.mjs"]) put(path.join(p.claudeHooks, name), fx(folder, name));
     const registered = spawnSync(process.execPath, [path.join(p.claudeHooks, "install.mjs")], {
       env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: "utf8" });
-    if (registered.status !== 0) throw new Error(`workshop ${short} install failed: ${registered.stderr}`);
+    if (registered.status !== 0) throw new Error(`${folder} install failed: ${registered.stderr}`);
   };
 }
 for (const short of WORKSHOP_COMMITS)
-  TOPOLOGIES[`workshop-${short}-claude`] = { flags: ["--claude"], fresh: true, build: workshopBuild(short) };
+  TOPOLOGIES[`workshop-${short}-claude`] = { flags: ["--claude"], fresh: true, build: workshopBuild(`workshop-${short}`) };
+// The Windows copy of every workshop main state, registered by its own CRLF install.mjs.
+for (const short of WORKSHOP_MAIN)
+  TOPOLOGIES[`workshop-${short}-crlf-claude`] = { flags: ["--claude"], fresh: true, build: workshopBuild(`workshop-${short}-crlf`) };
 function receiptFreeHome(name) {
   const home = newHome();
   const { flags, build, fresh } = TOPOLOGIES[name];
@@ -270,6 +314,9 @@ const EXPECTED = {
 for (const short of WORKSHOP_COMMITS)
   EXPECTED[`workshop-${short}-claude`] = { topology: "course-deployed", clients: ["claude"], priorRef: `workshop-installer-${short}`,
     workshopCommit: workshopState(short)?.workshopInstallerCommit, workshopPullRequest: workshopState(short)?.workshopInstallerPullRequest };
+for (const short of WORKSHOP_MAIN)
+  EXPECTED[`workshop-${short}-crlf-claude`] = { topology: "course-deployed", clients: ["claude"], priorRef: `workshop-installer-${short}-crlf`,
+    workshopCommit: crlfState(short)?.workshopInstallerCommit, workshopPullRequest: crlfState(short)?.workshopInstallerPullRequest };
 const priorStateMatches = (want, priorState) => want.workshopCommit
   ? priorState?.ref === want.priorRef && priorState.sourceRepository === "aibuild-lab/workshop-installer"
     && JSON.stringify(priorState.workshopInstallerCommits) === JSON.stringify([want.workshopCommit])
@@ -513,6 +560,62 @@ function agree(label, home, flags, want) {
   check("tampered workshop-installer record: preview and application hold with SOURCE_INTEGRITY and write nothing",
     preview?.failureClass === "SOURCE_INTEGRITY" && apply?.failureClass === "SOURCE_INTEGRITY"
     && preview.eligibility !== "eligible-migration" && snapshot(home) === before, JSON.stringify(preview));
+}
+// The CRLF records are exact hashes, not a line-ending normalization: every one of these still holds.
+{
+  // an unknown CRLF file in the guard's place (no reviewed release, in any line endings, has these bytes)
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"), Buffer.from("#!/usr/bin/env node\r\n// not a reviewed guard\r\nprocess.exit(0);\r\n"));
+  agree("an unknown CRLF secrets-guard.js beside the workshop 64130d9 CRLF files", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // the Windows copy of the 64130d9 guard with one changed byte
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  const edited = Buffer.from(fx("workshop-64130d9-crlf", "secrets-guard.js"));
+  edited[edited.length - 3] ^= 0x20;
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"), edited);
+  agree("workshop 64130d9 CRLF guard with one changed byte", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // the Windows copy with a CRLF line added at the end
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"),
+    Buffer.concat([fx("workshop-64130d9-crlf", "secrets-guard.js"), Buffer.from("// edited locally\r\n")]));
+  agree("workshop 64130d9 CRLF guard with a line added", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // mixed line endings: the same content as the reviewed guard, but one CRLF turned back into LF.
+  // Proves the managed files are never normalized before matching.
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  const crlf = fx("workshop-64130d9-crlf", "secrets-guard.js").toString("latin1");
+  const mixed = Buffer.from(crlf.replace("\r\n", "\n"), "latin1");
+  check("the mixed-ending guard is the reviewed 64130d9 content once normalized", sha(toLf(mixed)) === workshopState("64130d9").files["secrets-guard.js"]);
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"), mixed);
+  agree("workshop 64130d9 guard with mixed line endings", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
+}
+{
+  // a CRLF guard beside the LF tripwire and installer of the same state is two records, not one release
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  for (const name of ["secrets-tripwire.js", "install.mjs"]) put(path.join(paths(home).claudeHooks, name), fx("workshop-64130d9", name));
+  agree("workshop 64130d9 CRLF guard beside its LF tripwire and installer", home, ["--claude"], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // CRLF files from two different workshop states are not one release
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  for (const name of ["secrets-tripwire.js", "install.mjs"]) put(path.join(paths(home).claudeHooks, name), fx("workshop-9ab6044-crlf", name));
+  agree("workshop 64130d9 CRLF guard beside the June CRLF tripwire and installer", home, ["--claude"], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // a CRLF workshop state attributes no adapter either
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  put(path.join(paths(home).claudeHooks, "aws-credential-guard.mjs"), current("aws-credential-guard.mjs"));
+  agree("workshop 64130d9 CRLF guard beside an AWS supplement", home, ["--claude"], { failureClass: "MIGRATION_TOPOLOGY_UNRECOGNIZED", firstFailedStage: "OWNER_BINDING", action: "escalate-unreviewed-topology" });
+}
+{
+  // the current release's guard with CRLF endings is not a reviewed record: no normalization reached it
+  const home = receiptFreeHome("workshop-64130d9-crlf-claude");
+  put(path.join(paths(home).claudeHooks, "secrets-guard.js"), Buffer.from(current("secrets-guard.js").toString("latin1").replace(/\n/g, "\r\n"), "latin1"));
+  agree("the current guard with CRLF endings beside workshop CRLF files", home, ["--claude"], { failureClass: "UNKNOWN_MANAGED_BYTES", firstFailedStage: "OWNER_DISCOVERY", action: "review-private-ownership" });
 }
 {
   const home = receiptFreeHome("legacy-claude");

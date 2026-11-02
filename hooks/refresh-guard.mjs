@@ -82,8 +82,12 @@ const COURSE_DEPLOYED_IDENTITIES_SHA256 = "0fb6a0d8181135a00067a4a26ceceb12b26ca
 // 9ab6044 (#12), f506b52 (#26, tag secrets-guard-2026-09-03-r2) and 64130d9 (#33, main since
 // 09-09-2026). They join the course-deployed topology under their own refs, so they are attributed
 // only as a whole release and still need a separate human approval.
+// The same file also lists the CRLF copy of all thirteen workshop main states (refs ending -crlf):
+// a Windows student's Git checks workshop-installer out with CRLF (no .gitattributes there), and its
+// install.mjs copies those bytes as they are. Those are exact-hash records too; the managed files are
+// never line-ending normalized, so edited, mixed-ending or half-CRLF installations still hold.
 const workshopInstallerPath = path.join(hooksSourceDir, "secrets-guard.workshop-installer.identities.json");
-const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "f95bb18826bd4fd6986a3b14127e3d523183eb703e383029f375c278c3703c52";
+const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "67965b7d6ec260942ff112675bd20a5d27c3611180343feed184119fc1d9e0b8";
 let courseDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
 const GUARD_MATCHER = "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit";

@@ -59,6 +59,15 @@ then names that commit instead of an agent-native-os one. A workshop state has n
 adapter or supplement beside it is a hold, and an edited copy of any workshop file is still
 `UNKNOWN_MANAGED_BYTES`.
 
+On Windows the workshop's files usually arrived with CRLF line endings: workshop-installer has no
+`.gitattributes`, so Git for Windows (default `core.autocrlf=true`) checked them out CRLF and the
+workshop's `install.mjs` copied them as they were. The same file therefore also lists the CRLF copy
+of all thirteen workshop main states (refs ending `-crlf`, `lineEndings: "crlf"`), each the exact
+bytes of a `core.autocrlf=true` checkout at that commit, with `sameContentAs` naming the reviewed LF
+record of the same content. They are exact-hash records like the rest: the managed files are never
+line-ending normalized, so a CRLF copy with any other change, mixed line endings, or CRLF files
+beside LF files of the same state still hold.
+
 A single-client legacy, R-774, current or course-deployed installation (the other app has no
 managed files) is the same topology for that one app. Anything else, including a current Claude guard beside legacy
 Codex files, a missing tripwire, or any file that is not byte-identical to a reviewed release, is a

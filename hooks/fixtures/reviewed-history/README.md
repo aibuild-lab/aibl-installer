@@ -17,5 +17,9 @@ Identity comes from the pinned compatibility records, not from this folder:
 - `workshop-<commit>/` (six folders) are the exact `hooks/` blobs of `aibuild-lab/workshop-installer`
   at that commit, checked against `hooks/secrets-guard.workshop-installer.identities.json`. Each
   holds all three files, so a test can install a workshop state with its own `install.mjs`.
+- `workshop-<commit>-crlf/` (thirteen folders, one per workshop main state) are the same three files
+  as a Git for Windows checkout (`core.autocrlf=true`) of `aibuild-lab/workshop-installer` at that
+  commit leaves them: CRLF line endings, nothing else different. Checked against the `-crlf` records
+  in the same identities file. `.gitattributes` keeps them byte-exact (`-text`).
 
 The `.bytes` suffix keeps editors, linters and hook-source scanners from treating them as live code.
