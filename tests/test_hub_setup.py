@@ -578,5 +578,52 @@ class RenamedWorkbenchTests(unittest.TestCase):
         self.assertIn('put the folder\'s own name (`renamed.name`) wherever the block names the `my-workbench` folder', PROMPT)
 
 
+class RetiredCourseTests(unittest.TestCase):
+    """A workbench from the retired Essentials course (09-14 to 09-16) is reused and changed nothing, as
+    before; setup now names the Start fresh route instead of only 'ask in your channel'."""
+
+    def retired(self, home, marker):
+        wb = clone_of(Path(home) / 'GitHub' / 'my-workbench', 'https://github.com/' + FULL + '.git')
+        if marker == 'receipt':
+            (wb / '.aibl').mkdir()
+            (wb / '.aibl' / 'installed-agent-essentials.json').write_text('{}', encoding='utf-8')
+        else:
+            (wb / 'CLAUDE.md').write_text('# Workbench\nRun /aibl-teach to start your lesson.\n', encoding='utf-8')
+        return wb
+
+    def test_both_retired_signs_get_the_start_fresh_line(self):
+        for marker in ('receipt', 'claude_md'):
+            with scratch_home() as home:
+                f = Fake(); f.with_skills = False
+                wb = self.retired(home, marker)
+                r = run(f, home)
+                self.assertEqual(r['status'], 'already_initialized')
+                self.assertEqual(r['skills_missing'], list(hub.SKILLS))
+                self.assertEqual(r['retired_course']['say'], hub.RETIRED_SAY)
+                self.assertEqual((wb / 'context' / 'project.md').read_text(encoding='utf-8'), 'my facts\n')
+                self.assertFalse(any(c[:3] in (['gh', 'repo', 'create'], ['gh', 'repo', 'clone']) for c in f.calls))
+
+    def test_current_or_merely_old_workbenches_are_not_called_retired(self):
+        with scratch_home() as home:
+            self.assertNotIn('retired_course', run(Fake(), home))                 # created, current
+        with scratch_home() as home:
+            wb = self.retired(home, 'claude_md')
+            (wb / '.aibl').mkdir(exist_ok=True)
+            (wb / '.aibl' / 'template.json').write_text('{"repository": "aibuild-lab/my-workbench-template"}', encoding='utf-8')
+            f = Fake(); f.with_skills = False
+            self.assertNotIn('retired_course', run(f, home))                      # marker wins
+        with scratch_home() as home:
+            clone_of(Path(home) / 'GitHub' / 'my-workbench', 'https://github.com/' + FULL + '.git')
+            f = Fake(); f.with_skills = False
+            r = run(f, home)
+            self.assertTrue(r['skills_missing'])
+            self.assertNotIn('retired_course', r)                                 # old, not retired
+
+    def test_prompt_offers_the_fresh_start_from_the_local_installer(self):
+        self.assertIn('say its `retired_course.say` word for word', PROMPT)
+        self.assertIn('FRESH-START-PROMPT.md` (Windows', PROMPT)
+        self.assertTrue((Path(__file__).resolve().parents[1] / 'FRESH-START-PROMPT.md').is_file())
+
+
 if __name__ == '__main__':
     unittest.main()

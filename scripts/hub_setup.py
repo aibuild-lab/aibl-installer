@@ -197,6 +197,26 @@ RENAMED_SAY = ("I found your workbench in a folder called {name}. I reused it ex
                "It doesn't have to be called my-workbench.")
 HOME_RECORD = ('.aibl', 'workbench.json')
 
+# A workbench made 09-14 to 09-16-2026 came from the retired Essentials course: no template marker,
+# and .aibl/installed-agent-essentials.json or a CLAUDE.md that points to /aibl-teach (the same
+# signs UPDATE-PROMPT.md and FRESH-START-PROMPT.md use). Rerunning setup reuses it and changes
+# nothing, but its aibl- skills are missing, so no program can be added. FRESH-START-PROMPT.md is
+# the route; SETUP-PROMPT.md step 8 says this line and offers it.
+RETIRED_SAY = ("This workbench came from an earlier version of Essentials, so it is missing the skills that add a program, "
+               "and updating can't fix that. There is a Start fresh step for exactly this: it keeps your old workbench "
+               "under a new name, builds a fresh one, and lets you choose which files to bring across. Nothing is deleted.")
+
+
+def retired_course(folder):
+    """True when the folder is a workbench from the retired Essentials course. Looks only."""
+    folder = Path(folder)
+    if (folder / '.aibl' / 'template.json').exists():
+        return False
+    if (folder / '.aibl' / 'installed-agent-essentials.json').is_file():
+        return True
+    text = _small_text(folder / 'CLAUDE.md', 256 * 1024) or ''
+    return '/aibl-teach' in text
+
 
 def _origin_url(folder):
     """The origin URL from a folder's own .git/config, or None. Reads one small file; runs nothing."""
@@ -434,6 +454,8 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
     if missing:
         receipt['note'] = ('This workbench was made before the starter skills shipped in the template, or from a different template. '
                            'Nothing was changed. Ask in your program channel with this message.')
+        if retired_course(folder):
+            receipt['retired_course'] = {'say': RETIRED_SAY}
     if renamed:
         receipt['renamed'] = renamed
     if status == 'cloned_existing':
