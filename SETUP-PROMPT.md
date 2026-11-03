@@ -69,7 +69,7 @@ Check every item below before installing anything. Use the three-state rule (rul
 - **Claude only:** Claude Code CLI: `command -v claude`; fallbacks `~/.local/bin/claude` (native installer), `/opt/homebrew/bin/claude` or `/usr/local/bin/claude` (Homebrew), `"$(npm prefix -g 2>/dev/null)/bin/claude"` (npm). Any one of these is "installed"; note which path, steps 4.4 and 7 use it
 - **Codex only:** Codex CLI: `command -v codex`; fallbacks `~/.codex/bin/codex`, `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`
 - Secrets guard: `~/.claude/hooks/secrets-guard.js` (Claude) or `~/.codex/hooks.json` (Codex)
-- Workbench: `~/GitHub/my-workbench` (an existing one is reused in step 8, never replaced)
+- Workbench: `~/GitHub/my-workbench` (an existing one is reused in step 8, never replaced, also when the student renamed the folder)
 
 **Windows (PowerShell):**
 - winget: `Get-Command winget` (built into Windows 10 build 2004+ and Windows 11; if missing, the student updates Windows or installs App Installer from the Microsoft Store, then returns)
@@ -335,6 +335,7 @@ It checks tool versions, checks GitHub is signed in, creates the private reposit
 Read the result:
 - `"status": "created"`: new repository, new folder. Continue to step 9.
 - `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 9.
+- `"renamed"` is present (with `already_initialized`): the student had renamed their workbench folder, and setup found it under that name instead of making a second copy. Say its `renamed.say` word for word. From here on, the workbench is the folder named in `renamed.name` (the full path is `workspace`): use that name wherever step 9 and step 10 say `my-workbench` for the folder on disk. Never rename, move or copy it, and never suggest renaming it back.
 - `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Some things never go to GitHub, so they were only on the old computer. Before step 9, show the student the result's `left_behind.say` word for word, as your own message, line breaks kept. If the result has no `left_behind` (an older copy of the script), say this instead, word for word:
 
   > Your workbench came back from GitHub, but not everything comes with it. Anything in your library, your job folders and your voice samples was only on your old computer, so it isn't here. If that computer still works, copy them across before you go on:
@@ -357,7 +358,7 @@ Read the result:
 
 ## Step 9: Open the workbench in this app
 
-Tell the student, using the block for your harness:
+Tell the student, using the block for your harness. When step 8's result has `renamed`, put the folder's own name (`renamed.name`) wherever the block names the `my-workbench` folder.
 
 **Claude:**
 
@@ -379,7 +380,7 @@ Tell the student, using the block for your harness:
 
 ## Step 10: Final summary
 
-End with one clean message, real versions filled in:
+End with one clean message, real versions filled in (and, when step 8's result has `renamed`, the folder's own name and path from the result in place of `my-workbench` on disk; the GitHub repository keeps its name):
 
 > "You are set. On your computer now:
 >

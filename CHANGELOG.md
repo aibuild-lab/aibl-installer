@@ -1,5 +1,11 @@
 # AIBL Installer changes
 
+## Unreleased: A renamed workbench folder is reused, never cloned a second time
+
+- **Step 8 finds a workbench the student renamed.** Essentials says a student may rename `my-workbench`, and the alumni wave (11-04-2026) asks everyone to run the installer again. On main, a renamed folder meant `~/GitHub/my-workbench` was missing, so setup cloned a second copy beside it and told the student to copy files across from an "old computer" (alumni walk 11-03-2026, route B4). Before cloning, `scripts/hub_setup.py` now looks at each folder directly inside `~/GitHub`, plus the home workbench recorded in `~/.aibl/workbench.json`, and keeps one only when its own `.git/config` names the student's repository as `origin` (HTTPS or SSH). It reads that one file and runs no Git command in those folders, so a Camp clone or another project is never entered. One match is checked with `verify_existing` and reused as `already_initialized`, with `renamed` (`folder`, `name`, `say`) in the result. Two matches stop setup with both named; nothing is created, cloned or changed.
+- `SETUP-PROMPT.md` step 8 says `renamed.say` word for word, and steps 9 and 10 use the folder's own name in place of `my-workbench` on disk. A workbench at `~/GitHub/my-workbench` is used as before, with no search.
+- Tests: `tests/test_hub_setup.py` gains `RenamedWorkbenchTests` (renamed beside it, SSH origin and the home record outside `~/GitHub`, other projects and the Camp clone ignored and never entered, two copies stop, no search when `my-workbench` is there, the prompt lines).
+
 ## Unreleased: Recognize the Windows (CRLF) copies of the workshop installer's guard
 
 - **Windows workshop and Camp alumni no longer hold at the guard step.** The routes walk of 11-02-2026 (route 5) found that on Windows the preview returned `UNKNOWN_MANAGED_BYTES` for the workshop's current guard, while the same files with LF endings gave `eligible-migration`. `aibuild-lab/workshop-installer` has no `.gitattributes`, so Git for Windows (default `core.autocrlf=true`) checks its hooks out with CRLF, and its `install.mjs` copies them into `~/.claude/hooks` as they are (the 64130d9 guard becomes `9146e6b7...` instead of `02fbc66d...`).
