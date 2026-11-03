@@ -512,7 +512,7 @@ class RenamedWorkbenchTests(unittest.TestCase):
             mine = clone_of(Path(home) / 'GitHub' / 'Workbench', 'https://github.com/' + FULL + '.git')
             r = run(f, home)
             self.assertEqual(r['status'], 'already_initialized')
-            self.assertEqual(Path(r['workspace']), mine)
+            self.assertEqual(Path(r['workspace']).resolve(), mine.resolve())
             self.assertEqual(r['renamed']['name'], 'Workbench')
             self.assertEqual(r['renamed']['say'], hub.RENAMED_SAY.format(name='Workbench'))
             self.assertNotIn('left_behind', r)
@@ -530,7 +530,7 @@ class RenamedWorkbenchTests(unittest.TestCase):
                 {'schema_version': 'aibl.home-workbench/v1', 'path': str(mine)}), encoding='utf-8')
             r = run(f, home)
             self.assertEqual(r['status'], 'already_initialized')
-            self.assertEqual(Path(r['workspace']), mine)
+            self.assertEqual(Path(r['workspace']).resolve(), mine.resolve())
             self.assertEqual(r['renamed']['name'], 'Controller')
 
     def test_other_projects_beside_it_are_ignored_and_the_camp_clone_is_never_entered(self):
@@ -544,7 +544,7 @@ class RenamedWorkbenchTests(unittest.TestCase):
             r = run(f, home)
             self.assertEqual(r['status'], 'cloned_existing')
             self.assertNotIn('renamed', r)
-            self.assertEqual(Path(r['workspace']), gh / 'my-workbench')
+            self.assertEqual(Path(r['workspace']).resolve(), (gh / 'my-workbench').resolve())
             for name in ('agent-native-os', 'someone-elses', 'agent-native-camp', 'notes'):
                 self.assertFalse(any(c and Path(c).name == name for c in f.cwds), name)
 
