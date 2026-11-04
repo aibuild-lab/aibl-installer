@@ -37,7 +37,7 @@ Run `pwd`. Two answers are fine, and you continue with either:
 
 If the session is pointed at some other folder (Desktop, Documents, Downloads, a project, or anything inside Dropbox, OneDrive, iCloud or Google Drive), stop:
 
-> "This session is pointed at `<path>`, but setup wants your home folder, the one named after your username, so the workbench we create inside it is already trusted when you open it later. Please start a new session in this app and, when it asks for a folder, pick your home folder. On a Mac: Cmd + Shift + H in the picker. On Windows: This PC, Local Disk (C:), Users, then your name. Then paste the same prompt again."
+> "This session is pointed at `<path>`, but setup wants your home folder, the one named after your username, so the workbench gets created inside it. Please start a new session in this app and, when it asks for a folder, pick your home folder. On a Mac: Cmd + Shift + H in the picker. On Windows: This PC, Local Disk (C:), Users, then your name. Then paste the same prompt again."
 
 Do not continue from a project folder or a cloud-synced one.
 
@@ -367,7 +367,7 @@ Tell the student, using the block for your harness. When step 8's result has `re
 >
 > 1. Start a new session in this app (top left, same way you started this one).
 > 2. When it asks for a folder, choose `GitHub`, then `my-workbench`. On a Mac: Cmd + Shift + H, then GitHub, then my-workbench. On Windows: This PC, Local Disk (C:), Users, your name, GitHub, my-workbench.
-> 3. If it asks whether you trust the folder, click Trust. It is your folder. It usually will not ask, because my-workbench sits inside the home folder you already trusted.
+> 3. It may ask whether you trust this workspace, even though you already trusted your home folder. If it does, click Trust workspace. It is your folder.
 > 4. In the new session, type a forward slash. The items that start with `aibl-` came with your workbench: aibl-personalize, aibl-checkpoint, aibl-enroll and aibl-update. Press Escape, then ask: `What is in my workbench, and what can it do? List the files and the aibl- skills, one line each.` That answer is your proof that everything landed.
 > 5. Your workbench is ready even if your course access has not opened. Check your cohort on the Learn dashboard at https://learn.aibuildlab.com/ for its release date, time, and access status. Repository access follows your course's release schedule, which can differ from the first live session. Before you have access, that program will not appear in aibl-enroll. Once access opens, use it to select the program and follow its next step. Then return to Essentials lesson 3 where you left off."
 
