@@ -479,5 +479,151 @@ class CampOnceTests(unittest.TestCase):
             self.assertFalse((Path(home) / '.aibl' / 'camp.json').exists())
 
 
+class CwdFake(Fake):
+    """Fake that also records the folder each command ran in."""
+
+    def __init__(self):
+        super().__init__()
+        self.cwds = []
+
+    def __call__(self, args, cwd=None, interactive=False):
+        self.cwds.append(str(cwd) if cwd else None)
+        return super().__call__(args, cwd, interactive)
+
+
+def clone_of(folder, url):
+    """A folder that looks like a Git clone whose origin is url (only .git/config, as setup reads it)."""
+    folder = Path(folder)
+    (folder / '.git').mkdir(parents=True)
+    (folder / '.git' / 'config').write_text('[core]\n\tbare = false\n[remote "origin"]\n\turl = ' + url
+                                            + '\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n', encoding='utf-8')
+    (folder / 'context').mkdir()
+    (folder / 'context' / 'project.md').write_text('my facts\n', encoding='utf-8')
+    return folder
+
+
+class RenamedWorkbenchTests(unittest.TestCase):
+    """The alumni wave reruns setup on purpose, and Essentials says a student may rename the folder. A
+    renamed workbench is reused where it is, never cloned a second time (alumni walk 11-03-2026, route B4)."""
+
+    def test_renamed_folder_beside_it_is_reused_not_cloned_again(self):
+        with scratch_home() as home:
+            f = CwdFake(); f.exists = True
+            mine = clone_of(Path(home) / 'GitHub' / 'Workbench', 'https://github.com/' + FULL + '.git')
+            r = run(f, home)
+            self.assertEqual(r['status'], 'already_initialized')
+            self.assertEqual(Path(r['workspace']).resolve(), mine.resolve())
+            self.assertEqual(r['renamed']['name'], 'Workbench')
+            self.assertEqual(r['renamed']['say'], hub.RENAMED_SAY.format(name='Workbench'))
+            self.assertNotIn('left_behind', r)
+            self.assertFalse((Path(home) / 'GitHub' / 'my-workbench').exists())
+            self.assertFalse(any(c[:3] in (['gh', 'repo', 'create'], ['gh', 'repo', 'clone']) for c in f.calls))
+            self.assertEqual((mine / 'context' / 'project.md').read_text(encoding='utf-8'), 'my facts\n')
+            self.assertIn('Workbench', r['next'])
+
+    def test_ssh_origin_and_the_recorded_home_workbench_outside_github_are_found(self):
+        with scratch_home() as home:
+            f = Fake(); f.exists = True
+            mine = clone_of(Path(home) / 'Documents' / 'Controller', 'git@github.com:' + FULL + '.git')
+            (Path(home) / '.aibl').mkdir()
+            (Path(home) / '.aibl' / 'workbench.json').write_text(json.dumps(
+                {'schema_version': 'aibl.home-workbench/v1', 'path': str(mine)}), encoding='utf-8')
+            r = run(f, home)
+            self.assertEqual(r['status'], 'already_initialized')
+            self.assertEqual(Path(r['workspace']).resolve(), mine.resolve())
+            self.assertEqual(r['renamed']['name'], 'Controller')
+
+    def test_other_projects_beside_it_are_ignored_and_the_camp_clone_is_never_entered(self):
+        with scratch_home() as home:
+            f = CwdFake(); f.exists = True
+            gh = Path(home) / 'GitHub'
+            clone_of(gh / 'agent-native-os', 'https://github.com/aibuild-lab/agent-native-os.git')
+            clone_of(gh / 'someone-elses', 'https://github.com/someone/my-workbench.git')
+            clone_of(gh / 'agent-native-camp', 'https://github.com/' + FULL + '.git')   # even a look-alike
+            (gh / 'notes').mkdir()
+            r = run(f, home)
+            self.assertEqual(r['status'], 'cloned_existing')
+            self.assertNotIn('renamed', r)
+            self.assertEqual(Path(r['workspace']).resolve(), (gh / 'my-workbench').resolve())
+            for name in ('agent-native-os', 'someone-elses', 'agent-native-camp', 'notes'):
+                self.assertFalse(any(c and Path(c).name == name for c in f.cwds), name)
+
+    def test_two_copies_stop_with_both_named_and_nothing_made(self):
+        with scratch_home() as home:
+            f = Fake(); f.exists = True
+            gh = Path(home) / 'GitHub'
+            a = clone_of(gh / 'Workbench', 'https://github.com/' + FULL)
+            b = clone_of(gh / 'workbench-old', 'https://github.com/' + FULL + '.git')
+            with self.assertRaises(SetupError) as cm:
+                run(f, home)
+            self.assertIn(str(a), str(cm.exception))
+            self.assertIn(str(b), str(cm.exception))
+            self.assertIn('Nothing was changed', str(cm.exception))
+            self.assertFalse((gh / 'my-workbench').exists())
+            self.assertFalse(any(c[:3] in (['gh', 'repo', 'create'], ['gh', 'repo', 'clone']) for c in f.calls))
+
+    def test_my_workbench_present_means_no_search(self):
+        with scratch_home() as home:
+            f = Fake()
+            first = run(f, home)
+            clone_of(Path(home) / 'GitHub' / 'Workbench', 'https://github.com/' + FULL + '.git')
+            r = run(f, home)
+            self.assertEqual(r['status'], 'already_initialized')
+            self.assertEqual(r['workspace'], first['workspace'])
+            self.assertNotIn('renamed', r)
+
+    def test_prompt_says_the_renamed_line_and_opens_that_folder(self):
+        self.assertIn('Say its `renamed.say` word for word', PROMPT)
+        self.assertIn('use that name wherever step 9 and step 10 say `my-workbench`', PROMPT)
+        self.assertIn('put the folder\'s own name (`renamed.name`) wherever the block names the `my-workbench` folder', PROMPT)
+
+
+class RetiredCourseTests(unittest.TestCase):
+    """A workbench from the retired Essentials course (09-14 to 09-16) is reused and changed nothing, as
+    before; setup now names the Start fresh route instead of only 'ask in your channel'."""
+
+    def retired(self, home, marker):
+        wb = clone_of(Path(home) / 'GitHub' / 'my-workbench', 'https://github.com/' + FULL + '.git')
+        if marker == 'receipt':
+            (wb / '.aibl').mkdir()
+            (wb / '.aibl' / 'installed-agent-essentials.json').write_text('{}', encoding='utf-8')
+        else:
+            (wb / 'CLAUDE.md').write_text('# Workbench\nRun /aibl-teach to start your lesson.\n', encoding='utf-8')
+        return wb
+
+    def test_both_retired_signs_get_the_start_fresh_line(self):
+        for marker in ('receipt', 'claude_md'):
+            with scratch_home() as home:
+                f = Fake(); f.with_skills = False
+                wb = self.retired(home, marker)
+                r = run(f, home)
+                self.assertEqual(r['status'], 'already_initialized')
+                self.assertEqual(r['skills_missing'], list(hub.SKILLS))
+                self.assertEqual(r['retired_course']['say'], hub.RETIRED_SAY)
+                self.assertEqual((wb / 'context' / 'project.md').read_text(encoding='utf-8'), 'my facts\n')
+                self.assertFalse(any(c[:3] in (['gh', 'repo', 'create'], ['gh', 'repo', 'clone']) for c in f.calls))
+
+    def test_current_or_merely_old_workbenches_are_not_called_retired(self):
+        with scratch_home() as home:
+            self.assertNotIn('retired_course', run(Fake(), home))                 # created, current
+        with scratch_home() as home:
+            wb = self.retired(home, 'claude_md')
+            (wb / '.aibl').mkdir(exist_ok=True)
+            (wb / '.aibl' / 'template.json').write_text('{"repository": "aibuild-lab/my-workbench-template"}', encoding='utf-8')
+            f = Fake(); f.with_skills = False
+            self.assertNotIn('retired_course', run(f, home))                      # marker wins
+        with scratch_home() as home:
+            clone_of(Path(home) / 'GitHub' / 'my-workbench', 'https://github.com/' + FULL + '.git')
+            f = Fake(); f.with_skills = False
+            r = run(f, home)
+            self.assertTrue(r['skills_missing'])
+            self.assertNotIn('retired_course', r)                                 # old, not retired
+
+    def test_prompt_offers_the_fresh_start_from_the_local_installer(self):
+        self.assertIn('say its `retired_course.say` word for word', PROMPT)
+        self.assertIn('FRESH-START-PROMPT.md` (Windows', PROMPT)
+        self.assertTrue((Path(__file__).resolve().parents[1] / 'FRESH-START-PROMPT.md').is_file())
+
+
 if __name__ == '__main__':
     unittest.main()

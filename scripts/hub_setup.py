@@ -185,6 +185,94 @@ def left_behind(folder):
     return {'what': list(LEFT_BEHIND_PATHS), 'team_hq_night_shift': team_hq, 'say': say}
 
 
+# A student may rename their workbench folder (Essentials lesson 1 says they can), and the alumni
+# wave reruns setup on purpose. ~/GitHub/my-workbench is then missing while the student's own clone
+# sits beside it under another name, so setup would clone a second copy and tell them to copy files
+# from an "old computer". Before cloning, setup looks for that clone: each folder directly inside the
+# workspace, plus the home workbench a program recorded in ~/.aibl/workbench.json. It reads only each
+# folder's .git/config (no Git command runs there, so a Camp clone is never touched) and keeps a
+# folder only when its origin is exactly the student's repository; verify_existing then checks the
+# one it reuses. Two such folders stop setup with both named, and nothing is changed.
+RENAMED_SAY = ("I found your workbench in a folder called {name}. I reused it exactly as it is and changed nothing. "
+               "It doesn't have to be called my-workbench.")
+HOME_RECORD = ('.aibl', 'workbench.json')
+
+# A workbench made 09-14 to 09-16-2026 came from the retired Essentials course: no template marker,
+# and .aibl/installed-agent-essentials.json or a CLAUDE.md that points to /aibl-teach (the same
+# signs UPDATE-PROMPT.md and FRESH-START-PROMPT.md use). Rerunning setup reuses it and changes
+# nothing, but its aibl- skills are missing, so no program can be added. FRESH-START-PROMPT.md is
+# the route; SETUP-PROMPT.md step 8 says this line and offers it.
+RETIRED_SAY = ("This workbench came from an earlier version of Essentials, so it is missing the skills that add a program, "
+               "and updating can't fix that. There is a Start fresh step for exactly this: it keeps your old workbench "
+               "under a new name, builds a fresh one, and lets you choose which files to bring across. Nothing is deleted.")
+
+
+def retired_course(folder):
+    """True when the folder is a workbench from the retired Essentials course. Looks only."""
+    folder = Path(folder)
+    if (folder / '.aibl' / 'template.json').exists():
+        return False
+    if (folder / '.aibl' / 'installed-agent-essentials.json').is_file():
+        return True
+    text = _small_text(folder / 'CLAUDE.md', 256 * 1024) or ''
+    return '/aibl-teach' in text
+
+
+def _origin_url(folder):
+    """The origin URL from a folder's own .git/config, or None. Reads one small file; runs nothing."""
+    text = _small_text(Path(folder) / '.git' / 'config', 256 * 1024)
+    if text is None:
+        return None
+    section = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith('['):
+            section = line
+            continue
+        if section in ('[remote "origin"]', "[remote 'origin']") and '=' in line:
+            key, value = line.split('=', 1)
+            if key.strip().lower() == 'url':
+                return value.strip()
+    return None
+
+
+def renamed_workbenches(home, workspace, full, name):
+    """Folders other than workspace/name that hold a clone of the student's own repository. Looks only."""
+    seen, found = set(), []
+    target = workspace / name
+
+    def consider(folder):
+        try:
+            folder = Path(folder)
+            if folder.is_symlink() or not folder.is_dir() or folder.name.endswith('.cloning'):
+                return
+            resolved = folder.resolve()
+        except OSError:
+            return
+        key = str(resolved).lower() if sys.platform == 'win32' else str(resolved)
+        if key in seen or resolved == target.resolve():
+            return
+        seen.add(key)
+        url = _origin_url(folder)
+        if url and remote_matches(url, full):
+            found.append(folder)
+
+    try:
+        children = sorted(p for p in workspace.iterdir() if p.name not in CAMP_NAMES)
+    except OSError:
+        children = []
+    for child in children:
+        consider(child)
+    record = _small_text(Path(home).joinpath(*HOME_RECORD), 64 * 1024)
+    try:
+        recorded = json.loads(record).get('path') if record else None
+    except (ValueError, AttributeError):
+        recorded = None
+    if isinstance(recorded, str) and recorded:
+        consider(recorded)
+    return found
+
+
 def _small_text(path, limit):
     """A small regular file's text, or None. Never follows a link."""
     try:
@@ -304,7 +392,22 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
     source = template_head(runner, template)
 
     created = False
-    if folder.exists():
+    renamed = None
+    elsewhere = [] if folder.exists() else renamed_workbenches(home, workspace, full, name)
+    if len(elsewhere) > 1:
+        raise SetupError(f'Your workbench github.com/{full} is in more than one folder on this computer: '
+                         + ', '.join(str(p) for p in elsewhere)
+                         + '. Nothing was changed. Ask in your program channel which one to keep using; do not delete either.')
+    if elsewhere:
+        try:
+            verify_existing(elsewhere[0], full, runner)
+        except SetupError as exc:
+            raise SetupError(f'The folder {elsewhere[0]} looks like your workbench but could not be checked ({exc}). '
+                             'Nothing was changed. Ask in your program channel.')
+        folder = elsewhere[0]
+        renamed = {'folder': str(folder), 'name': folder.name, 'say': RENAMED_SAY.format(name=folder.name)}
+        status = 'already_initialized'
+    elif folder.exists():
         try:
             verify_existing(folder, full, runner)
         except SetupError as exc:
@@ -351,6 +454,10 @@ def setup(harness, workspace=None, name='my-workbench', template=None, runner=co
     if missing:
         receipt['note'] = ('This workbench was made before the starter skills shipped in the template, or from a different template. '
                            'Nothing was changed. Ask in your program channel with this message.')
+        if retired_course(folder):
+            receipt['retired_course'] = {'say': RETIRED_SAY}
+    if renamed:
+        receipt['renamed'] = renamed
     if status == 'cloned_existing':
         receipt['left_behind'] = left_behind(folder)
     camp = camp_notice(home)

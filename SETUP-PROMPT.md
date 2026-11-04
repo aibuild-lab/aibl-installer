@@ -69,7 +69,7 @@ Check every item below before installing anything. Use the three-state rule (rul
 - **Claude only:** Claude Code CLI: `command -v claude`; fallbacks `~/.local/bin/claude` (native installer), `/opt/homebrew/bin/claude` or `/usr/local/bin/claude` (Homebrew), `"$(npm prefix -g 2>/dev/null)/bin/claude"` (npm). Any one of these is "installed"; note which path, steps 4.4 and 7 use it
 - **Codex only:** Codex CLI: `command -v codex`; fallbacks `~/.codex/bin/codex`, `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`
 - Secrets guard: `~/.claude/hooks/secrets-guard.js` (Claude) or `~/.codex/hooks.json` (Codex)
-- Workbench: `~/GitHub/my-workbench` (an existing one is reused in step 8, never replaced)
+- Workbench: `~/GitHub/my-workbench` (an existing one is reused in step 8, never replaced, also when the student renamed the folder)
 
 **Windows (PowerShell):**
 - winget: `Get-Command winget` (built into Windows 10 build 2004+ and Windows 11; if missing, the student updates Windows or installs App Installer from the Microsoft Store, then returns)
@@ -335,6 +335,7 @@ It checks tool versions, checks GitHub is signed in, creates the private reposit
 Read the result:
 - `"status": "created"`: new repository, new folder. Continue to step 9.
 - `"status": "already_initialized"`: the student's own workbench was already at `~/GitHub/my-workbench`. Nothing was rewritten, no file, no Git history, no unfinished work. Tell the student it was reused, and continue to step 9.
+- `"renamed"` is present (with `already_initialized`): the student had renamed their workbench folder, and setup found it under that name instead of making a second copy. Say its `renamed.say` word for word. From here on, the workbench is the folder named in `renamed.name` (the full path is `workspace`): use that name wherever step 9 and step 10 say `my-workbench` for the folder on disk. Never rename, move or copy it, and never suggest renaming it back.
 - `"status": "cloned_existing"`: the repository existed on GitHub but the folder did not (a second computer, or a folder that was moved). It was cloned back. Some things never go to GitHub, so they were only on the old computer. Before step 9, show the student the result's `left_behind.say` word for word, as your own message, line breaks kept. If the result has no `left_behind` (an older copy of the script), say this instead, word for word:
 
   > Your workbench came back from GitHub, but not everything comes with it. Anything in your library, your job folders and your voice samples was only on your old computer, so it isn't here. If that computer still works, copy them across before you go on:
@@ -349,6 +350,7 @@ Read the result:
   Never copy, move or open anything on the student's behalf here; they bring the files across themselves. Then continue to step 9.
 - `"camp"` is present (any status): setup found the student's Agent Native Camp setup on this computer. Say its `camp.say` once, word for word. Say nothing else about Camp, never ask whether they took Camp, and never open, change or set up anything in a Camp folder. Setup records that it said this (`~/.aibl/camp.json`), so neither a rerun nor enrolling later says or asks it again; when `"camp"` is absent, say nothing about Camp.
 - `"skills_missing"` is not empty: the workbench was made from an older template. Nothing was changed. Tell the student to ask in their program's channel with that message, and continue; the workbench still works.
+- `"retired_course"` is present (with `skills_missing`): the workbench came from the retired Essentials course (set up 14 to 16 September 2026). Instead of the channel line above, say its `retired_course.say` word for word, then ask once: "Want me to start fresh now? 1. Yes 2. Not now". On 1, this session is already on the home folder, which is where the fresh start runs: read `~/GitHub/aibl-installer/FRESH-START-PROMPT.md` (Windows: `$HOME\GitHub\aibl-installer\FRESH-START-PROMPT.md`) and follow it from its Step 1, then come back here for step 9 with the fresh `my-workbench`. On 2, say: "Your old workbench stays exactly as it is. When you're ready, the Start fresh prompt is on the installer's START-HERE page, under 'Set up between 14 and 16 September? Start fresh'." and continue to step 9.
 - `"template": { ..., "version": "0.0.12" }`: the template version you report in step 10. If it is `null`, the template ships no version stamp; say "the current template" and do not go looking for a number elsewhere.
 - `Setup paused: GitHub is not signed in yet`: step 6.1 did not finish. Do it, then run the same command again.
 - `Setup paused: ... already exists under this account ...` or `... was made from ...`: a repository or folder called `my-workbench` belongs to something else. Stop and show the student exactly what was found; never delete or replace it. They can choose another name with `--repo-name`.
@@ -357,7 +359,7 @@ Read the result:
 
 ## Step 9: Open the workbench in this app
 
-Tell the student, using the block for your harness:
+Tell the student, using the block for your harness. When step 8's result has `renamed`, put the folder's own name (`renamed.name`) wherever the block names the `my-workbench` folder.
 
 **Claude:**
 
@@ -379,7 +381,7 @@ Tell the student, using the block for your harness:
 
 ## Step 10: Final summary
 
-End with one clean message, real versions filled in:
+End with one clean message, real versions filled in (and, when step 8's result has `renamed`, the folder's own name and path from the result in place of `my-workbench` on disk; the GitHub repository keeps its name):
 
 > "You are set. On your computer now:
 >
