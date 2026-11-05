@@ -6,6 +6,11 @@
 - The clean-tree wording in rule 5 and step 2 follows, and step 2's "did anything change" check looks only at the paths it replaces.
 - Tests: `tests/test_update_prompt.py` gains `UnsavedWork`, which pins the wording and runs the two status checks on throwaway repositories.
 
+## Unreleased: The Start Here update paste is one line in the student's own words
+
+- **`START-HERE.md`, "Later: update your workbench" (WF-118).** On 10-13 the app wrapped the multi-line paste as pasted text and the agent refused it, 1 run in 5, costing 16 minutes. The paste is now one line that starts with the student's own ask, without "without summarizing", which read as a request to skip a safety check. A line after the box names `/aibl-update` (`$aibl-update` in Codex) if the app still declines.
+- Tests: `tests/test_update_prompt.py` gains `StartHereUpdatePaste`. Wording only; whether the app follows the line is a real-app check.
+
 ## Unreleased: A renamed workbench folder is reused, never cloned a second time
 
 - **Step 8 finds a workbench the student renamed.** Essentials says a student may rename `my-workbench`, and the alumni wave (11-04-2026) asks everyone to run the installer again. On main, a renamed folder meant `~/GitHub/my-workbench` was missing, so setup cloned a second copy beside it and told the student to copy files across from an "old computer" (alumni walk 11-03-2026, route B4). Before cloning, `scripts/hub_setup.py` now looks at each folder directly inside `~/GitHub`, plus the home workbench recorded in `~/.aibl/workbench.json`, and keeps one only when its own `.git/config` names the student's repository as `origin` (HTTPS or SSH). It reads that one file and runs no Git command in those folders, so a Camp clone or another project is never entered. One match is checked with `verify_existing` and reused as `already_initialized`, with `renamed` (`folder`, `name`, `say`) in the result. Two matches stop setup with both named; nothing is created, cloned or changed.
