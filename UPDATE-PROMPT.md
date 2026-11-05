@@ -110,4 +110,4 @@ If it does not exist, the workbench has no program-update skill yet. Say: "Your 
 
 ## Step 4: report
 
-In four lines or fewer: what changed (skills, programs, or nothing), the commit you made if any, whether their private copy on GitHub has it yet (offer `aibl-checkpoint` if not), and that they should start a new session so the app reloads the updated skills.
+In four lines or fewer: what changed (skills, programs, or nothing), the commit you made if any, whether their private copy on GitHub has it yet (offer `aibl-checkpoint` if not), and that they should start a new session so the app reloads the updated skills. Keep the `aibl-update` skill's line on where the student goes next as it is. Never name a lesson, module or week of your own: an update often brings weeks the student hasn't reached.
