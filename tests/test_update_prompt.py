@@ -264,6 +264,15 @@ class OlderWorkbenchWithRealGit(unittest.TestCase):
         self.assertIn('?? CLAUDE.md', self.git('status', '--short', cwd=wb).stdout)
 
 
+class UpdateClose(unittest.TestCase):
+    """WF-119: on 10-13 the close named Week 4 to a student who hadn't started Week 3."""
+
+    def test_the_report_never_names_a_lesson_of_its_own(self):
+        report = TEXT.split('## Step 4: report', 1)[1]
+        self.assertIn("Keep the `aibl-update` skill's line on where the student goes next", report)
+        self.assertIn('Never name a lesson, module or week of your own', report)
+
+
 class ConnectStep(unittest.TestCase):
     def test_asks_before_creating_anything(self):
         ask = CONNECT.index('OK?"')
