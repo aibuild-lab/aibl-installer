@@ -264,6 +264,30 @@ class OlderWorkbenchWithRealGit(unittest.TestCase):
         self.assertIn('?? CLAUDE.md', self.git('status', '--short', cwd=wb).stdout)
 
 
+class StartHereUpdatePaste(unittest.TestCase):
+    """WF-118: the multi-line paste was wrapped as pasted text and refused on 10-13; one line with the student's own ask."""
+    SECTION = (ROOT / 'START-HERE.md').read_text(encoding='utf-8').split('## Later: update your workbench', 1)[1].split('\n## ', 1)[0]
+
+    def box(self):
+        return self.SECTION.split('```text\n', 1)[1].split('\n```', 1)[0]
+
+    def test_the_paste_is_one_line_in_the_students_own_words(self):
+        self.assertNotIn('\n', self.box())
+        self.assertTrue(self.box().startswith('Update my workbench:'))
+        self.assertIn('https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/UPDATE-PROMPT.md', self.box())
+
+    def test_it_never_asks_the_agent_to_skip_a_summary(self):
+        self.assertNotIn('without summarizing', self.SECTION)
+
+    def test_the_skill_is_named_for_both_apps_if_the_app_declines(self):
+        flat = re.sub(r'\s+', ' ', self.SECTION)
+        self.assertIn("If the app says it won't follow a page from the web, type `/aibl-update` in Claude (`$aibl-update` in Codex).", flat)
+
+    def test_no_em_or_en_dashes(self):
+        self.assertNotIn('\u2014', self.SECTION)
+        self.assertNotIn('\u2013', self.SECTION)
+
+
 class ConnectStep(unittest.TestCase):
     def test_asks_before_creating_anything(self):
         ask = CONNECT.index('OK?"')

@@ -79,19 +79,16 @@ chat instead. Same setup, delivered by hand.
 
 Your workbench keeps working after setup, and its skills and programs get better
 over time. When the team says an update is out, or whenever you want to check,
-open the app on your `my-workbench` folder and paste this:
+open the app on your `my-workbench` folder and paste this one line:
 
 ```text
-You are the AI Build Lab update assistant. I am a student and this session is open on my workbench.
-
-Fetch the update procedure from this URL and follow it from the beginning, step by step, without summarizing:
-
-https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/UPDATE-PROMPT.md
-
-Say what you are about to do before each step. Do not install anything, do not re-run setup, and do not touch anything I made.
-
-If you cannot fetch the URL, say so and I will paste the procedure into chat.
+Update my workbench: get the steps from https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/UPDATE-PROMPT.md and follow them from the beginning, telling me what you are about to do before each step.
 ```
+
+If the app says it won't follow a page from the web, type `/aibl-update` in Claude
+(`$aibl-update` in Codex). That runs the same update from the copy of the steps
+already in your workbench. If the app says it cannot open the link, open the link
+in your browser, select all, copy, and paste the whole page into the chat.
 
 It refreshes the workbench's own skills from the template, then, if your
 workbench has the `aibl-update` skill, brings every program you have joined up
