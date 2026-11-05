@@ -264,6 +264,64 @@ class OlderWorkbenchWithRealGit(unittest.TestCase):
         self.assertIn('?? CLAUDE.md', self.git('status', '--short', cwd=wb).stdout)
 
 
+class UnsavedWork(unittest.TestCase):
+    """WF-6, decision 40: lesson output does not stop the update; files the update replaces do."""
+    PATHS = ('.claude/skills/aibl-*', '.agents/skills/aibl-*', '.claude/hooks/update-check.mjs', '.claude/settings.json')
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.git('init', '-q', '-b', 'main')
+        (self.tmp / '.claude' / 'skills' / 'aibl-update').mkdir(parents=True)
+        (self.tmp / '.claude' / 'skills' / 'my-skill').mkdir()
+        (self.tmp / '.claude' / 'skills' / 'aibl-update' / 'SKILL.md').write_text('update\n')
+        (self.tmp / '.claude' / 'skills' / 'my-skill' / 'SKILL.md').write_text('mine\n')
+        (self.tmp / 'notes.md').write_text('notes\n')
+        self.git('add', '.')
+        self.git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'start')
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.tmp, text=True, capture_output=True, check=True).stdout
+
+    def stops(self):
+        """Step 1's rule, as written."""
+        lines = self.git('status', '--short').splitlines()
+        return [l for l in lines if l[0] not in ' ?' or l[3:].startswith(('.claude/skills/aibl-', '.agents/skills/aibl-', '.claude/hooks/update-check.mjs'))]
+
+    def test_the_prompt_offers_to_save_and_carries_on(self):
+        gate = STEP1.split('Run `git status --short`.', 1)[1]
+        self.assertNotIn('paste the prompt again', gate)
+        self.assertIn('Save them now and continue the update? (yes / no)', gate)
+        self.assertIn('with no second paste', gate)
+        self.assertIn('Do not stash for them.', gate)
+        self.assertIn('You have unsaved lesson work.', gate)
+        self.assertIn('All other unsaved work stays exactly as it is.', RULES)
+        self.assertNotIn('tree is clean', FLAT)
+
+    def test_lesson_output_does_not_stop_the_update(self):
+        (self.tmp / 'runs' / 'job').mkdir(parents=True)
+        (self.tmp / 'runs' / 'job' / 'receipt.md').write_text('private\n')
+        (self.tmp / 'notes.md').write_text('changed\n')
+        (self.tmp / '.claude' / 'skills' / 'my-skill' / 'SKILL.md').write_text('changed\n')
+        self.assertEqual(self.stops(), [])
+
+    def test_a_replaced_file_something_staged_and_an_unfinished_merge_stop_it(self):
+        (self.tmp / '.claude' / 'skills' / 'aibl-update' / 'SKILL.md').write_text('changed\n')
+        self.assertEqual(self.stops(), [' M .claude/skills/aibl-update/SKILL.md'])
+        self.git('checkout', '--', '.claude/skills/aibl-update/SKILL.md')
+        (self.tmp / 'notes.md').write_text('changed\n')
+        self.git('add', 'notes.md')
+        self.assertEqual(self.stops(), ['M  notes.md'])
+
+    def test_the_second_status_check_sees_only_the_paths_it_replaces(self):
+        self.assertIn('git status --short -- ".claude/skills/aibl-*" ".agents/skills/aibl-*" .claude/hooks/update-check.mjs .claude/settings.json', STEP2)
+        (self.tmp / 'notes.md').write_text('changed\n')
+        (self.tmp / '.claude' / 'skills' / 'my-skill' / 'SKILL.md').write_text('changed\n')
+        self.assertEqual(self.git('status', '--short', '--', *self.PATHS), '')
+        (self.tmp / '.claude' / 'skills' / 'aibl-update' / 'SKILL.md').write_text('changed\n')
+        self.assertEqual(self.git('status', '--short', '--', *self.PATHS).split(), ['M', '.claude/skills/aibl-update/SKILL.md'])
+
+
 class ConnectStep(unittest.TestCase):
     def test_asks_before_creating_anything(self):
         ask = CONNECT.index('OK?"')

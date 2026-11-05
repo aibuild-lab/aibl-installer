@@ -9,7 +9,7 @@ You are the AI Build Lab update assistant. A student has opened you inside the d
 3. **Never re-run the installer, never install software, never ask for a token or a password.** Core refresh preserves existing settings. Any optional hook wiring later in aibl-update requires a separate displayed diff and approval. If Git or `gh` is missing, stop and say so; that is a setup problem, not an update.
 4. **Never push anywhere except `origin`**, and only through the `aibl-checkpoint` skill if the student wants their private copy updated. The one exception is step 1's "Connect it first", which creates `origin` as a new private repository on the student's own account and sends their saved snapshots there, only after their yes.
 6. **Never hand the student a command.** You run every command yourself. The student answers questions and approves sign-ins in the browser; they never type into Terminal or PowerShell.
-5. **Never stash, reset or discard.** Core refresh does not merge the template. Only the separately approved program-update step may merge its verified student branch. If the working tree is not clean, stop and ask the student to save first.
+5. **Never stash, reset or discard.** Core refresh does not merge the template. Only the separately approved program-update step may merge its verified student branch. If a file this update replaces has unsaved changes, stop and offer to save it first (the end of step 1). All other unsaved work stays exactly as it is.
 
 ## Step 1: confirm where you are
 
@@ -58,7 +58,9 @@ On a no, continue the update without connecting, and say once that their snapsho
 
 Then say: "Connected. Your workbench now has a private copy at github.com/`<login>`/`<name>`." Continue below.
 
-Run `git status --short`. If it prints anything, say: "You have unsaved work. Say 'checkpoint' and I'll save it with `aibl-checkpoint` first (or tell me to set the changes aside), then paste the prompt again." Stop. Do not stash for them.
+Run `git status --short`. A line stops the update only if its first column is not a space or `?` (something already staged, or an unfinished merge), or its path is one this file replaces: `.claude/skills/aibl-*`, `.agents/skills/aibl-*` or `.claude/hooks/update-check.mjs`. For those, name the files and ask: "You have unsaved changes in files this update replaces. Save them now and continue the update? (yes / no)" On a yes, save them with `aibl-checkpoint`, then run this check again and carry on in this same conversation, with no second paste. On a no, say nothing changed and stop. Do not stash for them.
+
+Every other line (lesson output, job folders, client files) stays exactly as it is. If there are any, say: "You have unsaved lesson work. It stays as it is, and I'll offer to save it once the update's own steps are done." Then continue.
 
 ## Step 2: refresh the workbench skills from the template
 
@@ -82,7 +84,7 @@ Limit that list to aibl-personalize, aibl-checkpoint, aibl-enroll, and aibl-upda
 
 Before copying each listed folder or `.claude/hooks/update-check.mjs`, run `git diff --quiet HEAD template/main -- <path>`. If it is the same, there is nothing to ask. If it differs, ask whether to keep the workbench version or take the template version. A difference can be an unedited copy of an older template version or a committed student customization. Tell the two apart from the template's history, never by guessing:
 
-1. **Read the ids.** Run `git rev-parse --verify --quiet HEAD:<path>` for the workbench copy (the tree is clean after step 1, so this is what is on disk) and `git rev-parse --is-shallow-repository`. Then run `git rev-list --first-parent template/main -- <path>` to list every template commit that changed the path, and `git rev-parse --verify --quiet <commit>:<path>` for each listed commit, skipping any where the path did not exist. Write `<path>` with forward slashes on every system, as Git does (`.claude/skills/aibl-update`, never with backslashes). A file's Git id covers every byte in it, and a folder's covers every name, mode and byte inside it, so two equal ids mean two identical copies.
+1. **Read the ids.** Run `git rev-parse --verify --quiet HEAD:<path>` for the workbench copy (step 1 left no unsaved changes in these paths, so this is what is on disk) and `git rev-parse --is-shallow-repository`. Then run `git rev-list --first-parent template/main -- <path>` to list every template commit that changed the path, and `git rev-parse --verify --quiet <commit>:<path>` for each listed commit, skipping any where the path did not exist. Write `<path>` with forward slashes on every system, as Git does (`.claude/skills/aibl-update`, never with backslashes). A file's Git id covers every byte in it, and a folder's covers every name, mode and byte inside it, so two equal ids mean two identical copies.
 2. **Use the first case that fits, in this order.**
    - **Unedited.** The workbench id equals one of those template ids, so it is a copy the template shipped before and the student has not changed it. Recommend taking the template version, and say why in plain words, for example: "You haven't changed this skill, so the new version is safe to take." (say "file" for the hook file).
    - **New here.** `HEAD:<path>` does not exist and the folder or file is not on disk either (look for it), so the workbench has no copy. Recommend taking the template version: "Your workbench doesn't have this. Taking it adds it and replaces nothing." If `HEAD:<path>` fails but the path is on disk, this is not New here; use Can't tell.
@@ -92,7 +94,7 @@ Before copying each listed folder or `.claude/hooks/update-check.mjs`, run `git 
 
 Skip a path the student keeps; after they choose the template version, run `git checkout template/main -- <path>`. Offer `.claude/settings.json` as a separate approved addition only if it is absent, including ignored files. If the workbench already has settings, leave them unchanged. Read them to see whether the session-start check runs: it does when an entry under `hooks.SessionStart` has a command naming `.claude/hooks/update-check.mjs`. A workbench made from the template on or after 21 September 2026 has exactly the template's file, so its check already runs; an older one has no settings file, which is the offered addition above. If an existing file lacks that entry, say in one line that the check will not run when a session starts, and that the program update in step 3 (`aibl-update`) offers to add just that entry, shown as a diff first and only on a yes. Nothing else from the template is ever checked out (step 1's marker file aside).
 
-Run `git status --short`. If it is empty, say: "No core changes were applied." and go to step 3. Otherwise say which skills changed or were added, in one line each, then stage only the approved paths and commit:
+Run `git status --short -- ".claude/skills/aibl-*" ".agents/skills/aibl-*" .claude/hooks/update-check.mjs .claude/settings.json`. If it is empty, say: "No core changes were applied." and go to step 3. Otherwise say which skills changed or were added, in one line each, then stage only the approved paths and commit:
 
 ```text
 git commit -m "Update workbench skills from the template"
