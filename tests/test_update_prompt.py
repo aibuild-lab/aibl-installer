@@ -307,7 +307,7 @@ class SettingsHook(unittest.TestCase):
         self.assertIn('leave them unchanged', STEP2)
 
     def test_missing_hook_entry_is_offered_only_as_a_previewed_yes(self):
-        self.assertIn('offers to add just that entry, shown as a diff first and only on a yes', STEP2)
+        self.assertIn('adds just that entry, only on a yes to the update check above', STEP2)
 
 
 FLAT2 = re.sub(r'\s+', ' ', STEP2)
@@ -374,23 +374,53 @@ class UneditedCopiesGetARecommendation(unittest.TestCase):
         self.assertIn('Use the first case that fits, in this order.', STEP2)
 
     def test_a_short_summary_comes_before_any_raw_diff(self):
-        self.assertIn('in one or two plain lines, what the template version changes', FLAT2)
-        self.assertIn('Do not show the raw diff unless they ask for it', FLAT2)
+        self.assertIn('in one or two plain lines what the template version changes', FLAT2)
+        self.assertIn('Do not show a raw diff unless they ask for it', FLAT2)
         self.assertNotIn('show `git diff HEAD template/main -- <path>` and ask', FLAT2)
 
     def test_the_student_still_chooses_every_path(self):
-        self.assertIn('Ask once per path.', FLAT2)
-        self.assertIn('"Take the template version (recommended), or keep yours?', FLAT2)
+        self.assertIn("Each Changed or Can't tell path gets its own question", FLAT2)
         self.assertIn('"Keep your version, or take the template version?', FLAT2)
+        self.assertIn('Take all the recommended updates? I can show you the details first. If you say no, everything stays as it is.', FLAT2)
         self.assertIn('nothing is overwritten without their answer', FLAT2)
         checkout = FLAT2.index('after they choose the template version, run `git checkout template/main -- <path>`')
-        self.assertLess(FLAT2.index('Ask once per path.'), checkout)
+        self.assertLess(FLAT2.index("Each Changed or Can't tell path gets its own question"), checkout)
 
     def test_student_facing_lines_carry_no_shell_commands(self):
         said = re.findall(r'"([^"]*)"', STEP2.split('1. **Read the ids.**', 1)[1].split('Skip a path', 1)[0])
-        self.assertGreaterEqual(len(said), 6)
+        self.assertGreaterEqual(len(said), 5)
         for line in said:
             self.assertNotRegex(line, r'`(git|gh|node|python3?|py) ')
+
+
+class CombinedQuestionTests(unittest.TestCase):
+    """One question for what doesn't change how the team works (D200): nine questions and ten minutes on a first-version update."""
+
+    def test_unedited_and_new_go_together_and_changed_stays_apart(self):
+        self.assertIn('Unedited and New here paths go into the one combined question below, never one question each', FLAT2)
+        self.assertIn('in its own message after the student has answered the combined one', FLAT2)
+        self.assertIn('a yes to the combined question never covers it', FLAT2)
+
+    def test_a_no_still_goes_on_to_the_course_update(self):
+        self.assertIn('Yes or no, go on to step 3', FLAT2)
+
+    def test_privacy_lines_and_the_update_check_join_it(self):
+        self.assertIn('the privacy lines', FLAT2)
+        self.assertIn('the update check', FLAT2)
+        self.assertIn('without asking again', FLAT2)
+
+    def test_details_on_request_and_a_no_keeps_it(self):
+        self.assertIn('If they ask for the details', FLAT2)
+        self.assertIn('A no to any item keeps that item as it is', FLAT2)
+
+    def test_a_plain_yes_is_the_one_answer(self):
+        self.assertIn('A plain yes, such as "take it", answers the whole list', FLAT2)
+
+    def test_every_question_recommends_and_shows_no_raw_block(self):
+        self.assertIn('Every question says in plain words what it does and which answer you recommend', section('## Rules', '## Step 1:'))
+
+    def test_never_says_a_skill_requires_something(self):
+        self.assertIn('Never tell the student a skill or a procedure requires something', section('## Rules', '## Step 1:'))
 
 
 def decide(head_id, on_disk, shallow, commits, shipped):
