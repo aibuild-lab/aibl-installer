@@ -4,6 +4,7 @@
 
 - **`UPDATE-PROMPT.md` step 2 asks once.** Skill copies the student hasn't changed, new ones, the privacy lines and the update check are offered together: "Take all the recommended updates? I can show you the details first." A Changed or Can't tell copy still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update, team settings and team note keep their own yes in `aibl-update`, because those change how things behave. What a yes writes is unchanged. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200).
 - **Rule 7:** never tell the student a skill or procedure requires something. Say what they're choosing and why it's safe.
+- **Rule 8:** every question says in plain words what it does and which answer is recommended, with no raw block, hash or version id unless they ask. A plain yes answers the whole combined question.
 - Tests: `tests/test_update_prompt.py`. PROVISIONAL, for Wade to read. Undo: revert this commit; it pairs with the template's `aibl-update` change on the same branch name.
 
 ## Unreleased: Codex can fetch the procedures, and the update prompt's Rule 2 no longer stops `aibl-update`

@@ -409,6 +409,12 @@ class CombinedQuestionTests(unittest.TestCase):
         self.assertIn('If they ask for the details', FLAT2)
         self.assertIn('A no to any item keeps that item as it is', FLAT2)
 
+    def test_a_plain_yes_is_the_one_answer(self):
+        self.assertIn('A plain yes, such as "take it", answers the whole list', FLAT2)
+
+    def test_every_question_recommends_and_shows_no_raw_block(self):
+        self.assertIn('Every question says in plain words what it does and which answer you recommend', section('## Rules', '## Step 1:'))
+
     def test_never_says_a_skill_requires_something(self):
         self.assertIn('Never tell the student a skill or a procedure requires something', section('## Rules', '## Step 1:'))
 
