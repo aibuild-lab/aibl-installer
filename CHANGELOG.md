@@ -1,5 +1,11 @@
 # AIBL Installer changes
 
+## Unreleased: One combined question at the start of an update
+
+- **`UPDATE-PROMPT.md` step 2 asks once.** Skill copies the student hasn't changed, new ones, the privacy lines and the update check are offered together: "Take all the recommended updates? I can show you the details first." A Changed or Can't tell copy still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update, team settings and team note keep their own yes in `aibl-update`, because those change how things behave. What a yes writes is unchanged. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200).
+- **Rule 7:** never tell the student a skill or procedure requires something. Say what they're choosing and why it's safe.
+- Tests: `tests/test_update_prompt.py`. PROVISIONAL, for Wade to read. Undo: revert this commit; it pairs with the template's `aibl-update` change on the same branch name.
+
 ## Unreleased: Codex can fetch the procedures, and the update prompt's Rule 2 no longer stops `aibl-update`
 
 - **`START-HERE.md`: all three pastes (setup, update, fresh start) get the blocked-fetch last line from Learn's card 0.3.** In Codex the first fetch is blocked inside the sandbox and the old line ("say so and I will paste the procedure into chat") ended there, for a student with no way to get the text. In `codex exec` with auto-review, the update paste with the new line asked to run `curl` outside the sandbox and followed the procedure from the top, 4 of 4; the old line asked for a paste, 3 of 3. **Each paste also gets a Codex-only line before it:** click the shield and choose Approve for me, with the reason, the credits and the switch back, in Learn's words. Without Approve for me, the update paste names its commands (git, gh, curl or node); setup and fresh start say "the step it just told you about", because setup installs through winget or Homebrew and a command list would make a student refuse a real step. PROVISIONAL, matching Team HQ's installer line.
