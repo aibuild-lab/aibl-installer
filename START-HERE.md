@@ -51,6 +51,8 @@ If the app asks whether you trust the folder, click Trust. It is your own folder
 
 ## Step 3: paste this, and follow along
 
+**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The setup has to reach GitHub and build your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time. Don't see Approve for me? Codex will ask many times. Choose **Allow once** for the step it just told you about, and **Deny** anything else, then tell us.
+
 ```text
 You are the AI Build Lab installer assistant. I am a student setting up for my program.
 
@@ -60,7 +62,7 @@ https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/SETUP-PROMPT.m
 
 Start by greeting me and detecting my operating system and which app you are, as the procedure says. Do not skip steps. Do not ask me what I want to do; the procedure tells you.
 
-If you cannot fetch the URL, say so and I will paste the procedure into chat.
+If the fetch is blocked, ask me for permission to fetch it outside the sandbox with curl. If that doesn't work either, tell me to open that URL in my browser and paste what it shows.
 ```
 
 The app checks what is already on your machine, tells you what it found and
@@ -81,6 +83,8 @@ Your workbench keeps working after setup, and its skills and programs get better
 over time. When the team says an update is out, or whenever you want to check,
 open the app on your `my-workbench` folder and paste this:
 
+**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The update has to reach GitHub and save to your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time. Don't see Approve for me? Codex will ask many times. Choose **Allow once** when the command uses git, gh, curl or node on this update, and **Deny** anything else, then tell us.
+
 ```text
 You are the AI Build Lab update assistant. I am a student and this session is open on my workbench.
 
@@ -90,7 +94,7 @@ https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/UPDATE-PROMPT.
 
 Say what you are about to do before each step. Do not install anything, do not re-run setup, and do not touch anything I made.
 
-If you cannot fetch the URL, say so and I will paste the procedure into chat.
+If the fetch is blocked, ask me for permission to fetch it outside the sandbox with curl. If that doesn't work either, tell me to open that URL in my browser and paste what it shows.
 ```
 
 It refreshes the workbench's own skills from the template, then, if your
@@ -106,6 +110,8 @@ the app points you to `/aibl-teach`, and the skills the course uses now are
 missing. Updating cannot fix that, so start fresh. Open the app on your **home
 folder** (not on `my-workbench`) and paste this:
 
+**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The fresh start has to reach GitHub and build your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time. Don't see Approve for me? Codex will ask many times. Choose **Allow once** for the step it just told you about, and **Deny** anything else, then tell us.
+
 ```text
 You are the AI Build Lab fresh-start assistant. I am a student and this session is open on my home folder.
 
@@ -115,7 +121,7 @@ https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/FRESH-START-PR
 
 Say what you are about to do before each step. Do not delete anything.
 
-If you cannot fetch the URL, say so and I will paste the procedure into chat.
+If the fetch is blocked, ask me for permission to fetch it outside the sandbox with curl. If that doesn't work either, tell me to open that URL in my browser and paste what it shows.
 ```
 
 Your old workbench is kept under a new name (`my-workbench-old`), a fresh

@@ -568,5 +568,15 @@ class NoEmDashes(unittest.TestCase):
         self.assertNotIn('—', TEXT)
 
 
+class RuleTwoExceptionTests(unittest.TestCase):
+    """Rule 2 limits this prompt's own steps; it must not stop aibl-update's approved steps (a codex exec walk, 11-06-2026)."""
+
+    def test_the_rule_stands_and_names_its_scope(self):
+        rules = section('## Rules', '## Step 1:')
+        self.assertIn('Touch only the supplied update paths', rules)
+        self.assertIn('Never replace an existing settings file', rules)
+        self.assertIn("This rule covers this prompt's own steps. `aibl-update`'s approved steps have their own yes.", rules)
+
+
 if __name__ == '__main__':
     unittest.main()
