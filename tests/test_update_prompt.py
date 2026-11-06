@@ -423,6 +423,18 @@ class CombinedQuestionTests(unittest.TestCase):
         self.assertIn('Never tell the student a skill or a procedure requires something', section('## Rules', '## Step 1:'))
 
 
+class PrivateRecordsTests(unittest.TestCase):
+    """D199: untracked job records aren't unsaved work, and never go in a save point."""
+
+    def test_private_paths_do_not_stop_the_update(self):
+        self.assertIn('Untracked paths under `runs/`, `quarantine/`, `logs/` or `library/originals/` are job records', STEP1)
+        self.assertIn("Your job records stay on this computer, and this update doesn't touch them.", STEP1)
+
+    def test_other_unsaved_work_still_stops_and_leaves_them_out(self):
+        self.assertIn('You have unsaved work.', STEP1)
+        self.assertIn('Leave those private paths out of that save', STEP1)
+
+
 def decide(head_id, on_disk, shallow, commits, shipped):
     """Step 2's four cases, first fit wins, in the prompt's order. None means that command failed."""
     if head_id is not None and head_id in shipped:
