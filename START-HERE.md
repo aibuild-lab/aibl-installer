@@ -51,7 +51,7 @@ If the app asks whether you trust the folder, click Trust. It is your own folder
 
 ## Step 3: paste this, and follow along
 
-**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. Setup has to reach GitHub and install what is missing on your computer, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time.
+**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The setup has to reach GitHub and build your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time. Don't see Approve for me? Codex will ask many times. Choose **Allow once** for the step it just told you about, and **Deny** anything else, then tell us.
 
 ```text
 You are the AI Build Lab installer assistant. I am a student setting up for my program.
@@ -83,7 +83,7 @@ Your workbench keeps working after setup, and its skills and programs get better
 over time. When the team says an update is out, or whenever you want to check,
 open the app on your `my-workbench` folder and paste this:
 
-**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The update has to reach GitHub and save to your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time.
+**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The update has to reach GitHub and save to your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time. Don't see Approve for me? Codex will ask many times. Choose **Allow once** when the command uses git, gh, curl or node on this update, and **Deny** anything else, then tell us.
 
 ```text
 You are the AI Build Lab update assistant. I am a student and this session is open on my workbench.
@@ -110,7 +110,7 @@ the app points you to `/aibl-teach`, and the skills the course uses now are
 missing. Updating cannot fix that, so start fresh. Open the app on your **home
 folder** (not on `my-workbench`) and paste this:
 
-**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The fresh start has to reach GitHub and save to your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time.
+**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me. The fresh start has to reach GitHub and build your workbench, and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time. Don't see Approve for me? Codex will ask many times. Choose **Allow once** for the step it just told you about, and **Deny** anything else, then tell us.
 
 ```text
 You are the AI Build Lab fresh-start assistant. I am a student and this session is open on my home folder.

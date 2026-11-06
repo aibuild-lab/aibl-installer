@@ -12,6 +12,8 @@ TEXT = (ROOT / 'START-HERE.md').read_text(encoding='utf-8')
 LAST = "If the fetch is blocked, ask me for permission to fetch it outside the sandbox with curl. If that doesn't work either, tell me to open that URL in my browser and paste what it shows."
 SHIELD = '**In Codex only.** Before you paste: click the shield under the message box and choose Approve for me.'
 TAIL = 'and this stops Codex asking you about every step. The app says it may use more credits. You can switch it back any time.'
+STEP = "Choose **Allow once** for the step it just told you about, and **Deny** anything else, then tell us."
+CMD = "Choose **Allow once** when the command uses git, gh, curl or node on this update, and **Deny** anything else, then tell us."
 PASTES = re.findall(r'```text\n(You are the AI Build Lab .*?)```', TEXT, re.S)
 
 
@@ -30,7 +32,9 @@ class StartHerePastes(unittest.TestCase):
         for first in ('installer assistant', 'update assistant', 'fresh-start assistant'):
             before = TEXT.split('```text\nYou are the AI Build Lab ' + first, 1)[0].rstrip().splitlines()[-1]
             self.assertTrue(before.startswith(SHIELD), first)
-            self.assertTrue(before.endswith(TAIL), first)
+            self.assertIn(TAIL, before, first)
+            # Setup installs through winget or Homebrew, so only the update can name its commands.
+            self.assertTrue(before.endswith(CMD if first == 'update assistant' else STEP), first)
 
     def test_no_dashes(self):
         for dash in ('–', '—'):
