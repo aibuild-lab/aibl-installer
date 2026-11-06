@@ -398,7 +398,11 @@ class CombinedQuestionTests(unittest.TestCase):
 
     def test_unedited_and_new_go_together_and_changed_stays_apart(self):
         self.assertIn('Unedited and New here paths go into the one combined question below, never one question each', FLAT2)
-        self.assertIn('after the combined one', FLAT2)
+        self.assertIn('in its own message after the student has answered the combined one', FLAT2)
+        self.assertIn('a yes to the combined question never covers it', FLAT2)
+
+    def test_a_no_still_goes_on_to_the_course_update(self):
+        self.assertIn('Yes or no, go on to step 3', FLAT2)
 
     def test_privacy_lines_and_the_update_check_join_it(self):
         self.assertIn('the privacy lines', FLAT2)
