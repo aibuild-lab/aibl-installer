@@ -60,7 +60,7 @@ On a no, continue the update without connecting, and say once that their snapsho
 
 Then say: "Connected. Your workbench now has a private copy at github.com/`<login>`/`<name>`." Continue below.
 
-Run `git status --short`. If it prints anything, say: "You have unsaved work. Say 'checkpoint' and I'll save it with `aibl-checkpoint` first (or tell me to set the changes aside), then paste the prompt again." Stop. Do not stash for them.
+Run `git status --short`. Untracked paths under `runs/`, `quarantine/`, `logs/` or `library/originals/` are job records and other private files that stay on this computer: they aren't unsaved work, the update doesn't touch them, and they never go in a save point. If those are all it prints, say "Your job records stay on this computer, and this update doesn't touch them." and carry on. If it prints anything else, say: "You have unsaved work. Say 'checkpoint' and I'll save it with `aibl-checkpoint` first (or tell me to set the changes aside), then paste the prompt again." Leave those private paths out of that save, even if this workbench's checkpoint skill doesn't list them. Stop. Do not stash for them.
 
 ## Step 2: refresh the workbench skills from the template
 

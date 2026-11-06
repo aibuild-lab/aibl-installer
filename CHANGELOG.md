@@ -1,5 +1,10 @@
 # AIBL Installer changes
 
+## Unreleased: Job records don't stop an update or go in a save point
+
+- **`UPDATE-PROMPT.md` step 1:** untracked paths under `runs/`, `quarantine/`, `logs/` or `library/originals/` no longer count as unsaved work. On a workbench made before the template ignored `runs/` (10-03-2026), the update told a student "Say 'checkpoint'", and that workbench's older checkpoint skill then saved their job records and pushed them to their private GitHub copy (D199, walked in `codex exec` with a local stand-in origin: 7 of 7 files). Other unsaved work still stops the update, and those private paths are left out of that save.
+- Tests: `tests/test_update_prompt.py`. PROVISIONAL, for Wade to read. Undo: revert this commit.
+
 ## Unreleased: One combined question at the start of an update
 
 - **`UPDATE-PROMPT.md` step 2 asks once.** Skill copies the student hasn't changed, new ones, the privacy lines and the update check are offered together: "Take all the recommended updates? I can show you the details first." A Changed or Can't tell copy still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update, team settings and team note keep their own yes in `aibl-update`, because those change how things behave. What a yes writes is unchanged. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200).
