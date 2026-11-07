@@ -1,9 +1,10 @@
 # AIBL Installer changes
 
-## Unreleased: The course's bookmarks don't stop an update, and the rebuilt registry is saved
+## Unreleased: The course's bookmarks don't stop an update, the rebuilt registry is saved, and no asked Git reads
 
 - **`UPDATE-PROMPT.md` step 1:** `work/course/staff/continuation-*.json` and `work/course/staff/agent-menu.json`, new or changed, no longer count as unsaved work. The lessons write them to remember the student's place, and a course update never touches them. The update says once "Your saved place in the course stays as it is. This update doesn't touch it, and your next save includes it." and carries on. Rule 5 points to step 1's list, and step 3 carries the same exception into the workbench's own `aibl-update`, whose copy may not name the bookmarks yet. Found 11-07: the update said to save the bookmark, then the save said it stays on the computer, a dead end (launch-walks route c, and a real student on a Mac).
 - **`UPDATE-PROMPT.md` step 3:** when the workbench's own `aibl-update` rebuilds the team registry, the update saves `workforce/shed/registry.yaml` right away in its own commit, "Rebuild the team registry", even for a date-only change. Template main's aibl-update leaves it for the end-of-update save, which a student can decline, so the next update stopped for a save (Mac walk, 11-07).
+- **`UPDATE-PROMPT.md` steps 1 and 2 read Git without `git diff` or `git show` (D232).** The team's settings ask the student before each, so in Claude each was an Allow box. The same checks now use `git rev-parse` ids (same id, same copy), `git ls-tree -r` to find the changed files in a folder, and `git cat-file -p` to read a file from the template.
 - Tests: `tests/test_update_prompt.py`. Undo: revert this commit.
 
 ## Unreleased: Job records don't stop an update or go in a save point
