@@ -435,6 +435,18 @@ class PrivateRecordsTests(unittest.TestCase):
         self.assertIn('Leave those private paths out of that save', STEP1)
 
 
+class BookmarkTests(unittest.TestCase):
+    """11-07: an unsaved course bookmark stopped the update, then the save refused it. A dead end."""
+
+    def test_bookmarks_do_not_stop_the_update(self):
+        self.assertIn("`work/course/staff/continuation-*.json` and `work/course/staff/agent-menu.json`, new or changed, aren't unsaved work", STEP1)
+        self.assertIn("Your saved place in the course stays as it is. This update doesn't touch it, and your next save includes it.", STEP1)
+
+    def test_the_rule_and_the_hand_off_to_aibl_update_carry_it(self):
+        self.assertIn("stop and ask the student to save first (step 1 says which files don't count)", section('## Rules', '## Step 1:'))
+        self.assertIn("the course's bookmarks named in step 1 don't count as unsaved work either", section('## Step 3:', '## Step 4:'))
+
+
 def decide(head_id, on_disk, shallow, commits, shipped):
     """Step 2's four cases, first fit wins, in the prompt's order. None means that command failed."""
     if head_id is not None and head_id in shipped:

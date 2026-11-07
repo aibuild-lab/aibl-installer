@@ -1,5 +1,10 @@
 # AIBL Installer changes
 
+## Unreleased: The course's bookmarks don't stop an update
+
+- **`UPDATE-PROMPT.md` step 1:** `work/course/staff/continuation-*.json` and `work/course/staff/agent-menu.json`, new or changed, no longer count as unsaved work. The lessons write them to remember the student's place, and a course update never touches them. The update says once "Your saved place in the course stays as it is. This update doesn't touch it, and your next save includes it." and carries on. Rule 5 points to step 1's list, and step 3 carries the same exception into the workbench's own `aibl-update`, whose copy may not name the bookmarks yet. Found 11-07: the update said to save the bookmark, then the save said it stays on the computer, a dead end (launch-walks route c, and a real student on a Mac).
+- Tests: `tests/test_update_prompt.py`. Undo: revert this commit.
+
 ## Unreleased: Job records don't stop an update or go in a save point
 
 - **`UPDATE-PROMPT.md` step 1:** untracked paths under `runs/`, `quarantine/`, `logs/` or `library/originals/` no longer count as unsaved work. On a workbench made before the template ignored `runs/` (10-03-2026), the update told a student "Say 'checkpoint'", and that workbench's older checkpoint skill then saved their job records and pushed them to their private GitHub copy (D199, walked in `codex exec` with a local stand-in origin: 7 of 7 files). Other unsaved work still stops the update, and those private paths are left out of that save.
