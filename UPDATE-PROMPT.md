@@ -118,7 +118,7 @@ If a kept skill differs from the template, report it as kept, not current. For r
 
 ## Step 3: update the programs, if the skill is there
 
-If `.claude/skills/aibl-update/SKILL.md` (or `.agents/skills/aibl-update/SKILL.md` in Codex) now exists, read it and follow it from its first step. In its first step, the course's bookmarks named in step 1 don't count as unsaved work either, even if that skill doesn't name them yet. It checks every program connected to this workbench for a newer edition, shows what would change, and merges only after the student says yes.
+If `.claude/skills/aibl-update/SKILL.md` (or `.agents/skills/aibl-update/SKILL.md` in Codex) now exists, read it and follow it from its first step. In its first step, the course's bookmarks named in step 1 don't count as unsaved work either, even if that skill doesn't name them yet. When it rebuilds the team registry, save `workforce/shed/registry.yaml` right away in its own commit, `git commit -m "Rebuild the team registry" -- workforce/shed/registry.yaml`, even when only its date changed, rather than leaving it for the save at the end. It checks every program connected to this workbench for a newer edition, shows what would change, and merges only after the student says yes.
 
 If it does not exist, the workbench has no program-update skill yet. Say: "Your skills are current. When your program opens, `aibl-enroll` connects it." Stop.
 

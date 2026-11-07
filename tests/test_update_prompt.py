@@ -447,6 +447,16 @@ class BookmarkTests(unittest.TestCase):
         self.assertIn("the course's bookmarks named in step 1 don't count as unsaved work either", section('## Step 3:', '## Step 4:'))
 
 
+class RegistryCommitTests(unittest.TestCase):
+    """11-07 Mac walk: the rebuilt registry was left unsaved, so the next update stopped for a save."""
+
+    def test_step_3_saves_the_rebuilt_registry_right_away(self):
+        step3 = section('## Step 3:', '## Step 4:')
+        self.assertIn('save `workforce/shed/registry.yaml` right away in its own commit, '
+                      '`git commit -m "Rebuild the team registry" -- workforce/shed/registry.yaml`, '
+                      'even when only its date changed, rather than leaving it for the save at the end.', step3)
+
+
 def decide(head_id, on_disk, shallow, commits, shipped):
     """Step 2's four cases, first fit wins, in the prompt's order. None means that command failed."""
     if head_id is not None and head_id in shipped:
