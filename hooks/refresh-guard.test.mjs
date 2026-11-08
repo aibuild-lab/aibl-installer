@@ -153,6 +153,8 @@ fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774.manifes
   path.join(repo, "hooks", "secrets-guard.r774.manifest.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.identities.json"),
   path.join(repo, "hooks", "secrets-guard.legacy.identities.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774-corrections.manifest.json"),
+  path.join(repo, "hooks", "secrets-guard.r774-corrections.manifest.json"));
 // Pinned by its hash inside refresh-guard.mjs (not the manifest), so it is copied unchanged.
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.course-deployed.identities.json"),
   path.join(repo, "hooks", "secrets-guard.course-deployed.identities.json"));
@@ -172,6 +174,7 @@ const writeManifest = (ref, bodies) => fs.writeFileSync(manifestPath, JSON.strin
     ...Object.fromEntries(Object.entries(LOCAL_FILES).map(([n, b]) => [n, sha256(normalizeLf(b))])),
     "secrets-guard.r774.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774.manifest.json")))),
     "secrets-guard.legacy.identities.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.legacy.identities.json")))),
+    "secrets-guard.r774-corrections.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774-corrections.manifest.json")))),
   },
 }, null, 2));
 
@@ -927,6 +930,73 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   check("approved current upgrade and second application succeed", runHome(priorHome).status === 0
     && runHome(priorHome).status === 0
     && JSON.parse(runHome(priorHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
+
+  // An earlier CURRENT release (a guard edit since R-774, such as the Keychain rule): students who
+  // installed it hold a receipt naming its manifest ref and hash, and its guard bytes. With its
+  // manifest saved byte for byte as a predecessor snapshot, they upgrade instead of holding.
+  {
+    const predecessorPath = path.join(repo, "hooks", "secrets-guard.r774-corrections.manifest.json");
+    const savedPredecessor = fs.readFileSync(predecessorPath);
+    const OUTGOING = { ...STUB, "secrets-guard.js": "#!/usr/bin/env node\n// outgoing current release\nprocess.exit(0);\n" };
+    const useRelease = (ref, bodies) => {
+      for (const [name, body] of Object.entries(bodies)) fs.writeFileSync(path.join(src, name), body);
+      writeManifest(ref, bodies);
+    };
+    const guardIn = (selectedHome) => fs.readFileSync(path.join(selectedHome, ".claude", "hooks", "secrets-guard.js"), "utf8");
+    try {
+      useRelease("outgoing-fixture", OUTGOING);
+      const receiptHome = path.join(root, "previous-release-receipt");
+      const freeHome = path.join(root, "previous-release-no-receipt");
+      fs.mkdirSync(receiptHome);
+      fs.mkdirSync(freeHome);
+      check("outgoing release installs in both scratch homes", runHome(receiptHome).status === 0 && runHome(freeHome).status === 0);
+      fs.rmSync(receiptAt(freeHome));
+      check("the outgoing receipt names the outgoing release",
+        JSON.parse(fs.readFileSync(receiptAt(receiptHome), "utf8")).manifest.ref === "outgoing-fixture");
+
+      // Negative control: the new release WITHOUT a snapshot of the outgoing manifest holds.
+      useRelease("current-fixture", STUB);
+      const unsaved = JSON.parse(runHome(receiptHome, ["--check", "--json"]).stdout);
+      check("without the snapshot, an outgoing-release receipt holds as OWNERSHIP_INVALID",
+        unsaved.failureClass === "OWNERSHIP_INVALID" && unsaved.writesAttempted === false);
+      check("without the snapshot, outgoing bytes with no receipt hold as unknown bytes",
+        JSON.parse(runHome(freeHome, ["--migration-preview", "--json"]).stdout).failureClass === "UNKNOWN_MANAGED_BYTES");
+
+      // The release step: save the outgoing manifest byte for byte, then ship the new release.
+      useRelease("outgoing-fixture", OUTGOING);
+      fs.copyFileSync(manifestPath, predecessorPath);
+      useRelease("current-fixture", STUB);
+      const before = JSON.parse(runHome(receiptHome, ["--check", "--json"]).stdout);
+      check("an outgoing-release receipt is installer-owned and upgrade-required",
+        before.ownership.status === "installer-upgrade-required" && before.failureClass === "UPGRADE_REQUIRED"
+        && before.writesAttempted === false);
+      check("its preview proposes the upgrade, not a hold",
+        JSON.parse(runHome(receiptHome, ["--migration-preview", "--json"]).stdout).eligibility === "upgrade-required");
+      check("the approved upgrade succeeds and installs the new guard",
+        runHome(receiptHome).status === 0 && guardIn(receiptHome) === STUB["secrets-guard.js"]);
+      check("after the upgrade the receipt is current and installer-managed",
+        JSON.parse(runHome(receiptHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed"
+        && JSON.parse(fs.readFileSync(receiptAt(receiptHome), "utf8")).manifest.ref === "current-fixture");
+      const freePreview = JSON.parse(runHome(freeHome, ["--migration-preview", "--json"]).stdout);
+      check("outgoing bytes with no receipt are a reviewed earlier release, eligible for migration",
+        freePreview.eligibility === "eligible-migration" && freePreview.ownership === "prior-no-receipt"
+        && freePreview.topology === "previous-0" && freePreview.writesAttempted === false);
+      check("that migration, once approved, succeeds", runHome(freeHome).status === 0
+        && guardIn(freeHome) === STUB["secrets-guard.js"]
+        && JSON.parse(runHome(freeHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
+      const mixedHome = path.join(root, "previous-release-mixed");
+      fs.mkdirSync(mixedHome);
+      check("a current install for the mixed case", runHome(mixedHome).status === 0);
+      fs.rmSync(receiptAt(mixedHome));
+      fs.writeFileSync(path.join(mixedHome, ".claude", "hooks", "secrets-guard.js"), OUTGOING["secrets-guard.js"]);
+      const mixedPreview = JSON.parse(runHome(mixedHome, ["--migration-preview", "--json"]).stdout);
+      check("an outgoing Claude guard beside a current Codex guard is still a hold",
+        mixedPreview.eligibility === "hold" && mixedPreview.writesAttempted === false);
+    } finally {
+      fs.writeFileSync(predecessorPath, savedPredecessor);
+      useRelease("current-fixture", STUB);
+    }
+  }
 
   const legacyGuard = Buffer.from("#!/usr/bin/env node\n// synthetic legacy guard\nprocess.exit(0);\n");
   const legacyTripwire = Buffer.from("#!/usr/bin/env node\n// synthetic legacy tripwire\nprocess.exit(0);\n");

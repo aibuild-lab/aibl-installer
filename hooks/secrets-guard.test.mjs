@@ -399,6 +399,30 @@ const CASES = [
   ['Bash', 'ssh api-host cat /proc/1/environ', 'deny'],
   ['Bash', 'ps eww', 'deny'],
   ['Bash', 'ps auxe', 'deny'],
+  // --- macOS Keychain (WF-66, D273): -w or -g prints the password; without them it stays allowed ---
+  ['Bash', 'security find-generic-password -w -s example-service', 'deny'],
+  ['Bash', 'security find-generic-password -s example-service -w', 'deny'],
+  ['Bash', 'security find-generic-password -g -a someone -s example-service', 'deny'],
+  ['Bash', 'security find-generic-password -gs example-service', 'deny'],
+  ['Bash', 'security find-internet-password -w -s example.com', 'deny'],
+  ['Bash', 'security find-internet-password -g -s example.com', 'deny'],
+  ['Bash', '/usr/bin/security find-generic-password -wa someone', 'deny'],
+  ['Bash', 'sudo security find-generic-password -w -s example-service', 'deny'],
+  ['Bash', 'bash -c "security find-generic-password -w -s example-service"', 'deny'],
+  // Captured into a variable for one command, the value never reaches output: the same runtime
+  // injection the `$(op read ...)` allow block above protects. Printing it is still denied.
+  ['Bash', 'KEY=$(security find-generic-password -w -s example-service) some-tool', 'allow'],
+  ['Bash', 'echo "$(security find-generic-password -w -s example-service)"', 'deny'],
+  ['Bash', 'security find-generic-password -w -s example-service | cat', 'deny'],
+  ['Bash', 'LANG=C security find-internet-password -w -s example.com', 'deny'],
+  ['PowerShell', 'security find-generic-password -w -s example-service', 'deny'],
+  ['Bash', 'security dump-keychain -d', 'deny'],
+  ['Bash', 'security find-generic-password -s example-service', 'allow'],
+  ['Bash', 'security find-internet-password -s example.com -a someone', 'allow'],
+  ['Bash', 'security find-certificate -c example -p', 'allow'],
+  ['Bash', 'security dump-keychain', 'allow'],
+  ['Bash', 'security list-keychains', 'allow'],
+  ['Bash', 'grep -n "security find-generic-password -w" notes.md', 'allow'],
   // ...but WRITING about the path is not reading it. Caught in live use: a `gh pr merge --body`
   // describing this very fix was blocked by an earlier draft that matched the path as raw text.
   ['Bash', 'gh pr merge 19 --squash --body "adds a rule for /proc/<pid>/environ reads"', 'allow'],
