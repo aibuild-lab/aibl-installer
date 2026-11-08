@@ -1012,4 +1012,33 @@ for (const segment of segments) {
   }
 }
 
+// 9. macOS Keychain. `security find-generic-password` and `find-internet-password` print only an
+//    item's attributes unless asked for the secret: `-w` prints the password alone and `-g` prints
+//    it with the attributes. Either one, alone or in an option cluster (`-gs`, `-wa`), is a
+//    password read. Without them the lookup stays allowed, so an agent can still confirm an item
+//    exists. `dump-keychain -d` decrypts every item. The macOS approval box is not a boundary
+//    an agent can rely on: an item may already allow the `security` tool. (WF-66, D273)
+const KEYCHAIN_FIND_VERBS = new Set(['find-generic-password', 'find-internet-password']);
+for (const segment of segments) {
+  const tokens = words(segment);
+  if (resolveBinary(tokens) !== 'security') continue;
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  const args = tokens.slice(i + 1);
+  // Options before the verb (`security -i`, `security -q`) belong to `security` itself.
+  const verbIndex = args.findIndex(arg => !arg.startsWith('-'));
+  if (verbIndex < 0) continue;
+  const verb = args[verbIndex].toLowerCase();
+  const options = args.slice(verbIndex + 1).filter(arg => /^-[A-Za-z]+$/.test(arg));
+  if (KEYCHAIN_FIND_VERBS.has(verb) && options.some(option => /[wg]/.test(option.slice(1))))
+    deny(`\`security ${verb}\` with -w or -g prints a Keychain password. Check that the item exists without -w or -g, or let the program that needs the key read it at runtime.`);
+  if (verb === 'dump-keychain' && options.some(option => option.slice(1).includes('d')))
+    deny('`security dump-keychain -d` decrypts and prints every Keychain item. List names without -d.');
+}
+// The same read inside a command substitution that is then PRINTED, mirroring the `op read` rule
+// above: feeding a program (`KEY=$(security ... -w) tool`) stays allowed, printing it does not.
+if (!isMaskedClause(inspection) &&
+    /\b(?:echo|printf|print|cat|tee|write-host|write-output|gc)\b[^\n]*(?:\$\(|`)\s*(?:[^\s"'`]+[\\/])?security\s+find-(?:generic|internet)-password\b[^)`\n]*\s-[A-Za-z]*[wg]/i.test(inspection))
+  deny('Printing a Keychain password from $(security ...) sends it to stdout. Let the program that needs it read it at runtime.');
+
 process.exit(0);
