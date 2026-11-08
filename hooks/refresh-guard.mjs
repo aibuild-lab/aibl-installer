@@ -46,7 +46,13 @@ const CODEX_DISTINCT = ["secrets-guard.js", "secrets-tripwire.js"];
 //   current/r774/legacy: every distinct file of that release; mixed: the observed Claude R-774
 //   guard and tripwire beside the legacy installer; none: that client has no managed files.
 const REVIEWED_TOPOLOGIES = new Map();
-for (const set of ["current", "r774", "legacy"]) {
+// Earlier current releases, newest last. When a guard file changes, the outgoing manifest is saved
+// here byte for byte, so a student whose receipt or files name that release upgrades cleanly instead
+// of holding. Each is pinned in the current manifest's local_files like the R-774 snapshot, and each
+// is its own release set (`previous-<n>`): files from two different earlier releases never combine.
+const PREDECESSOR_MANIFEST_FILES = ["secrets-guard.r774-corrections.manifest.json"];
+const PREDECESSOR_SETS = PREDECESSOR_MANIFEST_FILES.map((_, index) => `previous-${index}`);
+for (const set of ["current", "r774", "legacy", ...PREDECESSOR_SETS]) {
   REVIEWED_TOPOLOGIES.set(`${set}|${set}`, set);
   REVIEWED_TOPOLOGIES.set(`${set}|none`, set);
   REVIEWED_TOPOLOGIES.set(`none|${set}`, set);
@@ -69,6 +75,7 @@ const repoRoot = path.resolve(hooksSourceDir, "..");
 const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
 const priorManifestPath = path.join(hooksSourceDir, "secrets-guard.r774.manifest.json");
 let priorManifest;
+let predecessorManifests = [];
 let legacyIdentities;
 // Pinned here rather than in secrets-guard.manifest.json on purpose: every ownership receipt and the
 // Agent Native OS inspector bind to the manifest file's own hash, so editing the manifest to add an
@@ -334,6 +341,12 @@ async function main() {
   enterStage("INPUT_SCOPE");
   const manifest = loadManifest();
   priorManifest = readPinnedIdentity("secrets-guard.r774.manifest.json", manifest);
+  predecessorManifests = PREDECESSOR_MANIFEST_FILES.map((name, index) => {
+    const value = readPinnedIdentity(name, manifest);
+    if (value.ref === manifest.ref || value.ref === priorManifest.ref)
+      hold("SOURCE_INTEGRITY", "An earlier release snapshot repeats a current or R-774 ref. No files were changed.");
+    return { name, set: PREDECESSOR_SETS[index], path: path.join(hooksSourceDir, name), value };
+  });
   legacyIdentities = readPinnedIdentity("secrets-guard.legacy.identities.json", manifest);
   courseDeployedReleases = readCourseDeployedIdentities();
   diagnosticSourceIdentity = manifest.ref;
@@ -1176,11 +1189,18 @@ function receiptFor(manifest, clients = Object.entries(APPS).filter(([, selected
     schemaVersion: 1,
     owner: "aibl-installer",
     source: { location: normalizePath(repoRoot) },
-    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(
-      manifest.ref === priorManifest.ref ? priorManifestPath : manifestPath))) },
+    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(manifestFileFor(manifest)))) },
     managedFiles,
     clients: Object.entries(managedFiles).filter(([, files]) => files.length > 0).map(([client]) => client),
   };
+}
+
+// The file whose bytes a receipt's manifest identity hashes: the R-774 snapshot, an earlier
+// current release's snapshot, or the current manifest.
+function manifestFileFor(manifest) {
+  if (manifest.ref === priorManifest.ref) return priorManifestPath;
+  const predecessor = predecessorManifests.find((entry) => entry.value === manifest);
+  return predecessor ? predecessor.path : manifestPath;
 }
 
 function inspectOwnership(manifest, { requireSelected = true, verifySelectedBinding = true } = {}) {
@@ -1196,7 +1216,8 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     || new Set(receipt.clients).size !== receipt.clients.length) {
     return { status: "invalid", issues: ["receipt clients are invalid"] };
   }
-  const receiptManifest = receipt.manifest?.ref === priorManifest.ref ? priorManifest : manifest;
+  const receiptManifest = receipt.manifest?.ref === priorManifest.ref ? priorManifest
+    : predecessorManifests.find((entry) => entry.value.ref === receipt.manifest?.ref)?.value || manifest;
   const expected = receiptFor(receiptManifest, receipt.clients);
   // The checkout can move after installation. Its recorded path is recovery metadata, not a
   // trust input; ownership comes from the pinned manifest and independently inspected bindings.
@@ -1212,14 +1233,15 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     if (APPS[client] && !receipt.clients.includes(client)) issues.push(`${client} required ownership`);
   }
   if (issues.length > 0) return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: issues.map((field) => `receipt ${field} does not match this installer`) };
-  return { status: receiptManifest === priorManifest ? "installer-upgrade-required" : "installer-managed",
+  return { status: receiptManifest !== manifest ? "installer-upgrade-required" : "installer-managed",
     receiptPath: normalizePath(ownershipReceiptPath), receipt };
 }
 
 function fileLabels(name, bytes, manifest) {
   const courseSources = [...courseDeployedReleases].flatMap(([ref, states]) =>
     states.map((state) => [`${COURSE_SET_PREFIX}${ref}`, state]));
-  return [...new Set([["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities], ...courseSources].filter(([, source]) => {
+  const predecessorSources = predecessorManifests.map((entry) => [entry.set, entry.value]);
+  return [...new Set([["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities], ...predecessorSources, ...courseSources].filter(([, source]) => {
     const wanted = source.files?.[name] || source.local_files?.[name];
     return wanted && (sha256(bytes) === wanted || (source.local_files?.[name] && sha256(normalizeLf(bytes)) === wanted));
   }).map(([label]) => label))];
@@ -1229,7 +1251,7 @@ function releaseSetFor(client, state) {
   const labels = (client === "claude" ? CLAUDE_DISTINCT : CODEX_DISTINCT).map((name) => state.get(`${client}/${name}`));
   if (labels.some((entry) => entry === "missing")) return "partial";
   const courseSets = [...courseDeployedReleases.keys()].map((ref) => `${COURSE_SET_PREFIX}${ref}`);
-  for (const set of ["current", "r774", "legacy", ...courseSets]) if (labels.every((entry) => entry.includes(set))) return set;
+  for (const set of ["current", ...PREDECESSOR_SETS, "r774", "legacy", ...courseSets]) if (labels.every((entry) => entry.includes(set))) return set;
   if (client === "claude" && labels[0].includes("r774") && labels[1].includes("r774") && labels[2].includes("legacy")) return "mixed";
   return "unreviewed";
 }
@@ -1315,7 +1337,7 @@ function classifyReceiptFree(manifest) {
     return finish("course-deployed-no-receipt", { requiredClients, topology, priorState: courseDeployedDescription(set) });
   }
   const kind = topology === "recognized-mixed" ? "recognized-mixed"
-    : topology === "legacy" ? "legacy-no-receipt" : topology === "r774" ? "prior-no-receipt"
+    : topology === "legacy" ? "legacy-no-receipt" : topology === "r774" || PREDECESSOR_SETS.includes(topology) ? "prior-no-receipt"
       : inspectInstalledGuard(manifest).healthy ? "current-no-receipt" : "current-registration-repair";
   return finish(kind, { requiredClients, topology });
 }

@@ -29,6 +29,14 @@ The earlier R-774 receipt is checked against its exact preserved manifest and re
 `installer-upgrade-required`. Its old registration is valid for that version but does not prove
 built-in Read coverage. Legacy on-disk health is a statement about the legacy release only.
 
+Earlier **current** releases are kept the same way. Before a pinned file changes, the outgoing
+`secrets-guard.manifest.json` is saved byte for byte as `secrets-guard.<outgoing-ref>.manifest.json`,
+listed in `PREDECESSOR_MANIFEST_FILES` in `refresh-guard.mjs` and pinned under `local_files`. A
+receipt that names it is `installer-upgrade-required`, and its files with no receipt form the
+`previous-<n>` topology. Without that step, every student on the outgoing release would hold as
+`OWNERSHIP_INVALID` or `UNKNOWN_MANAGED_BYTES` on the next refresh (`refresh-guard.test.mjs` proves
+both). The first snapshot is `secrets-guard.r774-corrections.manifest.json` (main `ae747f9`).
+
 ### Receipt-free installations
 
 An installation with no ownership receipt is never attributed by guesswork. The installer
@@ -42,6 +50,7 @@ come from the list plus a separate human approval.
 | `legacy` (all legacy) | pinned legacy | pinned legacy, or none | every app that has files |
 | `r774` (receipt absent) | R-774 files | R-774 files, or none | every app that has files |
 | `current` (current bytes, no receipt or damaged registration) | current | current, or none | every app that has files |
+| `previous-<n>` (an earlier current release, receipt absent) | that release's files | the same release, or none | every app that has files |
 | `recognized-mixed` | R-774 guard and tripwire, legacy installer | legacy | both |
 | `course-deployed` | one earlier agent-native-os or workshop-installer release | the same release, or none | every app that has files |
 
