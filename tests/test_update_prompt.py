@@ -19,6 +19,7 @@ copy), recommends nothing for a student edit, and falls back to the plain questi
 read. The wording tests read the prompt; the history tests run the prompt's own Git commands on disposable
 repositories. Nothing here runs an app.
 """
+import os
 import pathlib
 import re
 import shutil
@@ -114,7 +115,7 @@ class OlderWorkbench(unittest.TestCase):
 
     def test_the_marker_comes_from_the_template_and_is_checked(self):
         self.assertIn("step 2's two commands", MARKER)
-        self.assertIn('`git show template/main:.aibl/template.json`', MARKER)
+        self.assertIn('`git cat-file -p template/main:.aibl/template.json`', MARKER)
         self.assertIn('`schema_version` is `aibl.workbench-template/v1`', MARKER)
         self.assertIn('`repository` is `aibuild-lab/my-workbench-template`', MARKER)
         self.assertIn('not a plain folder', MARKER)
@@ -129,7 +130,7 @@ class OlderWorkbench(unittest.TestCase):
     def test_only_the_marker_is_committed(self):
         self.assertIn('`git commit -m "Add the workbench marker file" -- .aibl/template.json`', MARKER)
         self.assertIn('nothing else', MARKER)
-        self.assertIn('`git diff --quiet HEAD template/main -- .aibl/template.json`', MARKER)
+        self.assertIn('`git rev-parse HEAD:.aibl/template.json` and `git rev-parse template/main:.aibl/template.json` print the same id', MARKER)
 
     def test_rule_2_allows_the_marker_and_nothing_more(self):
         self.assertIn('plus `.aibl/template.json` in step 1\'s "Add the marker first", only when it is missing and only '
@@ -433,6 +434,57 @@ class PrivateRecordsTests(unittest.TestCase):
     def test_other_unsaved_work_still_stops_and_leaves_them_out(self):
         self.assertIn('You have unsaved work.', STEP1)
         self.assertIn('Leave those private paths out of that save', STEP1)
+
+
+class BookmarkTests(unittest.TestCase):
+    """11-07: an unsaved course bookmark stopped the update, then the save refused it. A dead end."""
+
+    def test_bookmarks_do_not_stop_the_update(self):
+        self.assertIn("`work/course/staff/continuation-*.json` and `work/course/staff/agent-menu.json`, new or changed, aren't unsaved work", STEP1)
+        self.assertIn("Your saved place in the course stays as it is. This update doesn't touch it, and your next save includes it.", STEP1)
+
+    def test_the_rule_and_the_hand_off_to_aibl_update_carry_it(self):
+        self.assertIn("stop and ask the student to save first (step 1 says which files don't count)", section('## Rules', '## Step 1:'))
+        self.assertIn("the course's bookmarks named in step 1 don't count as unsaved work either", section('## Step 3:', '## Step 4:'))
+
+
+class RegistryCommitTests(unittest.TestCase):
+    """11-07 Mac walk: the rebuilt registry was left unsaved, so the next update stopped for a save."""
+
+    def test_step_3_saves_the_rebuilt_registry_right_away(self):
+        step3 = section('## Step 3:', '## Step 4:')
+        self.assertIn('save `workforce/shed/registry.yaml` right away in its own commit, '
+                      '`git commit -m "Rebuild the team registry" -- workforce/shed/registry.yaml`, '
+                      'even when only its date changed, rather than leaving it for the save at the end.', step3)
+
+
+class NoAskedReadsTests(unittest.TestCase):
+    """D232: the team's settings ask before `git diff`, `git log` and `git show`, so each was an Allow box."""
+
+    def test_the_prompt_runs_none_of_the_asked_reads(self):
+        self.assertIsNone(re.search(r"`git (diff|log|show)\b", TEXT))
+
+    def test_rev_parse_ids_tell_the_same_as_diff_quiet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, HOME=tmp, USERPROFILE=tmp, GIT_CONFIG_NOSYSTEM="1",
+                       GIT_CONFIG_GLOBAL=os.path.join(tmp, "gitconfig"), GIT_TERMINAL_PROMPT="0")
+            pathlib.Path(tmp, "gitconfig").write_text("[user]\n\tname = test\n\temail = test@example.invalid\n")
+            repo = pathlib.Path(tmp, "wb")
+            (repo / "skill").mkdir(parents=True)
+            git = lambda *a, check=True: subprocess.run(["git", *a], cwd=repo, env=env, check=check,
+                                                        capture_output=True, text=True)
+            git("init", "-q", "-b", "main")
+            (repo / "skill/SKILL.md").write_text("old\n")
+            git("add", "-A")
+            git("commit", "-qm", "one")
+            git("branch", "same")
+            (repo / "skill/SKILL.md").write_text("new\n")
+            git("commit", "-qam", "two")
+            for other, alike in (("same", False), ("HEAD", True)):
+                ids = {git("rev-parse", "--verify", "--quiet", f"{rev}:skill").stdout for rev in ("HEAD", other)}
+                quiet = git("diff", "--quiet", "HEAD", other, "--", "skill", check=False).returncode == 0
+                self.assertEqual(len(ids) == 1, quiet)
+                self.assertEqual(quiet, alike)
 
 
 def decide(head_id, on_disk, shallow, commits, shipped):
