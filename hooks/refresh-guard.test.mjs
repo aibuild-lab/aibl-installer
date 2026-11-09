@@ -158,6 +158,8 @@ fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.course-deplo
   path.join(repo, "hooks", "secrets-guard.course-deployed.identities.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.workshop-installer.identities.json"),
   path.join(repo, "hooks", "secrets-guard.workshop-installer.identities.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.installer-deployed.identities.json"),
+  path.join(repo, "hooks", "secrets-guard.installer-deployed.identities.json"));
 const LOCAL_FILES = {};
 for (const [name, source] of REAL_LOCAL_FILES) {
   const body = fs.readFileSync(source);
@@ -1160,6 +1162,33 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   check("field B: one client alone is still a client-selection hold",
     preview(learnerB, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
   check("field B: previews wrote nothing", JSON.stringify(snapshotTree(learnerB)) === beforeB);
+  // Field report of 10-28-2026 (macOS): this installer's own 2026-09-24 release (#27) on both
+  // clients, receipt-free. Its Claude install.mjs is the legacy bytes, so without the
+  // installer-deployed record the rig read as an unreviewed mix and held at OWNER_BINDING.
+  const installer0924 = fieldHome({
+    ".claude/hooks/secrets-guard.js": fx("installer-2026-09-24", "secrets-guard.js"),
+    ".claude/hooks/secrets-tripwire.js": reviewed("secrets-tripwire.js"),
+    ".claude/hooks/install.mjs": fx("installer-2026-09-24", "install.mjs"),
+    ...supplements("claude"),
+    ".codex/hooks/secrets-guard.js": fx("installer-2026-09-24", "secrets-guard.js"),
+    ".codex/hooks/secrets-tripwire.js": reviewed("secrets-tripwire.js"),
+    ".codex/hooks/codex-secrets-guard.mjs": reviewed("codex-secrets-guard.mjs"),
+    ...supplements("codex"),
+  });
+  const beforeI = JSON.stringify(snapshotTree(installer0924));
+  const bothI = preview(installer0924, ["--claude", "--codex"]);
+  check("field I: installer-deployed 2026-09-24 state is an eligible migration for both clients, pending approval",
+    bothI?.eligibility === "eligible-migration" && bothI.topology === "installer-deployed"
+    && JSON.stringify(bothI.topologyClients) === JSON.stringify(["claude", "codex"])
+    && bothI.priorState?.ref === "aibl-installer-2026-09-24-secrets-guard-narrow-false-positives"
+    && bothI.priorState.sourceRepository === "aibuild-lab/aibl-installer"
+    && bothI.priorState.installerCommits.includes("181fa82abdbef8c1b535ad8a5124c14d5a4fa1c3")
+    && bothI.priorState.installerPullRequests.includes(27)
+    && bothI.approvalClass === "separate-human-migration-approval" && bothI.nextSafeAction?.approvalRequired === true
+    && bothI.writesAttempted === false);
+  check("field I: one client alone is still a client-selection hold",
+    preview(installer0924, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
+  check("field I: previews wrote nothing", JSON.stringify(snapshotTree(installer0924)) === beforeI);
   // Learner A (macOS): the pinned legacy release on both clients, but a Codex tripwire adapter whose
   // bytes no reviewed source contains. That stays held.
   const learnerA = fieldHome({
