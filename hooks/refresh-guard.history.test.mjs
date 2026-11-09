@@ -50,6 +50,24 @@ check("every course-deployed state names its source commit and shares the legacy
     && /^[0-9a-f]{40}$/.test(state.workshopInstallerTagCommit) && state.ref !== legacy.ref
     && state.files["secrets-tripwire.js"] === legacy.files["secrets-tripwire.js"] && state.files["install.mjs"] === legacy.files["install.mjs"]));
 
+// Installer-deployed prior states (this repository's own earlier releases). The fixtures are the exact
+// hooks/ bytes at 181fa82 (#27, release aibl-installer-2026-09-24-secrets-guard-narrow-false-positives):
+// the R-774 guard and the legacy installer. Its tripwire and adapters equal the current bytes, so they
+// are checked against the record directly rather than duplicated as fixtures.
+const installer = JSON.parse(fs.readFileSync(path.join(HOOKS, "secrets-guard.installer-deployed.identities.json"), "utf8"));
+const installerState = installer.states.find((state) => state.installerCommit === "181fa82abdbef8c1b535ad8a5124c14d5a4fa1c3");
+check("installer-deployed fixture secrets-guard.js is the 2026-09-24 release",
+  sha(fx("installer-2026-09-24", "secrets-guard.js")) === installerState?.files["secrets-guard.js"]);
+check("installer-deployed fixture install.mjs is the 2026-09-24 release",
+  sha(fx("installer-2026-09-24", "install.mjs")) === installerState?.files["install.mjs"]);
+check("every installer-deployed state names its source commit and is not another registry's ref",
+  installer.states.length > 0 && installer.states.every((state) => /^[0-9a-f]{40}$/.test(state.installerCommit)
+    && state.ref !== legacy.ref && state.ref !== prior.ref && !course.states.some((s) => s.ref === state.ref)));
+check("the 2026-09-24 tripwire and adapters are the current bytes",
+  installerState?.files["secrets-tripwire.js"] === sha(current("secrets-tripwire.js"))
+  && ["aws-credential-patterns.mjs", "aws-credential-guard.mjs", "aws-credential-tripwire.mjs", "codex-secrets-guard.mjs", "codex-secrets-tripwire.mjs"]
+    .every((name) => installerState.local_files[name] === sha(current(name))));
+
 // The two field reports of 10-18-2026, by the SHA-256 each learner posted (no file contents).
 // Learner B (Windows 11): every managed file is the agent-native-os secrets-guard-2026-09-02 state.
 const LEARNER_B = {
@@ -265,6 +283,22 @@ const TOPOLOGIES = {
     for (const name of ["secrets-tripwire.js", "install.mjs"]) put(path.join(p.claudeHooks, name), fx("legacy", name));
     useOldMatcher(home);
   } },
+  // this repository's own 2026-09-24 release (#27) on both clients, receipt-free (the 10-28-2026
+  // field report): the R-774 guard and the legacy installer over the current tripwire and adapters
+  "installer-2026-09-24-two": { flags: [], build(home) {
+    const p = paths(home);
+    put(path.join(p.claudeHooks, "secrets-guard.js"), fx("installer-2026-09-24", "secrets-guard.js"));
+    put(path.join(p.claudeHooks, "install.mjs"), fx("installer-2026-09-24", "install.mjs"));
+    put(path.join(p.codexHooks, "secrets-guard.js"), fx("installer-2026-09-24", "secrets-guard.js"));
+    useOldMatcher(home);
+  } },
+  // the same release on a Claude-only machine
+  "installer-2026-09-24-claude": { flags: ["--claude"], build(home) {
+    const p = paths(home);
+    put(path.join(p.claudeHooks, "secrets-guard.js"), fx("installer-2026-09-24", "secrets-guard.js"));
+    put(path.join(p.claudeHooks, "install.mjs"), fx("installer-2026-09-24", "install.mjs"));
+    useOldMatcher(home);
+  } },
 };
 // Camp and workshop alumni: built the way the workshop installer's setup did it, on a home this
 // installer never touched. The three files of one workshop state go into ~/.claude/hooks and that
@@ -310,6 +344,10 @@ const EXPECTED = {
   "recognized-mixed": { topology: "recognized-mixed", clients: ["claude", "codex"] },
   "course-deployed-two": { topology: "course-deployed", clients: ["claude", "codex"], priorRef: "secrets-guard-2026-09-02" },
   "course-deployed-claude": { topology: "course-deployed", clients: ["claude"], priorRef: "secrets-guard-2026-09-02" },
+  "installer-2026-09-24-two": { topology: "installer-deployed", clients: ["claude", "codex"], priorRef: "aibl-installer-2026-09-24-secrets-guard-narrow-false-positives",
+    installerCommit: "181fa82abdbef8c1b535ad8a5124c14d5a4fa1c3", installerPullRequest: 27 },
+  "installer-2026-09-24-claude": { topology: "installer-deployed", clients: ["claude"], priorRef: "aibl-installer-2026-09-24-secrets-guard-narrow-false-positives",
+    installerCommit: "181fa82abdbef8c1b535ad8a5124c14d5a4fa1c3", installerPullRequest: 27 },
 };
 for (const short of WORKSHOP_COMMITS)
   EXPECTED[`workshop-${short}-claude`] = { topology: "course-deployed", clients: ["claude"], priorRef: `workshop-installer-${short}`,
@@ -317,7 +355,12 @@ for (const short of WORKSHOP_COMMITS)
 for (const short of WORKSHOP_MAIN)
   EXPECTED[`workshop-${short}-crlf-claude`] = { topology: "course-deployed", clients: ["claude"], priorRef: `workshop-installer-${short}-crlf`,
     workshopCommit: crlfState(short)?.workshopInstallerCommit, workshopPullRequest: crlfState(short)?.workshopInstallerPullRequest };
-const priorStateMatches = (want, priorState) => want.workshopCommit
+const priorStateMatches = (want, priorState) => want.installerCommit
+  ? priorState?.ref === want.priorRef && priorState.sourceRepository === "aibuild-lab/aibl-installer"
+    && JSON.stringify(priorState.installerCommits) === JSON.stringify([want.installerCommit])
+    && JSON.stringify(priorState.installerPullRequests) === JSON.stringify([want.installerPullRequest])
+    && priorState.agentNativeOsCommits === undefined && priorState.workshopInstallerCommits === undefined
+  : want.workshopCommit
   ? priorState?.ref === want.priorRef && priorState.sourceRepository === "aibuild-lab/workshop-installer"
     && JSON.stringify(priorState.workshopInstallerCommits) === JSON.stringify([want.workshopCommit])
     && JSON.stringify(priorState.workshopInstallerPullRequests) === JSON.stringify([want.workshopPullRequest])
@@ -338,7 +381,7 @@ for (const [name, want] of Object.entries(EXPECTED)) {
     && proposal.nextSafeAction.action === "seek-separate-approval" && proposal.nextSafeAction.approvalRequired === true
     && proposal.stages.find((stage) => stage.id === "COMMIT_FILES").status === "NOT_RUN");
   check(`${name}: preview wrote nothing and leaked no path`, snapshot(home) === before && noStrayHome(preview, home));
-  check(`${name}: preview names the attributed prior state only for a course-deployed installation`, want.priorRef
+  check(`${name}: preview names the attributed prior state only for a deployed-history installation`, want.priorRef
     ? priorStateMatches(want, proposal?.priorState)
     : proposal?.priorState === undefined, JSON.stringify(proposal?.priorState));
   const readOnly = run(home, ["--check", "--json", ...flags]);

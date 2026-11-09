@@ -44,6 +44,7 @@ come from the list plus a separate human approval.
 | `current` (current bytes, no receipt or damaged registration) | current | current, or none | every app that has files |
 | `recognized-mixed` | R-774 guard and tripwire, legacy installer | legacy | both |
 | `course-deployed` | one earlier agent-native-os or workshop-installer release | the same release, or none | every app that has files |
+| `installer-deployed` | one earlier release of this repository | the same release, or none | every app that has files |
 
 `course-deployed` covers the guard states that `aibuild-lab/agent-native-os` installed before this
 repository became the guard's home. `secrets-guard.course-deployed.identities.json` lists each one
@@ -68,7 +69,15 @@ record of the same content. They are exact-hash records like the rest: the manag
 line-ending normalized, so a CRLF copy with any other change, mixed line endings, or CRLF files
 beside LF files of the same state still hold.
 
-A single-client legacy, R-774, current or course-deployed installation (the other app has no
+`installer-deployed` covers the guard states this repository itself installed as earlier releases.
+`secrets-guard.installer-deployed.identities.json` lists each one by exact hash with the commit and
+pull request that put it on main, and `priorState` names them. The first record is the 2026-09-24
+release (`181fa82`, #27): its Codex side is byte-identical to R-774's, so a Codex-only look fits
+both, and the run attributes the rig to the 2026-09-24 release only when every managed file on that
+app is exactly what the release installed. The reviewed `recognized-mixed` combination (that
+release's Claude files beside a legacy Codex install) keeps its name.
+
+A single-client legacy, R-774, current, course-deployed or installer-deployed installation (the other app has no
 managed files) is the same topology for that one app. Anything else, including a current Claude guard beside legacy
 Codex files, a missing tripwire, or any file that is not byte-identical to a reviewed release, is a
 hold.
