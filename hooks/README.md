@@ -25,9 +25,12 @@ selected client. Damaged or unsupported ownership is an incomplete result even w
 look healthy; review it before installing again. A local source path in a receipt is recovery
 metadata and does not grant authority to execute that checkout.
 
-The earlier R-774 receipt is checked against its exact preserved manifest and reported as
-`installer-upgrade-required`. Its old registration is valid for that version but does not prove
-built-in Read coverage. Legacy on-disk health is a statement about the legacy release only.
+The earlier R-774 receipt, and a receipt from the 2026-10-05 release
+(`secrets-guard.2026-10-05.manifest.json`), are each checked against their exact preserved manifest
+and reported as `installer-upgrade-required`. Whenever the current manifest changes, preserve the
+outgoing one the same way and add it to `PRIOR_RECEIPT_MANIFEST_FILES` in `refresh-guard.mjs`, or
+every installed receipt fails OWNER_BINDING. The R-774 registration is valid for that version but
+does not prove built-in Read coverage. Legacy on-disk health is a statement about the legacy release only.
 
 ### Receipt-free installations
 

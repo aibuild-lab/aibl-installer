@@ -74,6 +74,13 @@ const repoRoot = path.resolve(hooksSourceDir, "..");
 const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
 const priorManifestPath = path.join(hooksSourceDir, "secrets-guard.r774.manifest.json");
 let priorManifest;
+// Earlier receipt-bearing releases, each preserved byte for byte so a receipt bound to that
+// manifest's hash still verifies and is reported `installer-upgrade-required`. R-774 (above) is the
+// first; the 2026-10-05 release (#35, ref aibl-installer-r774-read-safety-corrections) was current
+// until the 2026-11-17 shell-syntax fix. Add an entry here whenever the current manifest changes.
+const PRIOR_RECEIPT_MANIFEST_FILES = ["secrets-guard.r774.manifest.json", "secrets-guard.2026-10-05.manifest.json"];
+let priorReceiptManifests = [];
+const priorReceiptManifestFor = (ref) => priorReceiptManifests.find((prior) => prior.manifest.ref === ref);
 let legacyIdentities;
 // Pinned here rather than in secrets-guard.manifest.json on purpose: every ownership receipt and the
 // Agent Native OS inspector bind to the manifest file's own hash, so editing the manifest to add an
@@ -101,7 +108,7 @@ const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "67965b7d6ec260942ff112675bd20a5d27
 // the installer-deployed topology under their own refs, attributed only as a whole release and
 // still needing a separate human approval.
 const installerDeployedPath = path.join(hooksSourceDir, "secrets-guard.installer-deployed.identities.json");
-const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "793a617f30551f9711c5ead9d59c072a7a2895aad16d81abc8e3ddd9c3382ecf";
+const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "f3646f874946e01d8d46b0824bdec63e1098700793046d09c5d7ebb89f1c4b8b";
 let courseDeployedReleases;
 let installerDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
@@ -349,6 +356,10 @@ async function main() {
   enterStage("INPUT_SCOPE");
   const manifest = loadManifest();
   priorManifest = readPinnedIdentity("secrets-guard.r774.manifest.json", manifest);
+  priorReceiptManifests = PRIOR_RECEIPT_MANIFEST_FILES.map((name) => ({
+    manifest: name === "secrets-guard.r774.manifest.json" ? priorManifest : readPinnedIdentity(name, manifest),
+    path: path.join(hooksSourceDir, name),
+  }));
   legacyIdentities = readPinnedIdentity("secrets-guard.legacy.identities.json", manifest);
   courseDeployedReleases = readCourseDeployedIdentities();
   installerDeployedReleases = readInstallerDeployedIdentities();
@@ -1193,7 +1204,7 @@ function receiptFor(manifest, clients = Object.entries(APPS).filter(([, selected
     owner: "aibl-installer",
     source: { location: normalizePath(repoRoot) },
     manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(
-      manifest.ref === priorManifest.ref ? priorManifestPath : manifestPath))) },
+      priorReceiptManifestFor(manifest.ref)?.path || manifestPath))) },
     managedFiles,
     clients: Object.entries(managedFiles).filter(([, files]) => files.length > 0).map(([client]) => client),
   };
@@ -1212,7 +1223,7 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     || new Set(receipt.clients).size !== receipt.clients.length) {
     return { status: "invalid", issues: ["receipt clients are invalid"] };
   }
-  const receiptManifest = receipt.manifest?.ref === priorManifest.ref ? priorManifest : manifest;
+  const receiptManifest = priorReceiptManifestFor(receipt.manifest?.ref)?.manifest || manifest;
   const expected = receiptFor(receiptManifest, receipt.clients);
   // The checkout can move after installation. Its recorded path is recovery metadata, not a
   // trust input; ownership comes from the pinned manifest and independently inspected bindings.
@@ -1228,7 +1239,7 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     if (APPS[client] && !receipt.clients.includes(client)) issues.push(`${client} required ownership`);
   }
   if (issues.length > 0) return { status: "invalid", receiptPath: normalizePath(ownershipReceiptPath), issues: issues.map((field) => `receipt ${field} does not match this installer`) };
-  return { status: receiptManifest === priorManifest ? "installer-upgrade-required" : "installer-managed",
+  return { status: receiptManifest !== manifest ? "installer-upgrade-required" : "installer-managed",
     receiptPath: normalizePath(ownershipReceiptPath), receipt };
 }
 
