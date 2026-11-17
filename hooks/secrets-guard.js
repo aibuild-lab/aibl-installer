@@ -358,6 +358,61 @@ function skipOptionTokens(tokens, start, operandOptions) {
   return i;
 }
 
+// Compound-command syntax and precommand words that can sit in front of the real command inside
+// one segment. splitShell cuts at `;`, `&&`, `|` and newlines, so `if true; then head .env; fi`
+// arrives as the segment `then head .env`, and every rule that keys on the first word saw `then`
+// (Lab student report 11-17-2026: `then`/`else`/`do`/`{`/`(`/`!`/`time` all hid a .env read).
+// Stripping these and inspecting the rest as its own command lets every rule below see the real
+// command. The original segment is still inspected too, so this can only add a denial.
+const LEADING_SHELL_WORDS = new Set(['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{',
+  'time', 'coproc', 'exec', 'command', 'builtin', 'nice', 'noglob', 'nocorrect']);
+// Precommand words that take options before the command, and which of those options take a value.
+const LEADING_WORD_OPTIONS = { time: [], exec: ['-a'], command: [], nice: ['-n', '--adjustment'] };
+function stripLeadingShellSyntax(tokens) {
+  const out = tokens.slice();
+  let i = 0;
+  let parens = 0;
+  while (i < out.length) {
+    const token = out[i];
+    const word = token.toLowerCase();
+    if (LEADING_SHELL_WORDS.has(word)) {
+      i++;
+      const operandOptions = LEADING_WORD_OPTIONS[word];
+      if (operandOptions)
+        while (i < out.length && out[i].startsWith('-') && out[i] !== '-')
+          i += operandOptions.includes(out[i]) ? 2 : 1;
+      continue;
+    }
+    // Subshell or arithmetic group glued to the command: `(cat .env)`, `( cat .env )`.
+    if (token.startsWith('(')) {
+      const rest = token.replace(/^\(+/, '');
+      parens += token.length - rest.length;
+      if (rest) { out[i] = rest; break; }
+      i++;
+      continue;
+    }
+    // Function definitions: `f() { ...`, `function f { ...`, `function f() { ...`.
+    if (/^[A-Za-z_][A-Za-z0-9_.:-]*\(\)$/.test(token)) { i++; continue; }
+    if (word === 'function') { i += 2; if (out[i] === '()') i++; continue; }
+    // Case arms: `case x in x) cat .env`, and a later arm `y) cat .env` arriving as its own segment.
+    if (word === 'case') {
+      const arm = out.findIndex((t, k) => k > i && /\)$/.test(t) && out.slice(i, k).includes('in'));
+      if (arm < 0) break;
+      i = arm + 1;
+      continue;
+    }
+    if (i === 0 && out.length > 1 && /^[^()\s]+\)$/.test(token)) { i++; continue; }
+    break;
+  }
+  if (i === 0 && !parens) return null;
+  const rest = out.slice(i);
+  if (parens && rest.length) {
+    const last = rest.length - 1;
+    rest[last] = rest[last].replace(/\)+$/, '') || rest[last];
+  }
+  return rest.length ? rest : null;
+}
+
 // Build a conservative inspection set without executing anything. Keep the original command,
 // then add runtime-injected children, env payloads, shell -c bodies, and remote-exec/wrapper
 // payloads recursively. This closes both the prefix-loss bypass and nested-shell/path-qualified
@@ -377,6 +432,9 @@ function collectInspectionCommands(root) {
   function inspectTokens(tokens, depth, includeCommand = true) {
     if (!tokens.length || depth > 8) return;
     if (includeCommand) remember(renderTokens(tokens));
+
+    const unwrapped = stripLeadingShellSyntax(tokens);
+    if (unwrapped) inspectTokens(unwrapped, depth + 1, true);
 
     for (let i = 0; i + 1 < tokens.length; i++) {
       if (!['infisical', 'op'].includes(commandName(tokens[i])) || tokens[i + 1].toLowerCase() !== 'run') continue;

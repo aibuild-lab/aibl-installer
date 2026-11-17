@@ -151,6 +151,8 @@ for (const [name, body] of Object.entries(STUB)) fs.writeFileSync(path.join(src,
 fs.copyFileSync(REAL_SCRIPT, path.join(repo, "hooks", "refresh-guard.mjs"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774.manifest.json"),
   path.join(repo, "hooks", "secrets-guard.r774.manifest.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.2026-10-05.manifest.json"),
+  path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.identities.json"),
   path.join(repo, "hooks", "secrets-guard.legacy.identities.json"));
 // Pinned by its hash inside refresh-guard.mjs (not the manifest), so it is copied unchanged.
@@ -173,6 +175,7 @@ const writeManifest = (ref, bodies) => fs.writeFileSync(manifestPath, JSON.strin
   local_files: {
     ...Object.fromEntries(Object.entries(LOCAL_FILES).map(([n, b]) => [n, sha256(normalizeLf(b))])),
     "secrets-guard.r774.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774.manifest.json")))),
+    "secrets-guard.2026-10-05.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json")))),
     "secrets-guard.legacy.identities.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.legacy.identities.json")))),
   },
 }, null, 2));
