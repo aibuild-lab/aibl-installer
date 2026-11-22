@@ -933,6 +933,48 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
     && runHome(priorHome).status === 0
     && JSON.parse(runHome(priorHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
 
+  // The 2026-10-05 release (review 11-17-2026). Every student who installed since 10-05 holds a
+  // receipt bound to that manifest's hash, so a guard change must read it as upgrade-required, not
+  // invalid. Unlike R-774 it already had the Read matcher, so no matcher is rewound here. Each
+  // future release adds its own block like this one.
+  const octPath = path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json");
+  const savedOct = fs.readFileSync(octPath);
+  const realOct = JSON.parse(savedOct);
+  check("the preserved 2026-10-05 manifest has its own ref, distinct from R-774 and current",
+    realOct.ref === "aibl-installer-r774-read-safety-corrections"
+    && realOct.ref !== JSON.parse(savedPrior).ref && realOct.ref !== current.ref);
+  const oct = { ...current, ref: "release-2026-10-05-fixture" };
+  fs.writeFileSync(octPath, JSON.stringify(oct) + "\n");
+  writeManifest("current-fixture", STUB);
+  const octHome = path.join(root, "receipt-2026-10-05");
+  fs.mkdirSync(octHome);
+  check("2026-10-05 fixture starts current", runHome(octHome).status === 0);
+  const octReceipt = JSON.parse(fs.readFileSync(receiptAt(octHome), "utf8"));
+  const writeOctReceipt = (identity) => fs.writeFileSync(receiptAt(octHome), JSON.stringify({
+    ...octReceipt, manifest: { ref: oct.ref, identity } }, null, 2) + "\n");
+  writeOctReceipt(sha256(normalizeLf(fs.readFileSync(octPath))));
+  const octCheck = runHome(octHome, ["--check", "--json"]);
+  const octReport = JSON.parse(octCheck.stdout);
+  check("2026-10-05 receipt is installer-owned and reads installer-upgrade-required", octCheck.status !== 0
+    && octReport.ownership.status === "installer-upgrade-required" && octReport.writesAttempted === false);
+  const octPreview = JSON.parse(runHome(octHome, ["--migration-preview", "--json"]).stdout);
+  check("2026-10-05 receipt previews as upgrade-required, not ownership invalid",
+    /upgrade-required/.test(JSON.stringify(octPreview)) && !/invalid/.test(String(octPreview.ownership))
+    && octPreview.writesAttempted === false);
+  writeOctReceipt(sha256("not the preserved 2026-10-05 manifest"));
+  check("a 2026-10-05 receipt with the wrong manifest identity is invalid, not upgradable",
+    JSON.parse(runHome(octHome, ["--check", "--json"]).stdout).ownership.status === "invalid");
+  writeOctReceipt(sha256(normalizeLf(fs.readFileSync(octPath))));
+  const octUpgrade = runHome(octHome);
+  const octAfter = JSON.parse(fs.readFileSync(receiptAt(octHome), "utf8"));
+  check("approved 2026-10-05 upgrade succeeds and rewrites the receipt to the current release",
+    octUpgrade.status === 0 && octAfter.manifest.ref === current.ref
+    && JSON.parse(runHome(octHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
+  check("second application after the 2026-10-05 upgrade is idempotent", runHome(octHome).status === 0
+    && /already current/.test(runHome(octHome).stdout));
+  fs.writeFileSync(octPath, savedOct);
+  writeManifest("current-fixture", STUB);
+
   const legacyGuard = Buffer.from("#!/usr/bin/env node\n// synthetic legacy guard\nprocess.exit(0);\n");
   const legacyTripwire = Buffer.from("#!/usr/bin/env node\n// synthetic legacy tripwire\nprocess.exit(0);\n");
   const legacyInstall = Buffer.from("// synthetic legacy install; never executed in migration\n");

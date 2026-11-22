@@ -281,6 +281,54 @@ const CASES = [
   ['Bash', 'if true; then systemctl show -p Restart nginx; fi', 'allow'],
   ['Bash', 'if true; then printenv PATH; fi', 'allow'],
   ['Bash', 'then grep -n "cat .env" notes.md', 'allow'],
+  // Review 11-17-2026, same gap in other spellings. A keyword glued to a subshell: bash splits
+  // `then(cat` at the `(`, the tokenizer here does not.
+  ['Bash', 'if true; then(cat .env); fi', 'deny'],
+  ['Bash', 'while true; do(cat .env); break; done', 'deny'],
+  ['Bash', 'if false; then :; else(cat .env); fi', 'deny'],
+  // Function definitions in every common spacing.
+  ['Bash', 'f () { cat .env; }; f', 'deny'],
+  ['Bash', 'f ( ) { cat .env; }; f', 'deny'],
+  ['Bash', 'f(){ cat .env; }; f', 'deny'],
+  ['Bash', 'function f () { cat .env; }; f', 'deny'],
+  // A named coprocess. The name only counts when a compound command follows it.
+  ['Bash', 'coproc name { cat .env; }', 'deny'],
+  ['Bash', 'coproc name ( cat .env )', 'deny'],
+  // zsh, the Mac default shell: `repeat`, brace bodies with no then/do, and short for loops.
+  ['Bash', 'repeat 1 cat .env', 'deny'],
+  ['Bash', 'repeat 3 { cat .env }', 'deny'],
+  ['Bash', 'if true { cat .env }', 'deny'],
+  ['Bash', 'while true { cat .env; break }', 'deny'],
+  ['Bash', 'if true; then :; elif true { cat .env }', 'deny'],
+  ['Bash', 'for x (1) cat .env', 'deny'],
+  ['Bash', 'foreach x (1) cat .env', 'deny'],
+  ['Bash', 'for x (1 2) { cat .env }', 'deny'],
+  // Precommands that are real programs are matched like any command name: by path, and in any
+  // case, because the Mac disk is case-insensitive and `/usr/bin/command` exists there.
+  ['Bash', '/usr/bin/nice -n 5 cat .env', 'deny'],
+  ['Bash', '/usr/bin/time cat .env', 'deny'],
+  ['Bash', 'Command cat .env', 'deny'],
+  // Shell keywords and builtins are case-sensitive, as in bash and zsh. Capitalized words in a
+  // heredoc or prose line are not syntax (review 11-17-2026: these were false blocks).
+  ['Bash', 'If cat .env is wrong, check the path', 'allow'],
+  ['Bash', 'Then cat .env shows the keys', 'allow'],
+  ['Bash', 'THEN cat .env', 'allow'],
+  ['Bash', 'Do cat .env first', 'allow'],
+  ['Bash', 'Exec cat .env', 'allow'],
+  ['Bash', 'Function f { cat .env; }', 'allow'],
+  // A quoted word is data, not a subshell: a Python heredoc line that mentions .env.
+  ['Bash', 'python3 - <<EOF\nrows = [\n    ("<p>See <code>.env</code> for setup</p>", 1),\n]\nEOF', 'allow'],
+  // The new forms still allow the template and ordinary commands.
+  ['Bash', 'if true; then(cat .env.example); fi', 'allow'],
+  ['Bash', 'f () { cat .env.example; }; f', 'allow'],
+  ['Bash', 'coproc name { cat .env.example; }', 'allow'],
+  ['Bash', 'if true { cat .env.example }', 'allow'],
+  ['Bash', 'repeat 1 cat .env.example', 'allow'],
+  ['Bash', 'coproc name cat notes.txt', 'allow'],
+  ['Bash', 'repeat 3 echo hi', 'allow'],
+  ['Bash', 'for x (a b) echo $x', 'allow'],
+  ['Bash', 'f () { npm test; }; f', 'allow'],
+  ['Bash', 'while true; do(cd web && npm run build); break; done', 'allow'],
 
   // --- Write/Edit: block a real-looking secret written into a file. Fake keys are built by
   //     concat so no contiguous key literal sits in this test file (would trip gitleaks). ---
