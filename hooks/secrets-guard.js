@@ -358,6 +358,121 @@ function skipOptionTokens(tokens, start, operandOptions) {
   return i;
 }
 
+// Compound-command syntax and precommand words that can sit in front of the real command inside
+// one segment. splitShell cuts at `;`, `&&`, `|` and newlines, so `if true; then head .env; fi`
+// arrives as the segment `then head .env`, and every rule that keys on the first word saw `then`
+// (Lab student report 11-17-2026: `then`/`else`/`do`/`{`/`(`/`!`/`time` all hid a .env read).
+// Stripping these and inspecting the rest as its own command lets every rule below see the real
+// command. The original segment is still inspected too, so this can only add a denial.
+//
+// Shell reserved words and builtins are matched case-sensitively, the way bash and zsh read them:
+// `If cat .env` in a heredoc line or prose is not an `if`. The exception is the precommands that
+// are also real programs (`/usr/bin/time`, `/usr/bin/nice`, `/usr/bin/command` on a Mac). Those are
+// matched like any other command name (path stripped, any case), because the Mac disk is
+// case-insensitive and `Command cat .env` really runs `cat` there, just as `Cat .env` does.
+const LEADING_SHELL_WORDS = new Set(['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{',
+  'time', 'coproc', 'exec', 'builtin', 'noglob', 'nocorrect']);
+const LEADING_PROGRAM_WORDS = new Set(['time', 'nice', 'command']);
+// Precommand words that take options before the command, and which of those options take a value.
+const LEADING_WORD_OPTIONS = { time: [], exec: ['-a'], command: [], nice: ['-n', '--adjustment'] };
+// A reserved word glued to a subshell: bash splits `then(cat .env)` into `then` and `(cat .env)`
+// because `(` is a metacharacter, but the tokenizer here keeps `then(cat` as one word.
+const GLUED_KEYWORD_PAREN = /^(?:if|then|else|elif|do|while|until|!|\{|time|coproc)(\(.*)$/;
+const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
+const COPROC_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// What may follow `coproc NAME`: only a compound command takes a name.
+const COMPOUND_START = new Set(['{', 'if', 'while', 'until', 'for', 'case', 'select']);
+function leadingWord(token) {
+  if (LEADING_SHELL_WORDS.has(token)) return token;
+  const program = commandName(token);
+  return LEADING_PROGRAM_WORDS.has(program) ? program : null;
+}
+function stripLeadingShellSyntax(tokens) {
+  const out = tokens.slice();
+  let i = 0;
+  let parens = 0;
+  while (i < out.length) {
+    const token = out[i];
+    const word = leadingWord(token);
+    if (word === 'coproc') {
+      i++;
+      // `coproc NAME { cat .env; }`: the name is only a name when a compound command follows.
+      if (i + 1 < out.length && COPROC_NAME.test(out[i]) &&
+          (COMPOUND_START.has(out[i + 1]) || out[i + 1].startsWith('('))) i++;
+      continue;
+    }
+    if (word) {
+      i++;
+      const operandOptions = LEADING_WORD_OPTIONS[word];
+      if (operandOptions)
+        while (i < out.length && out[i].startsWith('-') && out[i] !== '-')
+          i += operandOptions.includes(out[i]) ? 2 : 1;
+      continue;
+    }
+    // `then(cat .env)`, `do(cat .env)`: drop the keyword, keep the subshell for the next branch.
+    const glued = GLUED_KEYWORD_PAREN.exec(token);
+    if (glued) { out[i] = glued[1]; continue; }
+    // Subshell or arithmetic group glued to the command: `(cat .env)`, `( cat .env )`.
+    if (token.startsWith('(')) {
+      const rest = token.replace(/^\(+/, '');
+      // A word with a space in it was quoted, so it is data, not a command name: a Python heredoc
+      // line like `("<p>See <code>.env</code></p>",` is not a subshell (review 11-17-2026).
+      if (/\s/.test(rest)) break;
+      parens += token.length - rest.length;
+      if (rest) { out[i] = rest; break; }
+      i++;
+      continue;
+    }
+    // zsh `repeat N cmd` and `repeat N { ... }`.
+    if (token === 'repeat') { i += 2; continue; }
+    // zsh short loop `for x (a b) cmd` and `foreach x (a b) cmd`.
+    if ((token === 'for' || token === 'foreach') && COPROC_NAME.test(out[i + 1] || '') &&
+        (out[i + 2] || '').startsWith('(')) {
+      const close = out.findIndex((t, k) => k >= i + 2 && /\)$/.test(t));
+      if (close < 0) break;
+      i = close + 1;
+      continue;
+    }
+    // Function definitions: `f() { ...`, `f(){ ...`, `f () { ...`, `f ( ) { ...`,
+    // `function f { ...`, `function f() { ...`.
+    if (/^[A-Za-z_][A-Za-z0-9_.:-]*\(\)\{?$/.test(token)) { i++; continue; }
+    if (SHELL_NAME.test(token) && out[i + 1] === '()') { i += 2; continue; }
+    if (SHELL_NAME.test(token) && out[i + 1] === '(' && out[i + 2] === ')') { i += 3; continue; }
+    if (token === 'function') { i += 2; if (out[i] === '()') i++; continue; }
+    // Case arms: `case x in x) cat .env`, and a later arm `y) cat .env` arriving as its own segment.
+    if (token === 'case') {
+      const arm = out.findIndex((t, k) => k > i && /\)$/.test(t) && out.slice(i, k).includes('in'));
+      if (arm < 0) break;
+      i = arm + 1;
+      continue;
+    }
+    if (i === 0 && out.length > 1 && /^[^()\s]+\)$/.test(token)) { i++; continue; }
+    break;
+  }
+  if (i === 0 && !parens) return null;
+  const rest = out.slice(i);
+  if (parens && rest.length) {
+    const last = rest.length - 1;
+    rest[last] = rest[last].replace(/\)+$/, '') || rest[last];
+  }
+  return rest.length ? rest : null;
+}
+
+// zsh lets a brace body follow the condition with no `then`/`do`: `if true { cat .env }`,
+// `while true { cat .env }`. The body never starts its own segment, so inspect what follows the
+// first standalone `{` as its own command (without the closing `}`).
+const ZSH_BRACE_KEYWORDS = new Set(['if', 'elif', 'while', 'until', 'for', 'foreach', 'select', 'repeat']);
+function zshBraceBody(tokens) {
+  let j = 0;
+  while (j < tokens.length && ['then', 'else', 'do', '!', '{'].includes(tokens[j])) j++;
+  if (!ZSH_BRACE_KEYWORDS.has(tokens[j])) return null;
+  const open = tokens.indexOf('{', j + 1);
+  if (open < 0) return null;
+  const body = tokens.slice(open + 1);
+  if (body[body.length - 1] === '}') body.pop();
+  return body.length ? body : null;
+}
+
 // Build a conservative inspection set without executing anything. Keep the original command,
 // then add runtime-injected children, env payloads, shell -c bodies, and remote-exec/wrapper
 // payloads recursively. This closes both the prefix-loss bypass and nested-shell/path-qualified
@@ -377,6 +492,11 @@ function collectInspectionCommands(root) {
   function inspectTokens(tokens, depth, includeCommand = true) {
     if (!tokens.length || depth > 8) return;
     if (includeCommand) remember(renderTokens(tokens));
+
+    const unwrapped = stripLeadingShellSyntax(tokens);
+    if (unwrapped) inspectTokens(unwrapped, depth + 1, true);
+    const braceBody = zshBraceBody(tokens);
+    if (braceBody) inspectTokens(braceBody, depth + 1, true);
 
     for (let i = 0; i + 1 < tokens.length; i++) {
       if (!['infisical', 'op'].includes(commandName(tokens[i])) || tokens[i + 1].toLowerCase() !== 'run') continue;
@@ -1019,26 +1139,41 @@ for (const segment of segments) {
 //    exists. `dump-keychain -d` decrypts every item. The macOS approval box is not a boundary
 //    an agent can rely on: an item may already allow the `security` tool. (WF-66, D273)
 const KEYCHAIN_FIND_VERBS = new Set(['find-generic-password', 'find-internet-password']);
+// Lookup options that take a value. In a cluster the rest of the token is that value, so the `g` in
+// `-sgithub` is part of a service name while `-wsgithub` still asks for the password.
+const KEYCHAIN_VALUE_OPTIONS = new Set([...'acCdDGjlpPrst']);
+function asksForKeychainPassword(arg) {
+  if (!/^-[A-Za-z]/.test(arg)) return false;
+  for (const option of arg.slice(1)) {
+    if (option === 'w' || option === 'g') return true;
+    if (KEYCHAIN_VALUE_OPTIONS.has(option)) return false;
+  }
+  return false;
+}
 for (const segment of segments) {
   const tokens = words(segment);
   if (resolveBinary(tokens) !== 'security') continue;
   let i = 0;
   while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
   const args = tokens.slice(i + 1);
-  // Options before the verb (`security -i`, `security -q`) belong to `security` itself.
-  const verbIndex = args.findIndex(arg => !arg.startsWith('-'));
+  // Options before the verb belong to `security` itself and may take a value, so look for the verb
+  // by name instead of taking the first word without a dash.
+  const verbIndex = args.findIndex(arg => KEYCHAIN_FIND_VERBS.has(arg.toLowerCase()) || arg.toLowerCase() === 'dump-keychain');
   if (verbIndex < 0) continue;
   const verb = args[verbIndex].toLowerCase();
-  const options = args.slice(verbIndex + 1).filter(arg => /^-[A-Za-z]+$/.test(arg));
-  if (KEYCHAIN_FIND_VERBS.has(verb) && options.some(option => /[wg]/.test(option.slice(1))))
+  const options = args.slice(verbIndex + 1);
+  if (KEYCHAIN_FIND_VERBS.has(verb) && options.some(asksForKeychainPassword))
     deny(`\`security ${verb}\` with -w or -g prints a Keychain password. Check that the item exists without -w or -g, or let the program that needs the key read it at runtime.`);
-  if (verb === 'dump-keychain' && options.some(option => option.slice(1).includes('d')))
+  if (verb === 'dump-keychain' && options.some(option => /^-[A-Za-z]*d/.test(option)))
     deny('`security dump-keychain -d` decrypts and prints every Keychain item. List names without -d.');
 }
-// The same read inside a command substitution that is then PRINTED, mirroring the `op read` rule
-// above: feeding a program (`KEY=$(security ... -w) tool`) stays allowed, printing it does not.
-if (!isMaskedClause(inspection) &&
-    /\b(?:echo|printf|print|cat|tee|write-host|write-output|gc)\b[^\n]*(?:\$\(|`)\s*(?:[^\s"'`]+[\\/])?security\s+find-(?:generic|internet)-password\b[^)`\n]*\s-[A-Za-z]*[wg]/i.test(inspection))
-  deny('Printing a Keychain password from $(security ...) sends it to stdout. Let the program that needs it read it at runtime.');
+// The same read inside a command substitution that is then PRINTED, like the `op read` rule above:
+// feeding a program (`KEY=$(security ... -w) tool`) stays allowed, printing it does not. Judged one
+// clause at a time, so an unrelated neighboring command neither excuses nor causes a denial.
+const KEYCHAIN_PRINTED = /\b(?:echo|printf|print|cat|tee|write-host|write-output|gc)\b[^\n]*(?:\$\(|`)\s*(?:[^\s"'`]+[\/])?security\s+find-(?:generic|internet)-password\b[^)`\n]*\s-[A-Za-z]*[wg]/i;
+for (const clause of clauses) {
+  if (!isMaskedClause(clause) && KEYCHAIN_PRINTED.test(clause))
+    deny('Printing a Keychain password from $(security ...) sends it to stdout. Let the program that needs it read it at runtime.');
+}
 
 process.exit(0);

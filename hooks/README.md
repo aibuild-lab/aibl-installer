@@ -25,17 +25,23 @@ selected client. Damaged or unsupported ownership is an incomplete result even w
 look healthy; review it before installing again. A local source path in a receipt is recovery
 metadata and does not grant authority to execute that checkout.
 
-The earlier R-774 receipt is checked against its exact preserved manifest and reported as
-`installer-upgrade-required`. Its old registration is valid for that version but does not prove
-built-in Read coverage. Legacy on-disk health is a statement about the legacy release only.
+The earlier R-774 receipt, and receipts from the 2026-10-05 and 2026-11-17 releases
+(`secrets-guard.2026-10-05.manifest.json`, `secrets-guard.2026-11-17.manifest.json`), are each
+checked against their exact preserved manifest and reported as `installer-upgrade-required`. The
+R-774 registration is valid for that version but does not prove built-in Read coverage. Legacy
+on-disk health is a statement about the legacy release only.
 
-Earlier **current** releases are kept the same way. Before a pinned file changes, the outgoing
-`secrets-guard.manifest.json` is saved byte for byte as `secrets-guard.<outgoing-ref>.manifest.json`,
-listed in `PREDECESSOR_MANIFEST_FILES` in `refresh-guard.mjs` and pinned under `local_files`. A
-receipt that names it is `installer-upgrade-required`, and its files with no receipt form the
-`previous-<n>` topology. Without that step, every student on the outgoing release would hold as
-`OWNERSHIP_INVALID` or `UNKNOWN_MANAGED_BYTES` on the next refresh (`refresh-guard.test.mjs` proves
-both). The first snapshot is `secrets-guard.r774-corrections.manifest.json` (main `ae747f9`).
+Whenever the current manifest changes, preserve the outgoing release first, under one ref, in both places:
+
+- its manifest, byte for byte, as `secrets-guard.<release date>.manifest.json`, added to
+  `PRIOR_RECEIPT_MANIFEST_FILES` in `refresh-guard.mjs` and pinned under `local_files`, for students
+  with a receipt;
+- a record in `secrets-guard.installer-deployed.identities.json` (and its pin,
+  `INSTALLER_DEPLOYED_IDENTITIES_SHA256`), for installations without a receipt.
+
+Without them every student on the outgoing release holds as `OWNERSHIP_INVALID` or
+`UNKNOWN_MANAGED_BYTES` on the next refresh. `manifest.test.mjs` fails when the two disagree, and
+`refresh-guard.test.mjs` needs a block for each release.
 
 ### Receipt-free installations
 
@@ -50,9 +56,9 @@ come from the list plus a separate human approval.
 | `legacy` (all legacy) | pinned legacy | pinned legacy, or none | every app that has files |
 | `r774` (receipt absent) | R-774 files | R-774 files, or none | every app that has files |
 | `current` (current bytes, no receipt or damaged registration) | current | current, or none | every app that has files |
-| `previous-<n>` (an earlier current release, receipt absent) | that release's files | the same release, or none | every app that has files |
 | `recognized-mixed` | R-774 guard and tripwire, legacy installer | legacy | both |
 | `course-deployed` | one earlier agent-native-os or workshop-installer release | the same release, or none | every app that has files |
+| `installer-deployed` | one earlier release of this repository | the same release, or none | every app that has files |
 
 `course-deployed` covers the guard states that `aibuild-lab/agent-native-os` installed before this
 repository became the guard's home. `secrets-guard.course-deployed.identities.json` lists each one
@@ -77,7 +83,16 @@ record of the same content. They are exact-hash records like the rest: the manag
 line-ending normalized, so a CRLF copy with any other change, mixed line endings, or CRLF files
 beside LF files of the same state still hold.
 
-A single-client legacy, R-774, current or course-deployed installation (the other app has no
+`installer-deployed` covers the guard states this repository itself installed as earlier releases.
+`secrets-guard.installer-deployed.identities.json` lists each one by exact hash with the commit and
+pull request that put it on main, and `priorState` names them. The records are the 2026-09-24,
+2026-10-05 (#35) and 2026-11-17 (#51) releases. The first record is the 2026-09-24
+release (`181fa82`, #27): its Codex side is byte-identical to R-774's, so a Codex-only look fits
+both, and the run attributes the rig to the 2026-09-24 release only when every managed file on that
+app is exactly what the release installed. The reviewed `recognized-mixed` combination (that
+release's Claude files beside a legacy Codex install) keeps its name, and no later release joins it.
+
+A single-client legacy, R-774, current, course-deployed or installer-deployed installation (the other app has no
 managed files) is the same topology for that one app. Anything else, including a current Claude guard beside legacy
 Codex files, a missing tripwire, or any file that is not byte-identical to a reviewed release, is a
 hold.

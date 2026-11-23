@@ -151,15 +151,19 @@ for (const [name, body] of Object.entries(STUB)) fs.writeFileSync(path.join(src,
 fs.copyFileSync(REAL_SCRIPT, path.join(repo, "hooks", "refresh-guard.mjs"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774.manifest.json"),
   path.join(repo, "hooks", "secrets-guard.r774.manifest.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.2026-10-05.manifest.json"),
+  path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.2026-11-17.manifest.json"),
+  path.join(repo, "hooks", "secrets-guard.2026-11-17.manifest.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.identities.json"),
   path.join(repo, "hooks", "secrets-guard.legacy.identities.json"));
-fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.r774-corrections.manifest.json"),
-  path.join(repo, "hooks", "secrets-guard.r774-corrections.manifest.json"));
 // Pinned by its hash inside refresh-guard.mjs (not the manifest), so it is copied unchanged.
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.course-deployed.identities.json"),
   path.join(repo, "hooks", "secrets-guard.course-deployed.identities.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.workshop-installer.identities.json"),
   path.join(repo, "hooks", "secrets-guard.workshop-installer.identities.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.installer-deployed.identities.json"),
+  path.join(repo, "hooks", "secrets-guard.installer-deployed.identities.json"));
 const LOCAL_FILES = {};
 for (const [name, source] of REAL_LOCAL_FILES) {
   const body = fs.readFileSync(source);
@@ -173,8 +177,9 @@ const writeManifest = (ref, bodies) => fs.writeFileSync(manifestPath, JSON.strin
   local_files: {
     ...Object.fromEntries(Object.entries(LOCAL_FILES).map(([n, b]) => [n, sha256(normalizeLf(b))])),
     "secrets-guard.r774.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774.manifest.json")))),
+    "secrets-guard.2026-10-05.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json")))),
+    "secrets-guard.2026-11-17.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.2026-11-17.manifest.json")))),
     "secrets-guard.legacy.identities.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.legacy.identities.json")))),
-    "secrets-guard.r774-corrections.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774-corrections.manifest.json")))),
   },
 }, null, 2));
 
@@ -931,69 +936,116 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
     && runHome(priorHome).status === 0
     && JSON.parse(runHome(priorHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
 
-  // An earlier CURRENT release (a guard edit since R-774, such as the Keychain rule): students who
-  // installed it hold a receipt naming its manifest ref and hash, and its guard bytes. With its
-  // manifest saved byte for byte as a predecessor snapshot, they upgrade instead of holding.
+  // The 2026-10-05 release (review 11-17-2026). Every student who installed since 10-05 holds a
+  // receipt bound to that manifest's hash, so a guard change must read it as upgrade-required, not
+  // invalid. Unlike R-774 it already had the Read matcher, so no matcher is rewound here. Each
+  // future release adds its own block like this one.
+  const octPath = path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json");
+  const savedOct = fs.readFileSync(octPath);
+  const realOct = JSON.parse(savedOct);
+  check("the preserved 2026-10-05 manifest has its own ref, distinct from R-774 and current",
+    realOct.ref === "aibl-installer-r774-read-safety-corrections"
+    && realOct.ref !== JSON.parse(savedPrior).ref && realOct.ref !== current.ref);
+  const oct = { ...current, ref: "release-2026-10-05-fixture" };
+  fs.writeFileSync(octPath, JSON.stringify(oct) + "\n");
+  writeManifest("current-fixture", STUB);
+  const octHome = path.join(root, "receipt-2026-10-05");
+  fs.mkdirSync(octHome);
+  check("2026-10-05 fixture starts current", runHome(octHome).status === 0);
+  const octReceipt = JSON.parse(fs.readFileSync(receiptAt(octHome), "utf8"));
+  const writeOctReceipt = (identity) => fs.writeFileSync(receiptAt(octHome), JSON.stringify({
+    ...octReceipt, manifest: { ref: oct.ref, identity } }, null, 2) + "\n");
+  writeOctReceipt(sha256(normalizeLf(fs.readFileSync(octPath))));
+  const octCheck = runHome(octHome, ["--check", "--json"]);
+  const octReport = JSON.parse(octCheck.stdout);
+  check("2026-10-05 receipt is installer-owned and reads installer-upgrade-required", octCheck.status !== 0
+    && octReport.ownership.status === "installer-upgrade-required" && octReport.writesAttempted === false);
+  const octPreview = JSON.parse(runHome(octHome, ["--migration-preview", "--json"]).stdout);
+  check("2026-10-05 receipt previews as upgrade-required, not ownership invalid",
+    /upgrade-required/.test(JSON.stringify(octPreview)) && !/invalid/.test(String(octPreview.ownership))
+    && octPreview.writesAttempted === false);
+  writeOctReceipt(sha256("not the preserved 2026-10-05 manifest"));
+  check("a 2026-10-05 receipt with the wrong manifest identity is invalid, not upgradable",
+    JSON.parse(runHome(octHome, ["--check", "--json"]).stdout).ownership.status === "invalid");
+  writeOctReceipt(sha256(normalizeLf(fs.readFileSync(octPath))));
+  const octUpgrade = runHome(octHome);
+  const octAfter = JSON.parse(fs.readFileSync(receiptAt(octHome), "utf8"));
+  check("approved 2026-10-05 upgrade succeeds and rewrites the receipt to the current release",
+    octUpgrade.status === 0 && octAfter.manifest.ref === current.ref
+    && JSON.parse(runHome(octHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
+  check("second application after the 2026-10-05 upgrade is idempotent", runHome(octHome).status === 0
+    && /already current/.test(runHome(octHome).stdout));
+  fs.writeFileSync(octPath, savedOct);
+  writeManifest("current-fixture", STUB);
+
+  // The 2026-11-17 release (#51). The same pattern with that release's own, different guard bytes: its
+  // receipt is the one its installer wrote, not an edited current one, so the upgrade has to replace
+  // the guard, and the negative control shows what the preserved manifest is for.
   {
-    const predecessorPath = path.join(repo, "hooks", "secrets-guard.r774-corrections.manifest.json");
-    const savedPredecessor = fs.readFileSync(predecessorPath);
-    const OUTGOING = { ...STUB, "secrets-guard.js": "#!/usr/bin/env node\n// outgoing current release\nprocess.exit(0);\n" };
+    const novPath = path.join(repo, "hooks", "secrets-guard.2026-11-17.manifest.json");
+    const savedNov = fs.readFileSync(novPath);
+    const realNov = JSON.parse(savedNov);
+    check("the preserved 2026-11-17 manifest has its own ref, distinct from R-774, 2026-10-05 and current",
+      realNov.ref === "aibl-installer-2026-11-17-shell-syntax-prefixes"
+      && ![JSON.parse(savedPrior).ref, realOct.ref, current.ref].includes(realNov.ref));
+    const OUTGOING = { ...STUB, "secrets-guard.js": "#!/usr/bin/env node\n// outgoing 2026-11-17 release\nprocess.exit(0);\n" };
     const useRelease = (ref, bodies) => {
       for (const [name, body] of Object.entries(bodies)) fs.writeFileSync(path.join(src, name), body);
       writeManifest(ref, bodies);
     };
-    const guardIn = (selectedHome) => fs.readFileSync(path.join(selectedHome, ".claude", "hooks", "secrets-guard.js"), "utf8");
+    const novHome = path.join(root, "receipt-2026-11-17");
+    fs.mkdirSync(novHome);
+    const guardIn = (client) => fs.readFileSync(path.join(novHome, client, "hooks", "secrets-guard.js"), "utf8");
+    const statusOf = () => JSON.parse(runHome(novHome, ["--check", "--json"]).stdout);
+    const previewOf = () => JSON.parse(runHome(novHome, ["--migration-preview", "--json"]).stdout);
     try {
-      useRelease("outgoing-fixture", OUTGOING);
-      const receiptHome = path.join(root, "previous-release-receipt");
-      const freeHome = path.join(root, "previous-release-no-receipt");
-      fs.mkdirSync(receiptHome);
-      fs.mkdirSync(freeHome);
-      check("outgoing release installs in both scratch homes", runHome(receiptHome).status === 0 && runHome(freeHome).status === 0);
-      fs.rmSync(receiptAt(freeHome));
-      check("the outgoing receipt names the outgoing release",
-        JSON.parse(fs.readFileSync(receiptAt(receiptHome), "utf8")).manifest.ref === "outgoing-fixture");
+      useRelease("release-2026-11-17-fixture", OUTGOING);
+      const outgoingManifest = fs.readFileSync(manifestPath);
+      check("2026-11-17 fixture installs", runHome(novHome).status === 0);
+      const novReceipt = JSON.parse(fs.readFileSync(receiptAt(novHome), "utf8"));
+      check("the 2026-11-17 receipt names its release and its manifest's hash",
+        novReceipt.manifest.ref === "release-2026-11-17-fixture" && novReceipt.manifest.identity === sha256(normalizeLf(outgoingManifest)));
 
-      // Negative control: the new release WITHOUT a snapshot of the outgoing manifest holds.
       useRelease("current-fixture", STUB);
-      const unsaved = JSON.parse(runHome(receiptHome, ["--check", "--json"]).stdout);
-      check("without the snapshot, an outgoing-release receipt holds as OWNERSHIP_INVALID",
-        unsaved.failureClass === "OWNERSHIP_INVALID" && unsaved.writesAttempted === false);
-      check("without the snapshot, outgoing bytes with no receipt hold as unknown bytes",
-        JSON.parse(runHome(freeHome, ["--migration-preview", "--json"]).stdout).failureClass === "UNKNOWN_MANAGED_BYTES");
+      check("without the preserved manifest, a 2026-11-17 receipt is invalid and holds",
+        statusOf().ownership.status === "invalid" && previewOf().failureClass === "OWNERSHIP_INVALID"
+        && previewOf().writesAttempted === false);
 
-      // The release step: save the outgoing manifest byte for byte, then ship the new release.
-      useRelease("outgoing-fixture", OUTGOING);
-      fs.copyFileSync(manifestPath, predecessorPath);
+      fs.writeFileSync(novPath, outgoingManifest);
       useRelease("current-fixture", STUB);
-      const before = JSON.parse(runHome(receiptHome, ["--check", "--json"]).stdout);
-      check("an outgoing-release receipt is installer-owned and upgrade-required",
-        before.ownership.status === "installer-upgrade-required" && before.failureClass === "UPGRADE_REQUIRED"
-        && before.writesAttempted === false);
-      check("its preview proposes the upgrade, not a hold",
-        JSON.parse(runHome(receiptHome, ["--migration-preview", "--json"]).stdout).eligibility === "upgrade-required");
-      check("the approved upgrade succeeds and installs the new guard",
-        runHome(receiptHome).status === 0 && guardIn(receiptHome) === STUB["secrets-guard.js"]);
-      check("after the upgrade the receipt is current and installer-managed",
-        JSON.parse(runHome(receiptHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed"
-        && JSON.parse(fs.readFileSync(receiptAt(receiptHome), "utf8")).manifest.ref === "current-fixture");
-      const freePreview = JSON.parse(runHome(freeHome, ["--migration-preview", "--json"]).stdout);
-      check("outgoing bytes with no receipt are a reviewed earlier release, eligible for migration",
-        freePreview.eligibility === "eligible-migration" && freePreview.ownership === "prior-no-receipt"
-        && freePreview.topology === "previous-0" && freePreview.writesAttempted === false);
-      check("that migration, once approved, succeeds", runHome(freeHome).status === 0
-        && guardIn(freeHome) === STUB["secrets-guard.js"]
-        && JSON.parse(runHome(freeHome, ["--check", "--json"]).stdout).ownership.status === "installer-managed");
-      const mixedHome = path.join(root, "previous-release-mixed");
-      fs.mkdirSync(mixedHome);
-      check("a current install for the mixed case", runHome(mixedHome).status === 0);
-      fs.rmSync(receiptAt(mixedHome));
-      fs.writeFileSync(path.join(mixedHome, ".claude", "hooks", "secrets-guard.js"), OUTGOING["secrets-guard.js"]);
-      const mixedPreview = JSON.parse(runHome(mixedHome, ["--migration-preview", "--json"]).stdout);
-      check("an outgoing Claude guard beside a current Codex guard is still a hold",
-        mixedPreview.eligibility === "hold" && mixedPreview.writesAttempted === false);
+      const before = statusOf();
+      check("2026-11-17 receipt is installer-owned and reads installer-upgrade-required",
+        before.ownership.status === "installer-upgrade-required" && before.writesAttempted === false);
+      const novPreview = previewOf();
+      check("2026-11-17 receipt previews as upgrade-required, not ownership invalid",
+        novPreview.eligibility === "upgrade-required" && novPreview.ownership === "installer-upgrade-required"
+        && novPreview.failureClass === "NONE" && novPreview.writesAttempted === false);
+      fs.writeFileSync(receiptAt(novHome), JSON.stringify({ ...novReceipt,
+        manifest: { ...novReceipt.manifest, identity: sha256("not the preserved 2026-11-17 manifest") } }, null, 2) + "\n");
+      const forgedBefore = JSON.stringify(snapshotTree(novHome));
+      const forged = runHome(novHome, ["--diagnostic-json"]);
+      check("a 2026-11-17 receipt with the wrong manifest identity is invalid, not upgradable, and nothing is written",
+        statusOf().ownership.status === "invalid" && forged.status !== 0
+        && JSON.parse(forged.stdout).failureClass === "OWNERSHIP_INVALID"
+        && JSON.stringify(snapshotTree(novHome)) === forgedBefore);
+      fs.writeFileSync(receiptAt(novHome), JSON.stringify(novReceipt, null, 2) + "\n");
+      const upgraded = runHome(novHome);
+      check("approved 2026-11-17 upgrade replaces the guard for both apps and rewrites the receipt to the current release",
+        upgraded.status === 0 && guardIn(".claude") === STUB["secrets-guard.js"] && guardIn(".codex") === STUB["secrets-guard.js"]
+        && JSON.parse(fs.readFileSync(receiptAt(novHome), "utf8")).manifest.ref === "current-fixture"
+        && statusOf().ownership.status === "installer-managed");
+      const again = runHome(novHome);
+      check("second application after the 2026-11-17 upgrade is idempotent", again.status === 0 && /already current/.test(again.stdout)
+        && guardIn(".claude") === STUB["secrets-guard.js"] && statusOf().ownership.status === "installer-managed");
+
+      // A receipt is matched to its release by ref, so two releases may never share one.
+      fs.writeFileSync(novPath, JSON.stringify({ ...JSON.parse(outgoingManifest), ref: "current-fixture" }));
+      useRelease("current-fixture", STUB);
+      const repeated = previewOf();
+      check("a preserved manifest that repeats another release's ref stops before any inspection or write",
+        repeated.failureClass === "SOURCE_INTEGRITY" && repeated.writesAttempted === false);
     } finally {
-      fs.writeFileSync(predecessorPath, savedPredecessor);
+      fs.writeFileSync(novPath, savedNov);
       useRelease("current-fixture", STUB);
     }
   }
@@ -1230,6 +1282,33 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   check("field B: one client alone is still a client-selection hold",
     preview(learnerB, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
   check("field B: previews wrote nothing", JSON.stringify(snapshotTree(learnerB)) === beforeB);
+  // Field report of 10-28-2026 (macOS): this installer's own 2026-09-24 release (#27) on both
+  // clients, receipt-free. Its Claude install.mjs is the legacy bytes, so without the
+  // installer-deployed record the rig read as an unreviewed mix and held at OWNER_BINDING.
+  const installer0924 = fieldHome({
+    ".claude/hooks/secrets-guard.js": fx("installer-2026-09-24", "secrets-guard.js"),
+    ".claude/hooks/secrets-tripwire.js": reviewed("secrets-tripwire.js"),
+    ".claude/hooks/install.mjs": fx("installer-2026-09-24", "install.mjs"),
+    ...supplements("claude"),
+    ".codex/hooks/secrets-guard.js": fx("installer-2026-09-24", "secrets-guard.js"),
+    ".codex/hooks/secrets-tripwire.js": reviewed("secrets-tripwire.js"),
+    ".codex/hooks/codex-secrets-guard.mjs": reviewed("codex-secrets-guard.mjs"),
+    ...supplements("codex"),
+  });
+  const beforeI = JSON.stringify(snapshotTree(installer0924));
+  const bothI = preview(installer0924, ["--claude", "--codex"]);
+  check("field I: installer-deployed 2026-09-24 state is an eligible migration for both clients, pending approval",
+    bothI?.eligibility === "eligible-migration" && bothI.topology === "installer-deployed"
+    && JSON.stringify(bothI.topologyClients) === JSON.stringify(["claude", "codex"])
+    && bothI.priorState?.ref === "aibl-installer-2026-09-24-secrets-guard-narrow-false-positives"
+    && bothI.priorState.sourceRepository === "aibuild-lab/aibl-installer"
+    && bothI.priorState.installerCommits.includes("181fa82abdbef8c1b535ad8a5124c14d5a4fa1c3")
+    && bothI.priorState.installerPullRequests.includes(27)
+    && bothI.approvalClass === "separate-human-migration-approval" && bothI.nextSafeAction?.approvalRequired === true
+    && bothI.writesAttempted === false);
+  check("field I: one client alone is still a client-selection hold",
+    preview(installer0924, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
+  check("field I: previews wrote nothing", JSON.stringify(snapshotTree(installer0924)) === beforeI);
   // Learner A (macOS): the pinned legacy release on both clients, but a Codex tripwire adapter whose
   // bytes no reviewed source contains. That stays held.
   const learnerA = fieldHome({
@@ -1251,6 +1330,154 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
   check("field A: Claude alone is still a client-selection hold",
     preview(learnerA, ["--claude"])?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
   check("field A: previews wrote nothing", JSON.stringify(snapshotTree(learnerA)) === beforeA);
+}
+
+// === Phase U: upgrading a real earlier release, by its exact bytes, on every CI platform ===
+// The REAL script, manifests and identities over each receipt-bearing release this repository shipped:
+// with its receipt, with a forged receipt, and with no receipt at all. Every home is disposable.
+{
+  const realHooks = path.dirname(REAL_SCRIPT);
+  const reviewed = (name) => fs.readFileSync(path.join(realHooks, name));
+  const fx = (set, name) => fs.readFileSync(path.join(realHooks, "fixtures", "reviewed-history", set, `${name}.bytes`));
+  const currentRef = JSON.parse(reviewed("secrets-guard.manifest.json")).ref;
+  const { GUARD_SOURCE_DIR: _unused, ...baseEnv } = process.env;
+  const runReal = (target, flags = [], env = {}) => spawnSync(process.execPath, [REAL_SCRIPT, ...flags], {
+    env: { ...baseEnv, HOME: target, USERPROFILE: target, ...env }, encoding: "utf8" });
+  const json = (result) => { try { return JSON.parse(result.stdout); } catch { return null; } };
+  const at = (target, client, name) => path.join(target, `.${client}`, "hooks", name);
+  const receiptPath = (target) => at(target, "claude", "aibl-installer-guard-receipt.json");
+  const readReceipt = (target) => JSON.parse(fs.readFileSync(receiptPath(target), "utf8"));
+  const currentGuards = (target, clients) => clients.every((client) =>
+    fs.readFileSync(at(target, client, "secrets-guard.js")).equals(normalizeLf(reviewed("secrets-guard.js"))));
+  // A home whose files and registration are exactly what `release` installed, with its receipt.
+  const releaseHome = (release, flags = []) => {
+    const target = fs.mkdtempSync(path.join(root, "release-"));
+    const installedNow = runReal(target, flags);
+    if (installedNow.status !== 0) console.error(`[release fixture] ${installedNow.stderr}`);
+    const receipt = readReceipt(target);
+    for (const client of receipt.clients) {
+      fs.writeFileSync(at(target, client, "secrets-guard.js"), fx(release.fixture, "secrets-guard.js"));
+      if (client === "claude" && release.ownInstaller)
+        fs.writeFileSync(at(target, client, "install.mjs"), fx(release.fixture, "install.mjs"));
+    }
+    if (release.oldMatcher && receipt.clients.includes("claude")) {
+      const settingsFile = path.join(target, ".claude", "settings.json");
+      const value = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+      value.hooks.PreToolUse.find((group) => group.hooks?.some((hook) => hook.command?.includes("secrets-guard.js"))).matcher =
+        "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit";
+      fs.writeFileSync(settingsFile, JSON.stringify(value, null, 2) + "\n");
+    }
+    fs.writeFileSync(receiptPath(target), JSON.stringify({ ...receipt,
+      manifest: { ref: release.ref, identity: release.manifestSha256 } }, null, 2) + "\n");
+    return target;
+  };
+  // `ref` and `manifestSha256` are what that release wrote into every student's receipt, so they are
+  // spelled out here rather than read back from the preserved file they check.
+  const RELEASES = [
+    { name: "R-774", ref: "aibl-installer-r774-guard-ownership", manifest: "secrets-guard.r774.manifest.json",
+      manifestSha256: "1ffc9d1f2eda511f77139b0b5fabd0b293cc56152a3cb5664c417f6b753879f5",
+      fixture: "r774", ownInstaller: true, oldMatcher: true, topology: "r774", label: "prior-no-receipt" },
+    { name: "2026-10-05", ref: "aibl-installer-r774-read-safety-corrections", manifest: "secrets-guard.2026-10-05.manifest.json",
+      manifestSha256: "8513e5b9a6d1c6e2197e84204719f935aafa2908c1f64a39b92b0742d80990d4",
+      fixture: "installer-2026-10-05", topology: "installer-deployed", label: "installer-deployed-no-receipt",
+      commit: "1a74e93d748bf99911d8ef02af2ffd3a8ce394e8", pullRequest: 35 },
+    { name: "2026-11-17", ref: "aibl-installer-2026-11-17-shell-syntax-prefixes", manifest: "secrets-guard.2026-11-17.manifest.json",
+      manifestSha256: "3f400013e5f59eeef774ae3987cf83654cc87f22973f863186cab225e97eb622",
+      fixture: "installer-2026-11-17", topology: "installer-deployed", label: "installer-deployed-no-receipt",
+      commit: "bddcc150fb69420c80460083be9ecc0847cbb963", pullRequest: 51 },
+  ];
+  for (const release of RELEASES) {
+    const { name } = release;
+    const preserved = JSON.parse(reviewed(release.manifest));
+    check(`${name}: the preserved manifest is that release's exact manifest, and its guard fixture is that release's guard`,
+      sha256(normalizeLf(reviewed(release.manifest))) === release.manifestSha256 && preserved.ref === release.ref
+      && sha256(fx(release.fixture, "secrets-guard.js")) === preserved.files["secrets-guard.js"]
+      && (release.ownInstaller ? sha256(fx(release.fixture, "install.mjs")) : sha256(normalizeLf(reviewed("install.mjs")))) === preserved.files["install.mjs"]);
+    for (const [apps, flags, clients] of [["both apps", [], ["claude", "codex"]], ["Claude only", ["--claude"], ["claude"]], ["Codex only", ["--codex"], ["codex"]]]) {
+      const label = `${name}, ${apps}`;
+      const owned = releaseHome(release, flags);
+      const status = json(runReal(owned, ["--check", "--json", ...flags]));
+      const offered = json(runReal(owned, ["--migration-preview", "--json", ...flags]));
+      check(`${label}: the receipt reads installer-upgrade-required and previews as upgrade-required`,
+        status?.ownership.status === "installer-upgrade-required" && offered?.eligibility === "upgrade-required"
+        && offered.failureClass === "NONE" && offered.proposedSource === currentRef && offered.writesAttempted === false);
+      const receipt = readReceipt(owned);
+      fs.writeFileSync(receiptPath(owned), JSON.stringify({ ...receipt, manifest: { ...receipt.manifest, identity: "0".repeat(64) } }, null, 2) + "\n");
+      const beforeForged = JSON.stringify(snapshotTree(owned));
+      const forged = runReal(owned, ["--diagnostic-json", ...flags]);
+      check(`${label}: a receipt naming this release with the wrong fingerprint stays invalid and nothing is written`,
+        json(runReal(owned, ["--check", "--json", ...flags]))?.ownership.status === "invalid"
+        && json(runReal(owned, ["--migration-preview", "--json", ...flags]))?.failureClass === "OWNERSHIP_INVALID"
+        && forged.status !== 0 && json(forged)?.failureClass === "OWNERSHIP_INVALID"
+        && JSON.stringify(snapshotTree(owned)) === beforeForged);
+      fs.writeFileSync(receiptPath(owned), JSON.stringify(receipt, null, 2) + "\n");
+      const upgrade = runReal(owned, flags);
+      check(`${label}: the approved upgrade installs the current guard and receipt`, upgrade.status === 0
+        && currentGuards(owned, clients) && readReceipt(owned).manifest.ref === currentRef
+        && JSON.stringify(readReceipt(owned).clients) === JSON.stringify(clients)
+        && json(runReal(owned, ["--check", "--json", ...flags]))?.ownership.status === "installer-managed");
+      const controlled = (target) => JSON.stringify(snapshotTree(target).filter(([id]) =>
+        /^\.(claude|codex)\/hooks\//.test(id) || id === ".claude/settings.json" || id === ".codex/hooks.json"));
+      const settled = controlled(owned);
+      const second = runReal(owned, flags);
+      check(`${label}: a second run changes nothing`, second.status === 0 && /already current/.test(second.stdout)
+        && controlled(owned) === settled);
+
+      const free = releaseHome(release, flags);
+      fs.rmSync(receiptPath(free));
+      const beforeFree = JSON.stringify(snapshotTree(free));
+      const proposal = json(runReal(free, ["--migration-preview", "--json", ...flags]));
+      check(`${label}, no receipt: an eligible migration under one name, pending separate approval, nothing written`,
+        proposal?.eligibility === "eligible-migration" && proposal.ownership === release.label && proposal.topology === release.topology
+        && JSON.stringify(proposal.topologyClients) === JSON.stringify(clients)
+        && (release.commit ? proposal.priorState?.ref === release.ref && proposal.priorState.sourceRepository === "aibuild-lab/aibl-installer"
+          && proposal.priorState.installerCommits.join() === release.commit && proposal.priorState.installerPullRequests.join() === String(release.pullRequest)
+          : proposal.priorState === undefined)
+        && proposal.approvalClass === "separate-human-migration-approval" && proposal.nextSafeAction.approvalRequired === true
+        && JSON.stringify(snapshotTree(free)) === beforeFree);
+      if (clients.length === 2) check(`${label}, no receipt: one app alone is a client-selection hold`,
+        json(runReal(free, ["--migration-preview", "--json", "--claude"]))?.failureClass === "CLIENT_SELECTION_INCOMPLETE");
+      const fault = runReal(free, ["--diagnostic-json", ...flags], { AIBL_GUARD_TEST_HOME: free, AIBL_GUARD_TEST_FAIL_STAGE: "REGISTER_HOOKS" });
+      check(`${label}, no receipt: a late fault restores every byte and the absent receipt`, fault.status !== 0
+        && json(fault)?.rollback === "RESTORED" && JSON.stringify(snapshotTree(free)) === beforeFree);
+      const migrated = runReal(free, flags);
+      const repeat = runReal(free, flags);
+      check(`${label}, no receipt: the approved migration succeeds once and a second run is idempotent`, migrated.status === 0
+        && currentGuards(free, clients) && readReceipt(free).manifest.ref === currentRef
+        && repeat.status === 0 && /already current/.test(repeat.stdout));
+    }
+  }
+
+  // Two different releases on the two apps are never one release. The single reviewed exception is the
+  // 2026-09-24 Claude files beside a legacy Codex install.
+  const pair = (claude, codex) => {
+    const target = fs.mkdtempSync(path.join(root, "pair-"));
+    runReal(target);
+    fs.rmSync(receiptPath(target));
+    for (const [client, files] of [["claude", claude], ["codex", codex]])
+      for (const [file, bytes] of Object.entries(files)) fs.writeFileSync(at(target, client, file), bytes);
+    const before = JSON.stringify(snapshotTree(target));
+    const proposal = json(runReal(target, ["--migration-preview", "--json"]));
+    return { ...proposal, unchanged: JSON.stringify(snapshotTree(target)) === before };
+  };
+  const guardOf = (set) => ({ "secrets-guard.js": fx(set, "secrets-guard.js") });
+  const legacyCodex = { ...guardOf("legacy"), "secrets-tripwire.js": fx("legacy", "secrets-tripwire.js") };
+  for (const [label, claude, codex] of [
+    ["2026-11-17 Claude beside current Codex", guardOf("installer-2026-11-17"), {}],
+    ["current Claude beside 2026-11-17 Codex", {}, guardOf("installer-2026-11-17")],
+    ["2026-11-17 Claude beside 2026-10-05 Codex", guardOf("installer-2026-11-17"), guardOf("installer-2026-10-05")],
+    ["2026-11-17 Claude beside R-774 Codex", guardOf("installer-2026-11-17"), guardOf("r774")],
+    ["2026-11-17 Claude beside legacy Codex", guardOf("installer-2026-11-17"), legacyCodex],
+    ["2026-10-05 Claude beside legacy Codex", guardOf("installer-2026-10-05"), legacyCodex],
+    ["current Claude beside legacy Codex", {}, legacyCodex],
+  ]) {
+    const proposal = pair(claude, codex);
+    check(`${label}: a hold with nothing written`, proposal.eligibility === "hold"
+      && proposal.failureClass === "MIGRATION_TOPOLOGY_UNRECOGNIZED" && proposal.writesAttempted === false && proposal.unchanged);
+  }
+  const reviewedMix = pair({ ...guardOf("installer-2026-09-24"), "install.mjs": fx("installer-2026-09-24", "install.mjs") }, legacyCodex);
+  check("2026-09-24 Claude beside legacy Codex is still the reviewed recognized-mixed combination",
+    reviewedMix.eligibility === "eligible-migration" && reviewedMix.topology === "recognized-mixed" && reviewedMix.unchanged);
 }
 
 try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }

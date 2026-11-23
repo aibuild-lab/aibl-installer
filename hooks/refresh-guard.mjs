@@ -46,13 +46,7 @@ const CODEX_DISTINCT = ["secrets-guard.js", "secrets-tripwire.js"];
 //   current/r774/legacy: every distinct file of that release; mixed: the observed Claude R-774
 //   guard and tripwire beside the legacy installer; none: that client has no managed files.
 const REVIEWED_TOPOLOGIES = new Map();
-// Earlier current releases, newest last. When a guard file changes, the outgoing manifest is saved
-// here byte for byte, so a student whose receipt or files name that release upgrades cleanly instead
-// of holding. Each is pinned in the current manifest's local_files like the R-774 snapshot, and each
-// is its own release set (`previous-<n>`): files from two different earlier releases never combine.
-const PREDECESSOR_MANIFEST_FILES = ["secrets-guard.r774-corrections.manifest.json"];
-const PREDECESSOR_SETS = PREDECESSOR_MANIFEST_FILES.map((_, index) => `previous-${index}`);
-for (const set of ["current", "r774", "legacy", ...PREDECESSOR_SETS]) {
+for (const set of ["current", "r774", "legacy"]) {
   REVIEWED_TOPOLOGIES.set(`${set}|${set}`, set);
   REVIEWED_TOPOLOGIES.set(`${set}|none`, set);
   REVIEWED_TOPOLOGIES.set(`none|${set}`, set);
@@ -62,6 +56,13 @@ REVIEWED_TOPOLOGIES.set("mixed|legacy", "recognized-mixed");
 // release sets named `course:<ref>` (see readCourseDeployedIdentities). They form the
 // `course-deployed` topology only as themselves: every client with files on the same ref.
 const COURSE_SET_PREFIX = "course:";
+// Prior states this repository itself deployed as earlier releases are release sets named
+// `installer:<ref>`; the same whole-release rule, under the `installer-deployed` topology.
+const INSTALLER_SET_PREFIX = "installer:";
+// The one such release whose Claude byte set is the reviewed `mixed` set (see classifyReceiptFree).
+const MIXED_INSTALLER_SET = `${INSTALLER_SET_PREFIX}aibl-installer-2026-09-24-secrets-guard-narrow-false-positives`;
+// Either deployed-history set prefix.
+const isDeployedSet = (set) => set.startsWith(COURSE_SET_PREFIX) || set.startsWith(INSTALLER_SET_PREFIX);
 
 const claudeHooksDir = path.join(os.homedir(), ".claude", "hooks");
 const claudeSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
@@ -75,7 +76,17 @@ const repoRoot = path.resolve(hooksSourceDir, "..");
 const manifestPath = path.join(hooksSourceDir, "secrets-guard.manifest.json");
 const priorManifestPath = path.join(hooksSourceDir, "secrets-guard.r774.manifest.json");
 let priorManifest;
-let predecessorManifests = [];
+// Earlier receipt-bearing releases, each preserved byte for byte so a receipt bound to that
+// manifest's hash still verifies and is reported `installer-upgrade-required`. R-774 (above) is the
+// first; the 2026-10-05 release (#35, ref aibl-installer-r774-read-safety-corrections) was current
+// until the 2026-11-17 shell-syntax release (#51), which was current until the Keychain rule (#49).
+// Add an entry here whenever the current manifest changes, and a record of the same release to
+// secrets-guard.installer-deployed.identities.json (below) for installations without a receipt;
+// manifest.test.mjs fails when one is missing or they disagree.
+const PRIOR_RECEIPT_MANIFEST_FILES = ["secrets-guard.r774.manifest.json", "secrets-guard.2026-10-05.manifest.json",
+  "secrets-guard.2026-11-17.manifest.json"];
+let priorReceiptManifests = [];
+const priorReceiptManifestFor = (ref) => priorReceiptManifests.find((prior) => prior.manifest.ref === ref);
 let legacyIdentities;
 // Pinned here rather than in secrets-guard.manifest.json on purpose: every ownership receipt and the
 // Agent Native OS inspector bind to the manifest file's own hash, so editing the manifest to add an
@@ -95,7 +106,17 @@ const COURSE_DEPLOYED_IDENTITIES_SHA256 = "0fb6a0d8181135a00067a4a26ceceb12b26ca
 // never line-ending normalized, so edited, mixed-ending or half-CRLF installations still hold.
 const workshopInstallerPath = path.join(hooksSourceDir, "secrets-guard.workshop-installer.identities.json");
 const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "67965b7d6ec260942ff112675bd20a5d27c3611180343feed184119fc1d9e0b8";
+// Guard states this repository deployed as its own earlier releases, pinned the same way and for
+// the same reason. The first record cites 181fa82 (#27, release
+// aibl-installer-2026-09-24-secrets-guard-narrow-false-positives): its guard and tripwire are the
+// R-774 and current bytes, but its install.mjs and adapters are the legacy ones, so without the
+// record the combination reads as an unreviewed mix instead of one whole release. These states form
+// the installer-deployed topology under their own refs, attributed only as a whole release and
+// still needing a separate human approval.
+const installerDeployedPath = path.join(hooksSourceDir, "secrets-guard.installer-deployed.identities.json");
+const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "650589ed3913048b44e165ef63b590961f22072477044202960f5c0438cd8f7a";
 let courseDeployedReleases;
+let installerDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
 const GUARD_MATCHER = "Bash|PowerShell|Read|Write|Edit|MultiEdit|NotebookEdit";
 const SHELL_MATCHER = "Bash|PowerShell";
@@ -341,14 +362,17 @@ async function main() {
   enterStage("INPUT_SCOPE");
   const manifest = loadManifest();
   priorManifest = readPinnedIdentity("secrets-guard.r774.manifest.json", manifest);
-  predecessorManifests = PREDECESSOR_MANIFEST_FILES.map((name, index) => {
-    const value = readPinnedIdentity(name, manifest);
-    if (value.ref === manifest.ref || value.ref === priorManifest.ref)
-      hold("SOURCE_INTEGRITY", "An earlier release snapshot repeats a current or R-774 ref. No files were changed.");
-    return { name, set: PREDECESSOR_SETS[index], path: path.join(hooksSourceDir, name), value };
-  });
+  priorReceiptManifests = PRIOR_RECEIPT_MANIFEST_FILES.map((name) => ({
+    manifest: name === "secrets-guard.r774.manifest.json" ? priorManifest : readPinnedIdentity(name, manifest),
+    path: path.join(hooksSourceDir, name),
+  }));
+  // A receipt is matched to its release by ref, so a repeated ref could bind it to the wrong bytes.
+  const receiptRefs = [manifest.ref, ...priorReceiptManifests.map((prior) => prior.manifest.ref)];
+  if (new Set(receiptRefs).size !== receiptRefs.length)
+    hold("SOURCE_INTEGRITY", "A preserved release manifest repeats another release's ref. No files were changed.");
   legacyIdentities = readPinnedIdentity("secrets-guard.legacy.identities.json", manifest);
   courseDeployedReleases = readCourseDeployedIdentities();
+  installerDeployedReleases = readInstallerDeployedIdentities();
   diagnosticSourceIdentity = manifest.ref;
 
   if (args.has("--check") && args.has("--session-check")) {
@@ -1189,18 +1213,11 @@ function receiptFor(manifest, clients = Object.entries(APPS).filter(([, selected
     schemaVersion: 1,
     owner: "aibl-installer",
     source: { location: normalizePath(repoRoot) },
-    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(manifestFileFor(manifest)))) },
+    manifest: { ref: manifest.ref, identity: sha256(normalizeLf(fs.readFileSync(
+      priorReceiptManifestFor(manifest.ref)?.path || manifestPath))) },
     managedFiles,
     clients: Object.entries(managedFiles).filter(([, files]) => files.length > 0).map(([client]) => client),
   };
-}
-
-// The file whose bytes a receipt's manifest identity hashes: the R-774 snapshot, an earlier
-// current release's snapshot, or the current manifest.
-function manifestFileFor(manifest) {
-  if (manifest.ref === priorManifest.ref) return priorManifestPath;
-  const predecessor = predecessorManifests.find((entry) => entry.value === manifest);
-  return predecessor ? predecessor.path : manifestPath;
 }
 
 function inspectOwnership(manifest, { requireSelected = true, verifySelectedBinding = true } = {}) {
@@ -1216,8 +1233,7 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
     || new Set(receipt.clients).size !== receipt.clients.length) {
     return { status: "invalid", issues: ["receipt clients are invalid"] };
   }
-  const receiptManifest = receipt.manifest?.ref === priorManifest.ref ? priorManifest
-    : predecessorManifests.find((entry) => entry.value.ref === receipt.manifest?.ref)?.value || manifest;
+  const receiptManifest = priorReceiptManifestFor(receipt.manifest?.ref)?.manifest || manifest;
   const expected = receiptFor(receiptManifest, receipt.clients);
   // The checkout can move after installation. Its recorded path is recovery metadata, not a
   // trust input; ownership comes from the pinned manifest and independently inspected bindings.
@@ -1240,8 +1256,9 @@ function inspectOwnership(manifest, { requireSelected = true, verifySelectedBind
 function fileLabels(name, bytes, manifest) {
   const courseSources = [...courseDeployedReleases].flatMap(([ref, states]) =>
     states.map((state) => [`${COURSE_SET_PREFIX}${ref}`, state]));
-  const predecessorSources = predecessorManifests.map((entry) => [entry.set, entry.value]);
-  return [...new Set([["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities], ...predecessorSources, ...courseSources].filter(([, source]) => {
+  const installerSources = [...installerDeployedReleases].flatMap(([ref, states]) =>
+    states.map((state) => [`${INSTALLER_SET_PREFIX}${ref}`, state]));
+  return [...new Set([["current", manifest], ["r774", priorManifest], ["legacy", legacyIdentities], ...courseSources, ...installerSources].filter(([, source]) => {
     const wanted = source.files?.[name] || source.local_files?.[name];
     return wanted && (sha256(bytes) === wanted || (source.local_files?.[name] && sha256(normalizeLf(bytes)) === wanted));
   }).map(([label]) => label))];
@@ -1251,29 +1268,34 @@ function releaseSetFor(client, state) {
   const labels = (client === "claude" ? CLAUDE_DISTINCT : CODEX_DISTINCT).map((name) => state.get(`${client}/${name}`));
   if (labels.some((entry) => entry === "missing")) return "partial";
   const courseSets = [...courseDeployedReleases.keys()].map((ref) => `${COURSE_SET_PREFIX}${ref}`);
-  for (const set of ["current", ...PREDECESSOR_SETS, "r774", "legacy", ...courseSets]) if (labels.every((entry) => entry.includes(set))) return set;
+  const installerSets = [...installerDeployedReleases.keys()].map((ref) => `${INSTALLER_SET_PREFIX}${ref}`);
+  for (const set of ["current", "r774", "legacy", ...courseSets, ...installerSets]) if (labels.every((entry) => entry.includes(set))) return set;
   if (client === "claude" && labels[0].includes("r774") && labels[1].includes("r774") && labels[2].includes("legacy")) return "mixed";
   return "unreviewed";
 }
 
-// A course-deployed adapter or supplement attributes nothing on its own: it counts only beside the
-// version-distinct files of its own agent-native-os release, which is how that refresher installed
-// it. Under any other release a file known only from a course state is an unreviewed combination.
-// Before course states existed every known local file carried a non-course label, so this changes
-// nothing for the legacy, R-774, mixed or current releases. Applied to selected clients only: an
-// unselected client's local files never decided its release, and unknown bytes are handled earlier.
+// A course-deployed or installer-deployed adapter or supplement attributes nothing on its own: it
+// counts only beside the version-distinct files of its own release, which is how that refresher
+// installed it. Under any other release a file known only from a deployed-history state is an
+// unreviewed combination. Before deployed-history states existed every known local file carried a
+// non-deployed label, so this changes nothing for the legacy, R-774, mixed or current releases.
+// Applied to selected clients only: an unselected client's local files never decided its release,
+// and unknown bytes are handled earlier.
 function localFilesFitRelease(client, set, state) {
   return (client === "claude" ? CLAUDE_SUPPLEMENTAL_FILES : CODEX_LOCAL_FILES).every((name) => {
     const labels = state.get(`${client}/${name}`);
     if (labels === "missing" || labels.length === 0) return true;
-    return set.startsWith(COURSE_SET_PREFIX) ? labels.includes(set) : labels.some((label) => !label.startsWith(COURSE_SET_PREFIX));
+    return isDeployedSet(set) ? labels.includes(set) : labels.some((label) => !isDeployedSet(label));
   });
 }
 
-// Reviewed only as itself: one agent-native-os release on every client that has files.
-function courseDeployedTopology(releases) {
+// Reviewed only as itself: one deployed-history release on every client that has files.
+function deployedTopology(releases) {
   const sets = [releases.claude, releases.codex].filter((set) => set !== "none");
-  return sets.length > 0 && sets.every((set) => set === sets[0] && set.startsWith(COURSE_SET_PREFIX)) ? "course-deployed" : null;
+  if (!(sets.length > 0 && sets.every((set) => set === sets[0]))) return null;
+  if (sets[0].startsWith(COURSE_SET_PREFIX)) return "course-deployed";
+  if (sets[0].startsWith(INSTALLER_SET_PREFIX)) return "installer-deployed";
+  return null;
 }
 
 function classifyReceiptFree(manifest) {
@@ -1326,18 +1348,38 @@ function classifyReceiptFree(manifest) {
     if (APPS[client] && !["partial", "unreviewed"].includes(set) && !localFilesFitRelease(client, set, state)) set = "unreviewed";
     releases[client] = !APPS[client] && ["partial", "unreviewed"].includes(set) ? "none" : set;
   }
+  // Two releases can share one client's whole byte set: the 2026-09-24 release's Codex side is
+  // byte-identical to R-774's (same guard, tripwire and adapters), so Codex alone fits both. When
+  // the other client is unambiguously one installer-deployed release and this client's every
+  // managed file is also exactly what that release installed, the whole rig is that release.
+  for (const client of ["claude", "codex"]) {
+    const other = client === "claude" ? "codex" : "claude";
+    if (releases[client] !== "r774" || !releases[other].startsWith(INSTALLER_SET_PREFIX)) continue;
+    const set = releases[other];
+    const fits = [...state.keys()].filter((key) => key.startsWith(`${client}/`))
+      .every((key) => state.get(key) === "missing" || state.get(key).includes(set));
+    if (fits) releases[client] = set;
+  }
   const selectedPresent = ["claude", "codex"].some((client) => APPS[client] && present[client]);
   if (orphanRegistration && !selectedPresent) return finish("unrecognized");
   if (releases.claude === "none" && releases.codex === "none") return finish("empty");
-  const topology = REVIEWED_TOPOLOGIES.get(`${releases.claude}|${releases.codex}`) || courseDeployedTopology(releases);
+  // The reviewed mixed|legacy combination predates the installer-deployed record: its Claude half
+  // (the R-774 guard and tripwire beside the legacy installer) is exactly the 2026-09-24 release's
+  // byte set, which now classifies as its own `installer:` set. Recognize the same reviewed
+  // combination under the release's new name, for that release only: a later release's Claude files
+  // beside a legacy Codex install were never a reviewed combination. Single-client and both-client
+  // installations of one installer-deployed release are the installer-deployed topology below.
+  const topologyKey = releases.claude === MIXED_INSTALLER_SET && releases.codex === "legacy"
+    ? "mixed|legacy" : `${releases.claude}|${releases.codex}`;
+  const topology = REVIEWED_TOPOLOGIES.get(topologyKey) || deployedTopology(releases);
   if (!topology) return finish("unreviewed-topology");
   const requiredClients = ["claude", "codex"].filter((client) => releases[client] !== "none");
-  if (topology === "course-deployed") {
+  if (topology === "course-deployed" || topology === "installer-deployed") {
     const set = releases[requiredClients[0]];
-    return finish("course-deployed-no-receipt", { requiredClients, topology, priorState: courseDeployedDescription(set) });
+    return finish(`${topology}-no-receipt`, { requiredClients, topology, priorState: deployedDescription(set) });
   }
   const kind = topology === "recognized-mixed" ? "recognized-mixed"
-    : topology === "legacy" ? "legacy-no-receipt" : topology === "r774" || PREDECESSOR_SETS.includes(topology) ? "prior-no-receipt"
+    : topology === "legacy" ? "legacy-no-receipt" : topology === "r774" ? "prior-no-receipt"
       : inspectInstalledGuard(manifest).healthy ? "current-no-receipt" : "current-registration-repair";
   return finish(kind, { requiredClients, topology });
 }
@@ -1441,6 +1483,15 @@ function readCourseDeployedIdentities() {
   return new Map([...courseReleases, ...workshopReleases]);
 }
 
+// This repository's own earlier releases load the same way, under refs that must not repeat a
+// course-deployed ref, so each release keeps exactly one source.
+function readInstallerDeployedIdentities() {
+  const releases = readDeployedStates(installerDeployedPath, INSTALLER_DEPLOYED_IDENTITIES_SHA256, "installerCommit");
+  if ([...releases.keys()].some((ref) => courseDeployedReleases.has(ref)))
+    hold("SOURCE_INTEGRITY", "A reviewed compatibility identity is incomplete. No files were changed.");
+  return releases;
+}
+
 function readDeployedStates(file, pinnedSha256, commitField) {
   let bytes;
   try { bytes = fs.readFileSync(file); }
@@ -1465,8 +1516,15 @@ function readDeployedStates(file, pinnedSha256, commitField) {
   return releases;
 }
 
-// Public description of an attributed course-deployed state for the preview (no paths, no bytes).
-function courseDeployedDescription(set) {
+// Public description of an attributed deployed-history state for the preview (no paths, no bytes).
+function deployedDescription(set) {
+  if (set.startsWith(INSTALLER_SET_PREFIX)) {
+    const ref = set.slice(INSTALLER_SET_PREFIX.length);
+    const states = installerDeployedReleases.get(ref) || [];
+    return { ref, sourceRepository: "aibuild-lab/aibl-installer",
+      installerCommits: states.map((state) => state.installerCommit),
+      installerPullRequests: states.map((state) => state.installerPullRequest).filter(Number.isInteger) };
+  }
   const states = courseDeployedReleases.get(set.slice(COURSE_SET_PREFIX.length)) || [];
   if (states[0]?.workshopInstallerCommit)
     return { ref: set.slice(COURSE_SET_PREFIX.length), sourceRepository: "aibuild-lab/workshop-installer",
