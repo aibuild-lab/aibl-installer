@@ -59,6 +59,8 @@ const COURSE_SET_PREFIX = "course:";
 // Prior states this repository itself deployed as earlier releases are release sets named
 // `installer:<ref>`; the same whole-release rule, under the `installer-deployed` topology.
 const INSTALLER_SET_PREFIX = "installer:";
+// The one such release whose Claude byte set is the reviewed `mixed` set (see classifyReceiptFree).
+const MIXED_INSTALLER_SET = `${INSTALLER_SET_PREFIX}aibl-installer-2026-09-24-secrets-guard-narrow-false-positives`;
 // Either deployed-history set prefix.
 const isDeployedSet = (set) => set.startsWith(COURSE_SET_PREFIX) || set.startsWith(INSTALLER_SET_PREFIX);
 
@@ -77,8 +79,12 @@ let priorManifest;
 // Earlier receipt-bearing releases, each preserved byte for byte so a receipt bound to that
 // manifest's hash still verifies and is reported `installer-upgrade-required`. R-774 (above) is the
 // first; the 2026-10-05 release (#35, ref aibl-installer-r774-read-safety-corrections) was current
-// until the 2026-11-17 shell-syntax fix. Add an entry here whenever the current manifest changes.
-const PRIOR_RECEIPT_MANIFEST_FILES = ["secrets-guard.r774.manifest.json", "secrets-guard.2026-10-05.manifest.json"];
+// until the 2026-11-17 shell-syntax release (#51), which was current until the Keychain rule (#49).
+// Add an entry here whenever the current manifest changes, and a record of the same release to
+// secrets-guard.installer-deployed.identities.json (below) for installations without a receipt;
+// manifest.test.mjs fails when one is missing or they disagree.
+const PRIOR_RECEIPT_MANIFEST_FILES = ["secrets-guard.r774.manifest.json", "secrets-guard.2026-10-05.manifest.json",
+  "secrets-guard.2026-11-17.manifest.json"];
 let priorReceiptManifests = [];
 const priorReceiptManifestFor = (ref) => priorReceiptManifests.find((prior) => prior.manifest.ref === ref);
 let legacyIdentities;
@@ -108,7 +114,7 @@ const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "67965b7d6ec260942ff112675bd20a5d27
 // the installer-deployed topology under their own refs, attributed only as a whole release and
 // still needing a separate human approval.
 const installerDeployedPath = path.join(hooksSourceDir, "secrets-guard.installer-deployed.identities.json");
-const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "f3646f874946e01d8d46b0824bdec63e1098700793046d09c5d7ebb89f1c4b8b";
+const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "650589ed3913048b44e165ef63b590961f22072477044202960f5c0438cd8f7a";
 let courseDeployedReleases;
 let installerDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");
@@ -360,6 +366,10 @@ async function main() {
     manifest: name === "secrets-guard.r774.manifest.json" ? priorManifest : readPinnedIdentity(name, manifest),
     path: path.join(hooksSourceDir, name),
   }));
+  // A receipt is matched to its release by ref, so a repeated ref could bind it to the wrong bytes.
+  const receiptRefs = [manifest.ref, ...priorReceiptManifests.map((prior) => prior.manifest.ref)];
+  if (new Set(receiptRefs).size !== receiptRefs.length)
+    hold("SOURCE_INTEGRITY", "A preserved release manifest repeats another release's ref. No files were changed.");
   legacyIdentities = readPinnedIdentity("secrets-guard.legacy.identities.json", manifest);
   courseDeployedReleases = readCourseDeployedIdentities();
   installerDeployedReleases = readInstallerDeployedIdentities();
@@ -1356,9 +1366,10 @@ function classifyReceiptFree(manifest) {
   // The reviewed mixed|legacy combination predates the installer-deployed record: its Claude half
   // (the R-774 guard and tripwire beside the legacy installer) is exactly the 2026-09-24 release's
   // byte set, which now classifies as its own `installer:` set. Recognize the same reviewed
-  // combination under the release's new name; single-client and both-client installations of one
-  // installer-deployed release are the installer-deployed topology below.
-  const topologyKey = releases.claude.startsWith(INSTALLER_SET_PREFIX) && releases.codex === "legacy"
+  // combination under the release's new name, for that release only: a later release's Claude files
+  // beside a legacy Codex install were never a reviewed combination. Single-client and both-client
+  // installations of one installer-deployed release are the installer-deployed topology below.
+  const topologyKey = releases.claude === MIXED_INSTALLER_SET && releases.codex === "legacy"
     ? "mixed|legacy" : `${releases.claude}|${releases.codex}`;
   const topology = REVIEWED_TOPOLOGIES.get(topologyKey) || deployedTopology(releases);
   if (!topology) return finish("unreviewed-topology");

@@ -1132,4 +1132,60 @@ for (const segment of segments) {
   }
 }
 
+// 9. macOS Keychain. `security find-generic-password` and `find-internet-password` print only an
+//    item's attributes unless asked for the secret: `-w` prints the password alone and `-g` prints
+//    it with the attributes. Either one, alone or in an option cluster (`-gs`, `-wa`), is a
+//    password read. Without them the lookup stays allowed, so an agent can still confirm an item
+//    exists. `dump-keychain -d` decrypts every item. The macOS approval box is not a boundary
+//    an agent can rely on: an item may already allow the `security` tool. (WF-66, D273)
+const KEYCHAIN_FIND_VERBS = new Set(['find-generic-password', 'find-internet-password']);
+// Lookup options that take a value. In a cluster the rest of the token is that value, so the `g` in
+// `-sgithub` is part of a service name while `-wsgithub` still asks for the password.
+const KEYCHAIN_VALUE_OPTIONS = new Set([...'acCdDGjlpPrst']);
+function asksForKeychainPassword(arg) {
+  if (!/^-[A-Za-z]/.test(arg)) return false;
+  for (const option of arg.slice(1)) {
+    if (option === 'w' || option === 'g') return true;
+    if (KEYCHAIN_VALUE_OPTIONS.has(option)) return false;
+  }
+  return false;
+}
+// The tool accepts a shortened command name and runs the first command it fits, so `find` is
+// `find-generic-password`. Checked against the tool's help text on macOS 26.
+const KEYCHAIN_VERBS = [...KEYCHAIN_FIND_VERBS, 'dump-keychain'];
+function keychainCommand(name) {
+  if (name === 'd') return 'default-keychain';
+  return (name && KEYCHAIN_VERBS.find(verb => verb.startsWith(name))) || name;
+}
+for (const segment of segments) {
+  const tokens = words(segment);
+  if (resolveBinary(tokens) !== 'security') continue;
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  const args = tokens.slice(i + 1);
+  // The first word that is not one of `security`'s own options is the command, full or shortened.
+  // `-p` takes a value. A full verb name is also matched anywhere, so a misread option cannot hide it.
+  let commandIndex = 0;
+  while (commandIndex < args.length && args[commandIndex].startsWith('-'))
+    commandIndex += /^-[A-Za-z]*p$/.test(args[commandIndex]) ? 2 : 1;
+  args.forEach((arg, index) => {
+    const name = arg.toLowerCase();
+    const verb = index === commandIndex ? keychainCommand(name) : name;
+    if (!KEYCHAIN_VERBS.includes(verb)) return;
+    const options = args.slice(index + 1);
+    if (KEYCHAIN_FIND_VERBS.has(verb) && options.some(asksForKeychainPassword))
+      deny(`\`security ${verb}\` with -w or -g prints a Keychain password. Check that the item exists without -w or -g, or let the program that needs the key read it at runtime.`);
+    if (verb === 'dump-keychain' && options.some(option => /^-[A-Za-z]*d/.test(option)))
+      deny('`security dump-keychain -d` decrypts and prints every Keychain item. List names without -d.');
+  });
+}
+// The same read inside a command substitution that is then PRINTED, like the `op read` rule above:
+// feeding a program (`KEY=$(security ... -w) tool`) stays allowed, printing it does not. Judged one
+// clause at a time, so an unrelated neighboring command neither excuses nor causes a denial.
+const KEYCHAIN_PRINTED = /\b(?:echo|printf|print|cat|tee|write-host|write-output|gc)\b[^\n]*(?:\$\(|`)\s*(?:[^\s"'`]+[\/])?security\s+f(?:i(?:n(?:d(?:-(?:g[a-z-]*|i|in[a-z-]*)?)?)?)?)?(?=\s)[^)`\n]*\s-[A-Za-z]*[wg]/i;
+for (const clause of clauses) {
+  if (!isMaskedClause(clause) && KEYCHAIN_PRINTED.test(clause))
+    deny('Printing a Keychain password from $(security ...) sends it to stdout. Let the program that needs it read it at runtime.');
+}
+
 process.exit(0);
