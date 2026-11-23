@@ -542,6 +542,15 @@ const CASES = [
   ['Bash', 'security -p example find-generic-password -s example-service', 'allow'],
   ['Bash', 'security help find-generic-password', 'allow'],
   ['Bash', 'security add-generic-password -s example-service -a someone -U', 'allow'],
+  // Neighboring everyday forms: what stays allowed, and what is denied on purpose because the
+  // value reaches a pipe or a file. Checking that an item exists needs neither -w nor -g.
+  ['Bash', 'export KEY="$(security find-generic-password -w -s example-service)"', 'allow'],
+  ['Bash', 'curl -H "Authorization: Bearer $(security find-generic-password -w -s example-service)" https://example.com', 'allow'],
+  ['Bash', 'git commit -m "note: security find-generic-password -w prints it"', 'allow'],
+  ['Bash', 'security find-identity -v -p codesigning', 'allow'],
+  ['Bash', 'security find-certificate -a -p', 'allow'],
+  ['Bash', 'security find-generic-password -w -s example-service >/dev/null 2>&1 && echo found', 'deny'],
+  ['Bash', 'security find-generic-password -w -s example-service | some-tool --stdin', 'deny'],
   // ...but WRITING about the path is not reading it. Caught in live use: a `gh pr merge --body`
   // describing this very fix was blocked by an earlier draft that matched the path as raw text.
   ['Bash', 'gh pr merge 19 --squash --body "adds a rule for /proc/<pid>/environ reads"', 'allow'],
