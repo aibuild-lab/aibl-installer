@@ -458,6 +458,18 @@ function stripLeadingShellSyntax(tokens) {
   return rest.length ? rest : null;
 }
 
+// A setting for one command: `LC_ALL=C grep ...`. The shell runs what follows it, so inspect that too.
+// An unbalanced `$(` means the value runs on into the next words (`KEY=$(op read ...) tool`), so stop.
+// A language program is left alone: rule 4 already reads the original text, and re-rendering a
+// multi-line script here would join its lines and block scripts that only read their own setting.
+function stripLeadingSettings(tokens) {
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(tokens[i]) &&
+      tokens[i].split('(').length === tokens[i].split(')').length) i++;
+  if (i === 0 || i >= tokens.length) return null;
+  return /^(?:python[0-9.]*|node|ruby|perl|php)(?:\.exe)?$/.test(commandName(tokens[i])) ? null : tokens.slice(i);
+}
+
 // zsh lets a brace body follow the condition with no `then`/`do`: `if true { cat .env }`,
 // `while true { cat .env }`. The body never starts its own segment, so inspect what follows the
 // first standalone `{` as its own command (without the closing `}`).
@@ -495,6 +507,8 @@ function collectInspectionCommands(root) {
 
     const unwrapped = stripLeadingShellSyntax(tokens);
     if (unwrapped) inspectTokens(unwrapped, depth + 1, true);
+    const afterSettings = stripLeadingSettings(tokens);
+    if (afterSettings) inspectTokens(afterSettings, depth + 1, true);
     const braceBody = zshBraceBody(tokens);
     if (braceBody) inspectTokens(braceBody, depth + 1, true);
 
@@ -1182,10 +1196,36 @@ for (const segment of segments) {
 // The same read inside a command substitution that is then PRINTED, like the `op read` rule above:
 // feeding a program (`KEY=$(security ... -w) tool`) stays allowed, printing it does not. Judged one
 // clause at a time, so an unrelated neighboring command neither excuses nor causes a denial.
-const KEYCHAIN_PRINTED = /\b(?:echo|printf|print|cat|tee|write-host|write-output|gc)\b[^\n]*(?:\$\(|`)\s*(?:[^\s"'`]+[\/])?security\s+f(?:i(?:n(?:d(?:-(?:g[a-z-]*|i|in[a-z-]*)?)?)?)?)?(?=\s)[^)`\n]*\s-[A-Za-z]*[wg]/i;
+const KEYCHAIN_SUBSTITUTION = '(?:\\$\\(|`)\\s*(?:[^\\s"\'`]+[\\/])?security\\s+f(?:i(?:n(?:d(?:-(?:g[a-z-]*|i|in[a-z-]*)?)?)?)?)?(?=\\s)[^)`\\n]*\\s-[A-Za-z]*[wg]';
+const KEYCHAIN_PRINTED = new RegExp('\\b(?:echo|printf|print|cat|tee|write-host|write-output|gc)\\b[^\\n]*' + KEYCHAIN_SUBSTITUTION, 'i');
 for (const clause of clauses) {
   if (!isMaskedClause(clause) && KEYCHAIN_PRINTED.test(clause))
     deny('Printing a Keychain password from $(security ...) sends it to stdout. Let the program that needs it read it at runtime.');
+}
+
+// The same read saved to a variable and then printed by a later part of the same command:
+// `PW=$(security ... -w); echo "$PW"`. Only what reaches the screen is denied. Testing it
+// (`[ -n "$PW" ]`), counting it (`${#PW}`), showing a word instead (`${PW:+set}`), using it as an
+// argument, and piping it into a program all stay allowed.
+const KEYCHAIN_SAVED = new RegExp('(?:^|[\\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=["\']?' + KEYCHAIN_SUBSTITUTION, 'gi');
+const PRINTS_STDIN = new Set([...READ_COMMANDS, ...PATTERN_READ_COMMANDS, 'tr']);
+for (const command of inspectionCommands) {
+  const saved = new Set([...command.matchAll(KEYCHAIN_SAVED)].map(match => match[1]));
+  if (!saved.size) continue;
+  for (const clause of splitShell(command, false)) {
+    if (isMaskedClause(clause)) continue;
+    const stages = splitShell(clause, true);
+    stages.forEach((stage, index) => {
+      const tokens = stripLeadingShellSyntax(words(stage)) || words(stage);
+      if (!['echo', 'printf', 'print'].includes(commandName(tokens[0]))) return;
+      const names = [...stage.matchAll(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_])(?!:?\+)|([A-Za-z_][A-Za-z0-9_]*))/g)]
+        .map(match => match[1] || match[2]);
+      if (!names.some(name => saved.has(name))) return;
+      const next = stages[index + 1];
+      if (next ? !PRINTS_STDIN.has(commandName(words(next)[0])) : /(?:^|[^0-9&>])>{1,2}\s*[^&\s>]/.test(stage)) return;
+      deny('This prints a Keychain password that was saved to a variable. Pass the variable to the program that needs it, or check that it is set without printing it.');
+    });
+  }
 }
 
 process.exit(0);

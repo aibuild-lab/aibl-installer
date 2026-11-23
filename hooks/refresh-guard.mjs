@@ -79,12 +79,13 @@ let priorManifest;
 // Earlier receipt-bearing releases, each preserved byte for byte so a receipt bound to that
 // manifest's hash still verifies and is reported `installer-upgrade-required`. R-774 (above) is the
 // first; the 2026-10-05 release (#35, ref aibl-installer-r774-read-safety-corrections) was current
-// until the 2026-11-17 shell-syntax release (#51), which was current until the Keychain rule (#49).
+// until the 2026-11-17 shell-syntax release (#51), which was current until the Keychain rule (#49),
+// which is the 2026-11-23 release.
 // Add an entry here whenever the current manifest changes, and a record of the same release to
 // secrets-guard.installer-deployed.identities.json (below) for installations without a receipt;
 // manifest.test.mjs fails when one is missing or they disagree.
 const PRIOR_RECEIPT_MANIFEST_FILES = ["secrets-guard.r774.manifest.json", "secrets-guard.2026-10-05.manifest.json",
-  "secrets-guard.2026-11-17.manifest.json"];
+  "secrets-guard.2026-11-17.manifest.json", "secrets-guard.2026-11-23.manifest.json"];
 let priorReceiptManifests = [];
 const priorReceiptManifestFor = (ref) => priorReceiptManifests.find((prior) => prior.manifest.ref === ref);
 let legacyIdentities;
@@ -114,7 +115,7 @@ const WORKSHOP_INSTALLER_IDENTITIES_SHA256 = "67965b7d6ec260942ff112675bd20a5d27
 // the installer-deployed topology under their own refs, attributed only as a whole release and
 // still needing a separate human approval.
 const installerDeployedPath = path.join(hooksSourceDir, "secrets-guard.installer-deployed.identities.json");
-const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "650589ed3913048b44e165ef63b590961f22072477044202960f5c0438cd8f7a";
+const INSTALLER_DEPLOYED_IDENTITIES_SHA256 = "4950b9d296ac2b28da40ec98e18b6da08476131f2292fb36f5a7ca46814ebcce";
 let courseDeployedReleases;
 let installerDeployedReleases;
 const ownershipReceiptPath = path.join(claudeHooksDir, "aibl-installer-guard-receipt.json");

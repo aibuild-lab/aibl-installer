@@ -25,8 +25,8 @@ selected client. Damaged or unsupported ownership is an incomplete result even w
 look healthy; review it before installing again. A local source path in a receipt is recovery
 metadata and does not grant authority to execute that checkout.
 
-The earlier R-774 receipt, and receipts from the 2026-10-05 and 2026-11-17 releases
-(`secrets-guard.2026-10-05.manifest.json`, `secrets-guard.2026-11-17.manifest.json`), are each
+The earlier R-774 receipt, and receipts from the 2026-10-05, 2026-11-17 and 2026-11-23
+releases (`secrets-guard.<release date>.manifest.json`), are each
 checked against their exact preserved manifest and reported as `installer-upgrade-required`. The
 R-774 registration is valid for that version but does not prove built-in Read coverage. Legacy
 on-disk health is a statement about the legacy release only.
@@ -86,7 +86,7 @@ beside LF files of the same state still hold.
 `installer-deployed` covers the guard states this repository itself installed as earlier releases.
 `secrets-guard.installer-deployed.identities.json` lists each one by exact hash with the commit and
 pull request that put it on main, and `priorState` names them. The records are the 2026-09-24,
-2026-10-05 (#35) and 2026-11-17 (#51) releases. The first record is the 2026-09-24
+2026-10-05 (#35), 2026-11-17 (#51) and 2026-11-23 (#49) releases. The first record is the 2026-09-24
 release (`181fa82`, #27): its Codex side is byte-identical to R-774's, so a Codex-only look fits
 both, and the run attributes the rig to the 2026-09-24 release only when every managed file on that
 app is exactly what the release installed. The reviewed `recognized-mixed` combination (that
