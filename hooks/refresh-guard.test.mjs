@@ -155,6 +155,8 @@ fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.2026-10-05.m
   path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.2026-11-17.manifest.json"),
   path.join(repo, "hooks", "secrets-guard.2026-11-17.manifest.json"));
+fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.2026-11-23.manifest.json"),
+  path.join(repo, "hooks", "secrets-guard.2026-11-23.manifest.json"));
 fs.copyFileSync(path.join(path.dirname(REAL_SCRIPT), "secrets-guard.legacy.identities.json"),
   path.join(repo, "hooks", "secrets-guard.legacy.identities.json"));
 // Pinned by its hash inside refresh-guard.mjs (not the manifest), so it is copied unchanged.
@@ -179,6 +181,7 @@ const writeManifest = (ref, bodies) => fs.writeFileSync(manifestPath, JSON.strin
     "secrets-guard.r774.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.r774.manifest.json")))),
     "secrets-guard.2026-10-05.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.2026-10-05.manifest.json")))),
     "secrets-guard.2026-11-17.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.2026-11-17.manifest.json")))),
+    "secrets-guard.2026-11-23.manifest.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.2026-11-23.manifest.json")))),
     "secrets-guard.legacy.identities.json": sha256(normalizeLf(fs.readFileSync(path.join(repo, "hooks", "secrets-guard.legacy.identities.json")))),
   },
 }, null, 2));
@@ -1385,6 +1388,10 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
       manifestSha256: "3f400013e5f59eeef774ae3987cf83654cc87f22973f863186cab225e97eb622",
       fixture: "installer-2026-11-17", topology: "installer-deployed", label: "installer-deployed-no-receipt",
       commit: "bddcc150fb69420c80460083be9ecc0847cbb963", pullRequest: 51 },
+    { name: "2026-11-23", ref: "aibl-installer-2026-11-23-keychain-reads", manifest: "secrets-guard.2026-11-23.manifest.json",
+      manifestSha256: "0b2955f01a077c5eea26bd7def6e06dca048ed3da402a2381f1cd5726a5e4402",
+      fixture: "installer-2026-11-23", topology: "installer-deployed", label: "installer-deployed-no-receipt",
+      commit: "92018e1369bda94f4f51dc64d44a6a72dbf2457f", pullRequest: 49 },
   ];
   for (const release of RELEASES) {
     const { name } = release;
@@ -1469,6 +1476,10 @@ check("unpinned error says it is not pinned to a release", /not pinned to a rele
     ["2026-11-17 Claude beside R-774 Codex", guardOf("installer-2026-11-17"), guardOf("r774")],
     ["2026-11-17 Claude beside legacy Codex", guardOf("installer-2026-11-17"), legacyCodex],
     ["2026-10-05 Claude beside legacy Codex", guardOf("installer-2026-10-05"), legacyCodex],
+    ["2026-11-23 Claude beside current Codex", guardOf("installer-2026-11-23"), {}],
+    ["current Claude beside 2026-11-23 Codex", {}, guardOf("installer-2026-11-23")],
+    ["2026-11-23 Claude beside 2026-11-17 Codex", guardOf("installer-2026-11-23"), guardOf("installer-2026-11-17")],
+    ["2026-11-23 Claude beside legacy Codex", guardOf("installer-2026-11-23"), legacyCodex],
     ["current Claude beside legacy Codex", {}, legacyCodex],
   ]) {
     const proposal = pair(claude, codex);

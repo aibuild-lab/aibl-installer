@@ -17,7 +17,7 @@ Identity comes from the pinned compatibility records, not from this folder:
 - `installer-2026-09-24/` is checked against `hooks/secrets-guard.installer-deployed.identities.json`
   (`aibl-installer-2026-09-24-secrets-guard-narrow-false-positives`, commit `181fa82`, #27). Its
   tripwire and adapters are the current bytes and are not duplicated here.
-- `installer-2026-10-05/` (#35) and `installer-2026-11-17/` (#51) hold those releases' guards, checked
+- `installer-2026-10-05/` (#35), `installer-2026-11-17/` (#51) and `installer-2026-11-23/` (#49) hold those releases' guards, checked
   against their preserved manifests. Their other files are the current bytes.
 - `workshop-<commit>/` (six folders) are the exact `hooks/` blobs of `aibuild-lab/workshop-installer`
   at that commit, checked against `hooks/secrets-guard.workshop-installer.identities.json`. Each

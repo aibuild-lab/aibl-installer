@@ -2,6 +2,12 @@
 
 # AIBL Installer changes
 
+## Unreleased: The secrets guard sees a command behind a setting
+
+- **`hooks/secrets-guard.js`:** a command with a setting in front of it now faces the same rules as the command alone, and printing a Keychain password that the same command saved to a variable is denied. Testing it, counting it, passing it to a program and piping it into one stay allowed.
+- **Upgrade path:** the outgoing 2026-11-23 manifest is preserved, listed and pinned, and its release recorded, the same way as 2026-11-17.
+- Tests: 46 guard rows, and the 2026-11-23 release joins the real-byte upgrade tests. Undo: ship a new release that preserves this one's manifest, rather than reverting.
+
 ## Unreleased: The secrets guard blocks Mac Keychain password reads
 
 - **`hooks/secrets-guard.js`:** `security find-generic-password` and `find-internet-password` with `-w` or `-g`, `security dump-keychain -d`, and printing such a read through a command substitution are denied. Looking an item up without `-w` or `-g` still works, and so does handing a password to one program for one command. The shell-syntax rules below apply to it too. Requested by a Workforce student (WF-66).
